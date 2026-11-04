@@ -894,3 +894,11 @@ Windows功能源码已接入正式工作台，本机可执行的统一验证已�
 
 - 本次修正已发布df2fd9ef93ecf65efc4840cb3e879ec0d94e67aa，树773d00e33f0954b484167f0b26f4a503d192b591与本地ebe0aaa完全一致；API保留原父提交0b9b170并以预期head非force更新。本地额外历史在settings-memory-local-ebe0aaa，main跟踪远端且工作区内容一致。
 - 新Windows run41820174611已实际运行： https://github.com/hspmanbu/hspterm/actions/runs/41820174611 。等待正式生成/构建/Analyze/19组件测试/启动退出；成功程序包仍叫HSPTerm-windows-x64，新增windows-startup-memory为锁库首屏三个工作集/专用字节样本。尚未宣称本次Windows构建通过或用户Win11设置页实际降幅；恢复先查看该run，不重复构建旧源码。
+
+### 七项反馈修正已发布并触发Windows构建（2026-11-04）
+
+- 源码已发布165ae67579eae165968bd84331263cd6a7f1d433，树4c248f1b76426edc8adde22e12a15780f353e629与本地f4cd1a7精确一致；18个PNG blob逐项Git SHA验证。保持原4e32c28父提交、预期head非force发布。完整本地源码提交仍在windows-feedback-local-f4cd1a7，main与远端同源码。
+- 新Windows run41849076983已实际启动： https://github.com/hspmanbu/hspterm/actions/runs/41849076983 。作业增加当前View ID/IME逻辑、目录大小和路径保护组件测试；等待MSVC构建/Analyze/组件/基础窗口启动结果。成功主包仍HSPTerm-windows-x64；Windows11实际文字/中文IME仍须用户复测，尚未冒称通过。
+- 本轮103组件、7个不同GTK、九分类两尺寸18图、最终Analyze0项/格式0变更/actionlint，正式debug/release最终构建和真实窗口启动/退出0及预览run0均已归档validation/windows-feedback-2026-11-04。补修加密页间距后的最后GTK/两模式构建也真实通过。没有在途本机编译或未完成的本机测试。
+- 仅移除了本轮已完成测试且Git忽略、时间/入口已核对的10份app.dill中间输出，保留正式debug/release包、源码和未知缓存；硬链/保留块可能影响实际磁盘释放，不把逻辑文件字节数冒充实际可用空间。
+- 恢复直接查看新run，勿重跑旧Git导入脚本或还原旧分类未保存弹窗；第3项仍必须逐主机主动启用，不删除输入安全保护。

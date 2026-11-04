@@ -53,7 +53,13 @@
   "analyze_issues": 0,
   "actionlint": "passed",
   "windows_text_input": "viewId required by pinned Windows engine verified in source, configured from actual Flutter View, asserted in keyboard/IME component test; actual Windows IME retest pending",
-  "windows_build": "pending push/new run",
+  "windows_build": {
+    "run_id": 41849076983,
+    "url": "https://github.com/hspmanbu/hspterm/actions/runs/41849076983",
+    "source_commit": "165ae67579eae165968bd84331263cd6a7f1d433",
+    "status": "in_progress_at_publication",
+    "windows11_real_ime": "pending user retest"
+  },
   "negative_runs": "Earlier old-category-guard assertions, previous-light-theme fixture assumption, and unscoped Cancel finder failed, corrected without weakening production safeguards. See PROGRESS.",
   "formal_linux_builds": {
     "debug": "passed; formal workbench_main entry; startup/normal close exit0; Rust loaded; preview runs0",
