@@ -850,3 +850,11 @@ Windows功能源码已接入正式工作台，本机可执行的统一验证已�
 - Windows CMake与脚本统一显式MSVC target/target-dir，避免重复构建及DLL源不一致；打包增加来自已安装VS的x64 CRT DLL，避免目标用户必须安装VS。新增实际窗口启动/正常关闭检查，不能当Windows11键盘/IME/OLE/DPAPI验收。
 - 已用actionlint1.7.12实际验证工作流0项（修复job env非法runner上下文）；固定所有Actions到官方tag对应commit。历史3692个文本blob检查未发现GitHub/云API Token及本项目私钥；仅vendor/russh两个上游公开测试向量含私钥正文，许可证/补丁说明保留；无敏感形状配置文件、无>=95MiB blob。
 - 当前尚未push或取得Windows构建结果；下一步正常推送main，读取Actions run并修复真实编译/启动错误，记录run URL及Artifacts。不要把这段源码检查当云端构建通过。
+
+### GitHub源码已发布、Windows首次云构建运行中（2026-11-04）
+
+- Git smart HTTP四次返回GitHub服务端500（含HTTP/1.1、非分块及不带workflow的源码提交），远端main均未变化；本地fsck仅存在正常dangling对象，无对象损坏。改走Git Data API分批上传当前源码，98个二进制/大blob逐项SHA校验、15批树对象，最终树5df5ed9811ba1b6eaba89f87ecf7a7dd772edb8f与本地2bd78bb完全相同，随后非force/原head租约更新main。
+- GitHub当前源码快照25ca3a8b85b4fc8d13d5c4f5a5769afaf6496001，父提交仍为远端原f339db5。完整本地开发历史保留在development-history分支（2bd78bb含与原仓库初始化历史的合并）；本地main现追踪origin/main的源码快照，文件内容完全一致，没有重写/删除旧历史。远端目前未上传此前所有开发提交，不能把本地旧hash链接当GitHub已存在提交。
+- push事件已自动触发Windows x64 build，run41811094676： https://github.com/hspmanbu/hspterm/actions/runs/41811094676 ，job126510236025。截至本记录，checkout/Python/Flutter/Rust MSVC/缓存准备通过，正在首次安装固定桥接工具；尚未完成编译或产生可宣称通过的Windows包。
+- GitHub连接器可查询作业/日志/Artifacts，但不提供本次push run列表和批量大文件上传接口；这两项使用本机现有Git凭据在内存调用GitHub API，不写入/打印令牌。/tmp/hspterm_github_ci.py可读取run/手动dispatch；/tmp/hspterm-github-import-state.json仅保存对象SHA/状态不含认证。已经发布，不能盲重跑旧import脚本覆盖新main。
+- 接续：优先读取上述run/job状态及首次Windows编译失败日志，自主修复普通编译/打包/启动问题；最终Artifact名HSPTerm-windows-x64，下载解压即完整Release目录。仍不将Windows Server2022基础启动视为Windows11键盘/IME/OLE/DPAPI验收。

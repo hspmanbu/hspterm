@@ -1,5 +1,7 @@
 # HSPTerm 开发恢复约定
 
+- **当前GitHub任务（2026-11-04）**：用户已授权上传并触发Windows构建。源码已在hspmanbu/hspterm私有main（25ca3a8，API精确树导入，保留原f339db5；本地完整历史在development-history，不再等同远端main历史）。首次run41811094676/job126510236025正在安装工具，须继续查看真实Windows编译结果并修复。正常Git大传输500已用API回退，不能force push或重跑旧import。最新状态见PROGRESS末节；Ubuntu完成不等于此云构建已过。
+
 - **最新恢复入口（2026-11-04，Ubuntu适用统一验证已收齐）**：Windows正式源码98fb042及后续测试风格修正已验证；完整Rust647、新锁Bridge75/SSH255、VTE56/alacritty178通过。Flutter按53中断+56续测去重507项/143文件均过；最终57号Analyze0项、305Dart格式/Rust格式、正式debug/release启动清理退出及Native散列全过。GTK29及新锁Kitty/Codex/SSH、19场景性能已过。没有在途runner或暂停进程，别重启旧53/56/57脚本；读PROGRESS顶部和validation/windows-unified-2026-11-04/README.md/results.json即可恢复。Windows MSVC/C++实际构建及系统行为、真实云账号仍待环境；Android暂缓。后文“静态阶段/未生成/待Shell决定”是历史，不能重复开发或恢复旧问题。
 
 - 工作目录 /opt/hspterm；V1.4 是唯一产品需求基线。
