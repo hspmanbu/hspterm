@@ -43,10 +43,87 @@ FlutterWindow::FlutterWindow(const flutter::DartProject& project)
 
 FlutterWindow::~FlutterWindow() {}
 
+LRESULT FlutterWindow::FrameHitTest(POINT point) const {
+  if (!integrated_frame_) return HTCLIENT;
+  const HWND window = const_cast<FlutterWindow*>(this)->GetHandle();
+  RECT bounds = {};
+  if (!GetWindowRect(window, &bounds) || !PtInRect(&bounds, point)) return HTCLIENT;
+  if (!IsZoomed(window)) {
+    const UINT dpi = GetDpiForWindow(window);
+    const int padding = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+    const int x = GetSystemMetricsForDpi(SM_CXFRAME, dpi) + padding;
+    const int y = GetSystemMetricsForDpi(SM_CYFRAME, dpi) + padding;
+    const bool left = point.x < bounds.left + x;
+    const bool right = point.x >= bounds.right - x;
+    const bool top = point.y < bounds.top + y;
+    const bool bottom = point.y >= bounds.bottom - y;
+    if (top && left) return HTTOPLEFT;
+    if (top && right) return HTTOPRIGHT;
+    if (bottom && left) return HTBOTTOMLEFT;
+    if (bottom && right) return HTBOTTOMRIGHT;
+    if (left) return HTLEFT;
+    if (right) return HTRIGHT;
+    if (top) return HTTOP;
+    if (bottom) return HTBOTTOM;
+  }
+  if (ScreenToClient(window, &point) && PtInRect(&maximize_button_, point)) return HTMAXBUTTON;
+  return HTCLIENT;
+}
+
+LRESULT CALLBACK FlutterWindow::ChildWindowProc(HWND window, UINT message,
+    WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR data) {
+  auto* owner = reinterpret_cast<FlutterWindow*>(data);
+  if (message == WM_NCHITTEST && owner->integrated_frame_) {
+    const POINT screen = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+    if (owner->FrameHitTest(screen) != HTCLIENT) return HTTRANSPARENT;
+  }
+  if (message == WM_NCDESTROY) RemoveWindowSubclass(window, ChildWindowProc, id);
+  return DefSubclassProc(window, message, wparam, lparam);
+}
+
+void FlutterWindow::RestorePlacement() {
+  WINDOWPLACEMENT placement = {};
+  DWORD bytes = sizeof(placement);
+  if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\HSPTerm\\Window", L"PlacementV1",
+                  RRF_RT_REG_BINARY, nullptr, &placement, &bytes) != ERROR_SUCCESS ||
+      bytes != sizeof(placement) || placement.length != sizeof(placement)) return;
+  const RECT rect = placement.rcNormalPosition;
+  const auto width = static_cast<long long>(rect.right) - rect.left;
+  const auto height = static_cast<long long>(rect.bottom) - rect.top;
+  if (width < 320 || width > 32768 || height < 240 || height > 32768 ||
+      rect.left < -1000000 || rect.left > 1000000 ||
+      rect.top < -1000000 || rect.top > 1000000) return;
+  startup_maximized_ = placement.showCmd == SW_SHOWMAXIMIZED;
+  placement.flags = 0;
+  placement.showCmd = SW_HIDE;
+  // Keep Get/SetWindowPlacement's workspace coordinate convention. Windows
+  // adjusts wholly off-screen rectangles after monitor configuration changes.
+  if (!SetWindowPlacement(GetHandle(), &placement)) startup_maximized_ = false;
+}
+
+void FlutterWindow::SavePlacement() {
+  WINDOWPLACEMENT placement = {};
+  placement.length = sizeof(placement);
+  if (!GetWindowPlacement(GetHandle(), &placement)) return;
+  const bool maximized = placement.showCmd == SW_SHOWMAXIMIZED ||
+      (placement.flags & WPF_RESTORETOMAXIMIZED) != 0;
+  placement.flags = 0;
+  placement.showCmd = maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+  // Only native geometry, local to this Windows account; never sync/Vault data.
+  HKEY key = nullptr;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\HSPTerm\\Window", 0, nullptr,
+                      0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
+    RegSetValueExW(key, L"PlacementV1", 0, REG_BINARY,
+                   reinterpret_cast<const BYTE*>(&placement), sizeof(placement));
+    RegCloseKey(key);
+  }
+}
+
 bool FlutterWindow::OnCreate() {
   if (!Win32Window::OnCreate()) {
     return false;
   }
+  RestorePlacement();
 
   RECT frame = GetClientArea();
 
@@ -58,6 +135,9 @@ bool FlutterWindow::OnCreate() {
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
     return false;
   }
+  child_subclassed_ = SetWindowSubclass(
+      flutter_controller_->view()->GetNativeWindow(), ChildWindowProc, 1,
+      reinterpret_cast<DWORD_PTR>(this)) != FALSE;
   explorer_drop_ = std::make_unique<ExplorerDropBridge>(
       flutter_controller_->engine()->messenger(), flutter_controller_->view()->GetNativeWindow());
   if (!explorer_drop_->IsReady()) return false;
@@ -71,6 +151,9 @@ bool FlutterWindow::OnCreate() {
     if (window == nullptr) { result->Error("window_closed", "窗口已关闭"); return; }
     const auto& method = call.method_name();
     if (method == "initialize") {
+      if (!child_subclassed_) {
+        result->Error("window_frame", "无法安装边框命中处理，保留原生窗口边框"); return;
+      }
       // Only workbench/mock opt into the custom frame. The Phase 2 runner
       // retains its normal system title bar until this method is called.
       const MARGINS margins = {1, 1, 1, 1};
@@ -175,7 +258,7 @@ bool FlutterWindow::OnCreate() {
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
+    ShowWindow(GetHandle(), startup_maximized_ ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
   });
 
   // Flutter can complete the first frame before the "show window" callback is
@@ -187,6 +270,12 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  // WM_DESTROY follows the framework's accepted close, never a cancelled close.
+  SavePlacement();
+  if (child_subclassed_ && flutter_controller_) {
+    RemoveWindowSubclass(flutter_controller_->view()->GetNativeWindow(), ChildWindowProc, 1);
+    child_subclassed_ = false;
+  }
   explorer_drop_.reset();
   if (secure_unlock_) { secure_unlock_->SetMethodCallHandler(nullptr); secure_unlock_ = nullptr; }
   if (window_channel_) {
@@ -208,6 +297,14 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // The resize border must precede Flutter's HTCLIENT result. The view child
+  // also hands these points through, otherwise the parent never receives them.
+  if (message == WM_NCHITTEST && integrated_frame_) {
+    return FrameHitTest({GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)});
+  }
+  // The base WM_DESTROY handler clears its HWND before calling OnDestroy.
+  // Capture accepted-close geometry while this handle still exists.
+  if (message == WM_DESTROY) SavePlacement();
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =
@@ -229,32 +326,6 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
           reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam)->rgrc[0] = monitor.rcWork;
         }
         return 0;
-      }
-      break;
-    case WM_NCHITTEST:
-      if (integrated_frame_) {
-        POINT point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-        RECT window = {};
-        if (!GetWindowRect(hwnd, &window)) break;
-        if (!IsZoomed(hwnd)) {
-          const UINT dpi = GetDpiForWindow(hwnd);
-          const int edge = GetSystemMetricsForDpi(SM_CXFRAME, dpi) +
-                           GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
-          const bool left = point.x < window.left + edge;
-          const bool right = point.x >= window.right - edge;
-          const bool top = point.y < window.top + edge;
-          const bool bottom = point.y >= window.bottom - edge;
-          if (top && left) return HTTOPLEFT;
-          if (top && right) return HTTOPRIGHT;
-          if (bottom && left) return HTBOTTOMLEFT;
-          if (bottom && right) return HTBOTTOMRIGHT;
-          if (left) return HTLEFT;
-          if (right) return HTRIGHT;
-          if (top) return HTTOP;
-          if (bottom) return HTBOTTOM;
-        }
-        if (ScreenToClient(hwnd, &point) && PtInRect(&maximize_button_, point)) return HTMAXBUTTON;
-        return HTCLIENT;
       }
       break;
     case WM_GETMINMAXINFO:

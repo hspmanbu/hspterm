@@ -112,23 +112,25 @@ class _TransferSettingsPanelState extends State<TransferSettingsPanel> {
     int max,
   ) => Padding(
     padding: const EdgeInsets.only(bottom: 12),
-    child: TextFormField(
-      key: ValueKey('transfer-setting-$name'),
-      controller: controller,
-      enabled: !_saving,
-      keyboardType: TextInputType.number,
-      inputFormatters: [
-        FilteringTextInputFormatter.digitsOnly,
-        LengthLimitingTextInputFormatter(13),
-      ],
-      decoration: InputDecoration(labelText: name),
-      validator: (text) {
-        final n = int.tryParse(text ?? '');
-        return n == null || n < min || n > max ? '请输入 $min–$max 之间的整数' : null;
-      },
-      onChanged: (_) {
-        if (_saved) setState(() => _saved = false);
-      },
+    child: SettingsField(
+      child: TextFormField(
+        key: ValueKey('transfer-setting-$name'),
+        controller: controller,
+        enabled: !_saving,
+        keyboardType: TextInputType.number,
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(13),
+        ],
+        decoration: InputDecoration(labelText: name),
+        validator: (text) {
+          final n = int.tryParse(text ?? '');
+          return n == null || n < min || n > max ? '请输入 $min–$max 之间的整数' : null;
+        },
+        onChanged: (_) {
+          if (_saved) setState(() => _saved = false);
+        },
+      ),
     ),
   );
   @override
@@ -151,25 +153,27 @@ class _TransferSettingsPanelState extends State<TransferSettingsPanel> {
           field('并发顶层任务', _concurrency, 1, 32),
           field('总体上传限制（字节/秒）', _upload, 0, 1099511627776),
           field('总体下载限制（字节/秒）', _download, 0, 1099511627776),
-          DropdownButtonFormField<String>(
-            key: const ValueKey('transfer-default-conflict'),
-            initialValue: _policy,
-            decoration: const InputDecoration(labelText: '新任务默认同名处理'),
-            items: const [
-              DropdownMenuItem(value: 'ask', child: Text('询问（默认）')),
-              DropdownMenuItem(value: 'rename', child: Text('更名另存，保留旧目标')),
-              DropdownMenuItem(value: 'skip', child: Text('跳过同名文件')),
-              DropdownMenuItem(value: 'overwrite', child: Text('覆盖已有文件内容')),
-            ],
-            onChanged: _saving
-                ? null
-                : (value) {
-                    if (value == null) return;
-                    setState(() {
-                      _policy = value;
-                      _saved = false;
-                    });
-                  },
+          SettingsField(
+            child: DropdownButtonFormField<String>(
+              key: const ValueKey('transfer-default-conflict'),
+              initialValue: _policy,
+              decoration: const InputDecoration(labelText: '新任务默认同名处理'),
+              items: const [
+                DropdownMenuItem(value: 'ask', child: Text('询问（默认）')),
+                DropdownMenuItem(value: 'rename', child: Text('更名另存，保留旧目标')),
+                DropdownMenuItem(value: 'skip', child: Text('跳过同名文件')),
+                DropdownMenuItem(value: 'overwrite', child: Text('覆盖已有文件内容')),
+              ],
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      if (value == null) return;
+                      setState(() {
+                        _policy = value;
+                        _saved = false;
+                      });
+                    },
+            ),
           ),
           const SizedBox(height: 8),
           const Text(

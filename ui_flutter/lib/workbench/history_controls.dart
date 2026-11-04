@@ -235,14 +235,16 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
         ),
         const SizedBox(height: 12),
         if (source != null) ...[
-          TextField(
-            key: const ValueKey('history-host-search'),
-            controller: _search,
-            enabled: !_busy,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              labelText: '查找保存的主机',
-              prefixIcon: Icon(Icons.search, size: 18),
+          SettingsField(
+            child: TextField(
+              key: const ValueKey('history-host-search'),
+              controller: _search,
+              enabled: !_busy,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: '查找保存的主机',
+                prefixIcon: Icon(Icons.search, size: 18),
+              ),
             ),
           ),
           const SizedBox(height: 8),

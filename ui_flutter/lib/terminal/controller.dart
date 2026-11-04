@@ -1,3 +1,5 @@
+import '../run_log.dart';
+
 import 'dart:async';
 import 'dart:math';
 
@@ -254,6 +256,13 @@ class TerminalController extends ChangeNotifier {
   }
 
   void report(Object failure) {
+    AppRunLog.instance.event(
+      AppLogEvent.terminalFailed,
+      terminal: id,
+      generation: generation,
+      error: failure,
+      stack: StackTrace.current,
+    );
     if (_disposed) return;
     // Rust has already reduced these to the audited public error boundary.
     // Event-stream details use the same message; do not expose the FFI wrapper

@@ -1,3 +1,5 @@
+- **最新恢复（2026-11-05）**：四项 Win 反馈修复，Ubuntu 验证已收齐，待发布/查询 Windows CI。路径 resize proof/随机 banner 探测、SettingsField 间距/诊断下拉、当前启动 `.log` 导出、原生边缘 HWND 转交/本机位置记忆已实现。Bridge77串行、term104、真实SSH8、probe2、组件66及日志/路径最终复测、Analyze/Clippy、GTK18组合/正规debug启动退出过；证据 validation/windows-feedback-2026-11-05。不要恢复旧“不导出日志/不记窗口几何”行为，V1.4末尾用户修订优先。新 Windows run/清理状态读 PROGRESS 顶部；无桌面正式 smoke 用 dbus-run-session，勿把旧门户阻塞当产品失败。Android 暂停。
+
 # HSPTerm 开发恢复约定
 
 - **最新环境状态（2026-11-04，用户授权清理后）**：已清理本机Cargo target、Flutter build/.dart_tool/ephemeral、旧验证SO/日志/截图及旧源码zip，释放约13.94GiB，项目约391MiB；源码、vendor、字体/图标、测试夹具、锁文件、正式桥接源码、文字/JSON结果和Git历史保留。103组件/7GTK/两模式构建结果不作废，但旧bundle已不存在；下次构建须先python3 tools/prepare_native_extensions.py，再ui_flutter/flutter pub get，勿直接运行旧测试runner或猜测重新生成Rust API。当前不重新编译。96张截图已移出HEAD，历史可查；validation新增图像忽略规则。

@@ -447,11 +447,13 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
     final source = _source;
     Widget color(int index, String label) => SizedBox(
       width: 136,
-      child: TextField(
-        key: ValueKey('terminal-color-$index'),
-        controller: _colors[index],
-        decoration: InputDecoration(labelText: label, prefixText: '#'),
-        onChanged: (_) => setState(() {}),
+      child: SettingsField(
+        child: TextField(
+          key: ValueKey('terminal-color-$index'),
+          controller: _colors[index],
+          decoration: InputDecoration(labelText: label, prefixText: '#'),
+          onChanged: (_) => setState(() {}),
+        ),
       ),
     );
     TerminalPreferencesValue? preview;
@@ -473,27 +475,31 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
             children: [
               SizedBox(
                 width: 220,
-                child: TextField(
-                  key: const ValueKey('terminal-history-limit'),
-                  controller: _history,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: '新终端历史上限（行）',
-                    helperText: 'RAM + 临时磁盘；应用退出清理',
+                child: SettingsField(
+                  child: TextField(
+                    key: const ValueKey('terminal-history-limit'),
+                    controller: _history,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: '新终端历史上限（行）',
+                      helperText: 'RAM + 临时磁盘；应用退出清理',
+                    ),
                   ),
                 ),
               ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                key: ValueKey('terminal-cursor-$_shape'),
-                initialValue: _shape,
-                decoration: const InputDecoration(labelText: '默认光标'),
-                items: const [
-                  DropdownMenuItem(value: 'block', child: Text('块状')),
-                  DropdownMenuItem(value: 'underline', child: Text('下划线')),
-                  DropdownMenuItem(value: 'beam', child: Text('竖线')),
-                ],
-                onChanged: (v) => setState(() => _shape = v!),
+              SettingsField(
+                child: DropdownButtonFormField<String>(
+                  key: ValueKey('terminal-cursor-$_shape'),
+                  initialValue: _shape,
+                  decoration: const InputDecoration(labelText: '默认光标'),
+                  items: const [
+                    DropdownMenuItem(value: 'block', child: Text('块状')),
+                    DropdownMenuItem(value: 'underline', child: Text('下划线')),
+                    DropdownMenuItem(value: 'beam', child: Text('竖线')),
+                  ],
+                  onChanged: (v) => setState(() => _shape = v!),
+                ),
               ),
               CompactSettingsToggle(
                 child: SwitchListTile(

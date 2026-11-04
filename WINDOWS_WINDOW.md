@@ -1,3 +1,11 @@
+## 2026-11-05 边框命中与位置记忆修订
+
+Flutter 子 HWND 先将边缘/最大化按钮的 WM_NCHITTEST 返回 HTTRANSPARENT；父窗体在 Flutter 默认处理前识别八个边缘，系统负责实际拖动/调整。中间客户区继续由 Flutter 输入。窗口最大化不暴露可缩放边缘，最小尺寸保持既定规则。
+
+本机 HKCU/Software/HSPTerm/Window 的 PlacementV1 只存 WINDOWPLACEMENT。正常关闭的 WM_DESTROY 在父类清除 HWND 前保存；取消关闭不保存。启动恢复经边界校验的正常矩形及最大化，遵循 workspace 坐标，由 Windows 调整完全屏外位置。不涉及 Vault、SSH 或云同步。
+
+CI tools/validate_windows_geometry.ps1 检查锁定启动下移动/缩放、正常关闭、重开位置/尺寸；解锁后自定义边框实际拖动、Snap、多显示器/DPI 为 Windows 用户验收项。
+
 # Windows 窗口接入与构建
 
 当前为**未编译、未实机验证的静态代码**，不能用Ubuntu结果代替Windows验收。源码节点/验证状态见PROGRESS。

@@ -282,31 +282,33 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
     ValueChanged<double> change,
   ) => SizedBox(
     width: 160,
-    child: DropdownButtonFormField<double>(
-      key: ValueKey('typography-$name-$value'),
-      isExpanded: true,
-      initialValue: value,
-      decoration: InputDecoration(labelText: name),
-      items: [
-        for (final v in <double>{
-          value,
-          for (double v = min; v <= max + .001; v += name == '行高' ? .1 : 1)
-            double.parse(v.toStringAsFixed(2)),
-        }.toList()..sort())
-          DropdownMenuItem(
-            value: v,
-            child: Text(
-              name == '行高'
-                  ? '${v.toStringAsFixed(1)} 倍'
-                  : '${v.toStringAsFixed(0)} px',
+    child: SettingsField(
+      child: DropdownButtonFormField<double>(
+        key: ValueKey('typography-$name-$value'),
+        isExpanded: true,
+        initialValue: value,
+        decoration: InputDecoration(labelText: name),
+        items: [
+          for (final v in <double>{
+            value,
+            for (double v = min; v <= max + .001; v += name == '行高' ? .1 : 1)
+              double.parse(v.toStringAsFixed(2)),
+          }.toList()..sort())
+            DropdownMenuItem(
+              value: v,
+              child: Text(
+                name == '行高'
+                    ? '${v.toStringAsFixed(1)} 倍'
+                    : '${v.toStringAsFixed(0)} px',
+              ),
             ),
-          ),
-      ],
-      onChanged: !_editable
-          ? null
-          : (v) {
-              if (v != null) setState(() => change(v));
-            },
+        ],
+        onChanged: !_editable
+            ? null
+            : (v) {
+                if (v != null) setState(() => change(v));
+              },
+      ),
     ),
   );
   @override

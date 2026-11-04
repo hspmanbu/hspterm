@@ -1,3 +1,4 @@
+import '../run_log.dart';
 import 'palette_settings.dart';
 import 'typography_settings.dart';
 import 'configuration_backup_panel.dart';
@@ -324,6 +325,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
   }
 
   Future<void> _performUnlock(bool withWindows) async {
+    AppRunLog.instance.event(AppLogEvent.vaultOpen);
     setState(() {
       _busy = true;
       _error = null;
@@ -353,6 +355,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
         await directory.create(recursive: true);
         await rust.createConfigurationVault(path: path, password: password);
       }
+      AppRunLog.instance.event(AppLogEvent.vaultOpened);
       await m.load();
       await m.appearance.load();
       await m.sftpView.load();

@@ -47,6 +47,7 @@ endif()
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "comctl32.lib" "advapi32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "gdi32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib" "uuid.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "crypt32.lib" "shell32.lib" "bcrypt.lib")

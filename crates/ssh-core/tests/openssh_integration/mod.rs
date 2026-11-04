@@ -363,3 +363,48 @@ async fn unsupported_allexport_keeps_shell_without_private_helper_environment() 
     session.wait_closed().await;
     drain.await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resized_idle_prompt_accepts_quoted_path_without_execution() {
+    use hspterm_ssh_core::{IntegratedEdit, IntegratedOutcome};
+    let server = Server::start().await;
+    let (session, drain, recorded) = open(&server).await;
+    until("ready before resize", || {
+        session.integration_proof().is_some()
+    })
+    .await;
+    for (cols, rows) in [(100, 30), (42, 16), (120, 24)] {
+        session
+            .resize(Size::new(cols, rows).unwrap())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            session.integration_proof().is_some(),
+            "resize must not revoke an idle Readline proof"
+        );
+    }
+    let proof = session.integration_proof().unwrap();
+    let quoted = "'/tmp/中文 folder/it'\\''s.txt'";
+    assert_eq!(
+        session
+            .apply_integrated(
+                session.status().generation,
+                proof,
+                IntegratedEdit::Insert,
+                Zeroizing::new(quoted.into()),
+                false,
+                None
+            )
+            .await
+            .unwrap(),
+        IntegratedOutcome::Applied
+    );
+    assert!(
+        recorded.lock().unwrap().is_empty(),
+        "inserting a path must not execute it"
+    );
+    session.shutdown();
+    session.wait_closed().await;
+    drain.await.unwrap();
+}

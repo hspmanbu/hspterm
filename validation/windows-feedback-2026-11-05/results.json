@@ -1,0 +1,50 @@
+{
+  "scope": "Four Windows feedback fixes; Ubuntu verification, Windows CI pending",
+  "rust": {
+    "bridge_serial": 77,
+    "terminal_core": 104,
+    "real_openssh_integration": 8,
+    "bash_capability_unit": 2,
+    "final_log_unit_repeat": 2,
+    "clippy": "pass, -D warnings"
+  },
+  "flutter": {
+    "component_suite": 66,
+    "final_logs_and_error_boundary_repeat": 10,
+    "final_paths_repeat": 5,
+    "analyze": "0 issues",
+    "real_gtk_settings": 1,
+    "categories": 9,
+    "window_sizes": 2,
+    "native_log_export_api": "verified; synthetic Vault password absent"
+  },
+  "build": {
+    "frb": "2.13.0 canonical generation passed",
+    "ubuntu_debug": "formal workbench rebuilt and started; native library hash matched"
+  },
+  "smoke": {
+    "mode": "debug",
+    "window": "real GTK/X11",
+    "rss_bytes": 493539328,
+    "idle_elapsed_ms": 5000,
+    "idle_cpu_pct": 0.0,
+    "rust_library_loaded": true,
+    "terminal_history_created": false,
+    "editor_work_files_created": false,
+    "remaining_preview_runs": 0,
+    "exit_code": 0,
+    "unfocused_rss_bytes": 493539328,
+    "unfocused_elapsed_ms": 5000,
+    "unfocused_cpu_pct": 0.0
+  },
+  "limitations": [
+    "Windows MSVC/native placement CI pending at commit",
+    "Integrated edge dragging/Snap/DPI/IME require Windows 11 user verification",
+    "Android remains paused"
+  ],
+  "recoverable_test_issues": [
+    "Bridge tests share process Vault state; default parallel run had one tmux interference failure; complete serial run passed 77 tests.",
+    "Export widget test now waits for flushed-write acknowledgement, not first visible file bytes.",
+    "Headless startup requires isolated D-Bus session; plain Xvfb was blocked by a stale desktop portal."
+  ]
+}

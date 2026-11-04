@@ -10,10 +10,12 @@ static PANIC_HOOK: Once = Once::new();
 pub(crate) fn prepare() {
     PANIC_HOOK.call_once(|| {
         crate::diagnostics::prepare_panic_recording();
+        crate::run_log::prepare();
         // This private native library is the application owner, not a public
         // embedding SDK. Default hooks can print key/output-bearing panic data.
         std::panic::set_hook(Box::new(|_info| {
             crate::diagnostics::panic_record();
+            crate::run_log::panic_location(_info.location());
             // Unit-test failures must be locatable without ever formatting a
             // potentially secret-bearing panic payload. Production stays silent.
             #[cfg(test)]
@@ -64,9 +66,12 @@ impl fmt::Debug for PublicFailure {
 }
 impl std::error::Error for PublicFailure {}
 
+#[track_caller]
 pub(crate) fn finish<T>(result: anyhow::Result<T>) -> anyhow::Result<T> {
+    let caller = std::panic::Location::caller();
     result.map_err(|error| {
         let message = summary(&error);
+        crate::run_log::failure(&error, &message, caller);
         // Do not retain the original error in source(), context(), backtrace
         // text or any diagnostic store. A new anyhow backtrace may refer to
         // code locations when explicitly enabled, never the original payload.

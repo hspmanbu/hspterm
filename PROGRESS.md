@@ -1,4 +1,12 @@
-# HSPTerm 开发进度
+## 2026-11-05 四项反馈修复：Ubuntu 验证完成，Windows CI 待执行
+
+- Shell 路径：resize 保留未改变的真实 Readline proof；能力探测兼容 banner；失败显示具体固定原因并记录阶段。仍要求同会话、主动启用与远端原子比较/回执，不能盲目注入 TUI。
+- 设置：详细字段外部留白，诊断筛选加宽/展开，九分类×大小两种窗口 GTK 无溢出并已视觉检查。
+- 日志：本次启动 Rust/UI 有界内存环形日志，UTC/INFO/WARN/ERROR、模块、错误分类和代码位置，支持导出 `.log` 覆盖写入；不读旧日志，不记录秘密、命令、正文、路径或剪贴板。
+- Windows：Flutter 子 HWND 边缘转交父窗体，父边框判断优先于 Flutter 默认处理；WM_DESTROY 清除 HWND 前保存本机 HKCU 正常矩形/最大化，下次启动恢复。CI 新增正常关闭后的位置/大小恢复检查；真实边框拖动、Snap/DPI 等待用户 Win11 实测。
+- 已执行：正规 FRB2.13；Bridge 串行77、term-core104、真实隔离 OpenSSH8、能力探测单测2；严格 Clippy；Flutter组件66、最终日志/错误边界10及路径5复测；Analyze0；GTK设置1（18分类/尺寸组合，含真实 Native 日志 API）；正式 Ubuntu debug 构建/启动/正常退出0，SO散列匹配，无残留 run。详 validation/windows-feedback-2026-11-05/results.json。
+- 失败均保留说明：Bridge 默认并行会相互替换测试全局 Vault，完整串行77通过；日志文件测试先见字节不等于 flush 已完成，已改为真实 ACK；无桌面环境旧门户阻塞，正式 smoke 使用独立 D-Bus 会话通过。未将失败算通过。
+- 下一步：提交/发布并查询 Windows 新 run，不重复触发；CI 验证 MSVC、扩展日志组件和窗口几何。Android 暂停。完成后清理本轮中间产物，保留源码与 JSON/文字证据。
 
 ## 最新操作：用户授权磁盘清理（2026-11-04）
 

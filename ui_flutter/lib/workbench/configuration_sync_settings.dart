@@ -1,3 +1,4 @@
+import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
 import 'dart:convert';
@@ -453,19 +454,21 @@ class _ConfigurationSyncSettingsPanelState
     String? Function(String?)? validator,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 10),
-    child: TextFormField(
-      controller: c,
-      enabled: !_busy,
-      readOnly: readOnly,
-      obscureText: secret,
-      enableSuggestions: !secret,
-      autocorrect: !secret,
-      decoration: InputDecoration(
-        labelText: label,
-        helperText: help,
-        isDense: true,
+    child: SettingsField(
+      child: TextFormField(
+        controller: c,
+        enabled: !_busy,
+        readOnly: readOnly,
+        obscureText: secret,
+        enableSuggestions: !secret,
+        autocorrect: !secret,
+        decoration: InputDecoration(
+          labelText: label,
+          helperText: help,
+          isDense: true,
+        ),
+        validator: validator ?? _required,
       ),
-      validator: validator ?? _required,
     ),
   );
   Widget _check(String title, bool value, ValueChanged<bool> set) =>

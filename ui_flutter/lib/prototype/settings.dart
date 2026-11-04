@@ -1,3 +1,4 @@
+import '../run_log.dart';
 import 'settings_style.dart';
 
 import 'package:flutter/material.dart';
@@ -58,8 +59,12 @@ class SettingsPageState extends State<SettingsPage> {
 
   Future<void> _apply({bool close = false}) async {
     if (_applying) return;
+    AppRunLog.instance.event(AppLogEvent.settingsApply);
     setState(() => _applying = true);
     final saved = await _leave.applyAll(context);
+    AppRunLog.instance.event(
+      saved ? AppLogEvent.settingsApplied : AppLogEvent.settingsFailed,
+    );
     if (!mounted) return;
     setState(() {
       _applying = false;

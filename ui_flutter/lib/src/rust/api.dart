@@ -27,7 +27,7 @@ import 'transfers.dart';
 import 'transfers/explorer.dart';
 import 'transfers/export_cleanup.dart';
 
-// These functions are ignored because they are not marked as `pub`: `agent_connected`, `agent_scope`, `allowed_integration`, `apply_entry_preferences`, `bind_display`, `check_directory_session`, `close_terminal_owned`, `configuration_restored`, `configuration_synchronized`, `connect_terminal_inner`, `connect_terminal_run`, `credential`, `display_sources`, `ensure_command_source`, `entry`, `event`, `history_version`, `integrated_result`, `integration_guard`, `invalidate_backup_agents`, `invalidate_synchronized_agents`, `key_credential`, `migrate_legacy_profiles`, `modifiers`, `next_id`, `persist_key_file`, `publish_terminal_preferences`, `record_integration_commands`, `record`, `remember_host_key`, `remote_sftp`, `replace_display`, `retire_suggestions_for`, `retire_suggestions`, `sessions`, `suggestion_context`, `terminal_path_context_revision`, `terminal_path_context`, `tmux_event`, `transfer_connection`, `trust_id`, `unlock_vault_inner`, `validate_remote_path`, `vault`, `with_vault`
+// These functions are ignored because they are not marked as `pub`: `agent_connected`, `agent_scope`, `allowed_integration`, `apply_entry_preferences`, `bind_display`, `check_directory_session`, `close_terminal_owned`, `configuration_restored`, `configuration_synchronized`, `connect_terminal_inner`, `connect_terminal_run`, `credential`, `display_sources`, `ensure_command_source`, `entry`, `event`, `history_version`, `integrated_result`, `integration_guard`, `integration_status`, `invalidate_backup_agents`, `invalidate_synchronized_agents`, `key_credential`, `migrate_legacy_profiles`, `modifiers`, `next_id`, `persist_key_file`, `publish_terminal_preferences`, `record_integration_commands`, `record`, `remember_host_key`, `remote_sftp`, `replace_display`, `retire_suggestions_for`, `retire_suggestions`, `sessions`, `suggestion_context`, `terminal_path_context_revision`, `terminal_path_context`, `tmux_event`, `transfer_connection`, `trust_id`, `unlock_vault_inner`, `validate_remote_path`, `vault`, `with_vault`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Entry`, `SavedProfile`, `SuggestionProposal`, `SuggestionsCache`, `TerminalCloseState`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `from`, `from`, `from`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`, `default`
@@ -41,6 +41,9 @@ Future<DiagnosticSnapshot> diagnosticSnapshot() =>
 
 Future<void> clearDiagnostics() =>
     RustLib.instance.api.crateApiClearDiagnostics();
+
+/// Current process only; writing/export location remains a user UI action.
+Future<String> currentRunLog() => RustLib.instance.api.crateApiCurrentRunLog();
 
 /// Convenient unlock may only open the same existing Vault whose non-secret
 /// identity was read before asking the OS to unprotect its cached password.
@@ -292,6 +295,15 @@ Future<String> chooseTerminalSuggestion({
   ticket: ticket,
   index: index,
   execute: execute,
+);
+
+/// Non-secret capability/reason only; does not probe, inject input or reconnect.
+Future<String> terminalIntegrationStatus({
+  required int id,
+  required int generation,
+}) => RustLib.instance.api.crateApiTerminalIntegrationStatus(
+  id: id,
+  generation: generation,
 );
 
 /// Literal paths from this exact session's SFTP; no lookup, expansion, upload or

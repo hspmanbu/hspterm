@@ -273,6 +273,9 @@ impl ManagedSession {
     pub fn integration_proof(&self) -> Option<hspterm_term_core::integration::Proof> {
         self.terminal.lock().integration_proof()
     }
+    pub fn integration_status(&self) -> &'static str {
+        self.terminal.lock().integration_status()
+    }
     pub fn shell_context(&self) -> hspterm_term_core::ShellContext {
         self.terminal.lock().shell_context()
     }

@@ -110,6 +110,10 @@ void main() {
               .canLeave(),
           true,
         );
+        final nativeLog = await rust.currentRunLog();
+        expect(nativeLog, contains('HSPTerm native current-process log'));
+        expect(nativeLog, contains('VaultOpened'));
+        expect(nativeLog, isNot(contains('synthetic-settings-only')));
         expect(model.sessions, isEmpty);
         for (final name in [
           '外观',

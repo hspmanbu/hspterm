@@ -417,7 +417,10 @@ impl Terminal {
     pub fn resize(&mut self, size: Size) -> Result<(), TerminalError> {
         let size = Size::new(size.columns, size.rows)?;
         if self.size != size && !self.size_locked {
-            self.invalidate_integration();
+            // Geometry/reflow does not edit Readline's line or cursor. The
+            // helper still compares the entire real line before accepting a
+            // controlled edit; losing proof here strands an idle prompt after
+            // the renderer's initial PTY resize (its PS1 redraw is a replay).
             self.events.0.lock().shell.invalidate();
             let command_reflow = self
                 .events
@@ -494,6 +497,23 @@ impl Terminal {
     pub fn integration_input(&self) -> Option<(integration::Proof, zeroize::Zeroizing<String>)> {
         self.integration_proof()?;
         self.events.0.lock().integration.as_ref()?.input()
+    }
+    pub fn integration_status(&self) -> &'static str {
+        let ready = self.integration_proof().is_some();
+        let events = self.events.0.lock();
+        let Some(state) = &events.integration else {
+            return "ShellUnavailable";
+        };
+        if !self.integration_mode_safe() {
+            return "TerminalMode";
+        }
+        if ready {
+            "Ready"
+        } else if !state.has_prompt() {
+            "WaitingForHelper"
+        } else {
+            "InputStateUnknown"
+        }
     }
     pub fn integration_revision(&self) -> u64 {
         self.events

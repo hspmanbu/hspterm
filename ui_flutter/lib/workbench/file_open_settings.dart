@@ -1,3 +1,4 @@
+import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
 import 'package:flutter/material.dart';
@@ -94,23 +95,25 @@ class _FileOpenSettingsPanelState extends State<FileOpenSettingsPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextFormField(
-            key: const ValueKey('file-open-confirmation-mib'),
-            controller: _limit,
-            enabled: !_saving,
-            keyboardType: TextInputType.number,
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(10),
-            ],
-            decoration: const InputDecoration(labelText: '文件打开确认阈值（MiB）'),
-            validator: (text) {
-              final n = int.tryParse(text ?? '');
-              return n == null || n < 0 || n > 4294967295
-                  ? '请输入 0–4294967295 之间的整数'
-                  : null;
-            },
-            onChanged: (_) => setState(() => _saved = false),
+          SettingsField(
+            child: TextFormField(
+              key: const ValueKey('file-open-confirmation-mib'),
+              controller: _limit,
+              enabled: !_saving,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(10),
+              ],
+              decoration: const InputDecoration(labelText: '文件打开确认阈值（MiB）'),
+              validator: (text) {
+                final n = int.tryParse(text ?? '');
+                return n == null || n < 0 || n > 4294967295
+                    ? '请输入 0–4294967295 之间的整数'
+                    : null;
+              },
+              onChanged: (_) => setState(() => _saved = false),
+            ),
           ),
           const SizedBox(height: 8),
           const Text(

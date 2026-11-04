@@ -1,5 +1,7 @@
 import 'dart:ui' show PlatformDispatcher;
 
+import 'run_log.dart';
+
 import 'package:flutter/material.dart';
 
 /// Four fixed counters for this process. No API accepts or formats an exception,
@@ -27,10 +29,22 @@ const nativeStartupFailure = 'Rust 核心加载失败。请检查匹配版本的
 /// replace the failed widget with a fixed message rather than secret-bearing
 /// default FlutterErrorDetails.toString()/ErrorWidget output.
 void installApplicationErrorBoundary() {
-  FlutterError.onError = (_) =>
-      RuntimeFaults.instance.record(RuntimeFault.framework);
-  PlatformDispatcher.instance.onError = (_, _) {
+  AppRunLog.instance.event(AppLogEvent.startup);
+  FlutterError.onError = (details) {
+    RuntimeFaults.instance.record(RuntimeFault.framework);
+    AppRunLog.instance.event(
+      AppLogEvent.frameworkFailed,
+      error: details.exception,
+      stack: details.stack,
+    );
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
     RuntimeFaults.instance.record(RuntimeFault.asynchronous);
+    AppRunLog.instance.event(
+      AppLogEvent.asyncFailed,
+      error: error,
+      stack: stack,
+    );
     return true;
   };
   ErrorWidget.builder = (_) =>

@@ -284,20 +284,22 @@ class _DisplaySettingsPanelState extends State<DisplaySettingsPanel> {
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 10),
-        DropdownButtonFormField<String>(
-          key: ValueKey('display-scope-${host ?? 'global'}'),
-          initialValue: host ?? '',
-          decoration: const InputDecoration(labelText: '设置范围'),
-          isExpanded: true,
-          items: [
-            const DropdownMenuItem(value: '', child: Text('全局默认')),
-            for (final h in hosts)
-              DropdownMenuItem(
-                value: h.id,
-                child: Text(h.name, overflow: TextOverflow.ellipsis),
-              ),
-          ],
-          onChanged: busy ? null : (v) => _select(v == '' ? null : v),
+        SettingsField(
+          child: DropdownButtonFormField<String>(
+            key: ValueKey('display-scope-${host ?? 'global'}'),
+            initialValue: host ?? '',
+            decoration: const InputDecoration(labelText: '设置范围'),
+            isExpanded: true,
+            items: [
+              const DropdownMenuItem(value: '', child: Text('全局默认')),
+              for (final h in hosts)
+                DropdownMenuItem(
+                  value: h.id,
+                  child: Text(h.name, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: busy ? null : (v) => _select(v == '' ? null : v),
+          ),
         ),
         if (busy) const LinearProgressIndicator(minHeight: 2),
         if (host != null)
@@ -474,13 +476,15 @@ class _DisplaySettingsPanelState extends State<DisplaySettingsPanel> {
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            key: const ValueKey('display-sample'),
-            controller: sample,
-            minLines: 2,
-            maxLines: 4,
-            maxLength: 8192,
-            decoration: const InputDecoration(labelText: '规则测试文本（仅当前界面内存）'),
+          SettingsField(
+            child: TextField(
+              key: const ValueKey('display-sample'),
+              controller: sample,
+              minLines: 2,
+              maxLines: 4,
+              maxLength: 8192,
+              decoration: const InputDecoration(labelText: '规则测试文本（仅当前界面内存）'),
+            ),
           ),
           Align(
             alignment: Alignment.centerLeft,

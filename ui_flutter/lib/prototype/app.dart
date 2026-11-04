@@ -1,3 +1,4 @@
+import '../run_log.dart';
 import '../terminal/application_keys.dart';
 import 'command_palette.dart';
 
@@ -122,9 +123,15 @@ class PrototypeAppState extends State<PrototypeApp> {
   Future<void> _initializeWindow() async {
     try {
       await prototypeWindow.invokeMethod<void>('initialize');
+      AppRunLog.instance.event(AppLogEvent.windowReady);
     } on MissingPluginException {
       // A runner without optional custom-frame support retains system controls.
-    } on PlatformException {
+    } on PlatformException catch (error, stack) {
+      AppRunLog.instance.event(
+        AppLogEvent.windowFailed,
+        error: error,
+        stack: stack,
+      );
       // System decorations remain available if optional window hints fail.
     }
   }

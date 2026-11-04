@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../run_log.dart';
+
 enum WorkPage { workspace, hosts, settings }
 
 enum TransferState {
@@ -396,6 +398,11 @@ class WorkbenchModel extends ChangeNotifier {
   WorkPage page = WorkPage.workspace;
   String? operationError;
   void reportOperation(Object error) {
+    AppRunLog.instance.event(
+      AppLogEvent.operationFailed,
+      error: error,
+      stack: StackTrace.current,
+    );
     operationError = error.toString();
     changed();
   }
@@ -477,6 +484,7 @@ class WorkbenchModel extends ChangeNotifier {
   TerminalTab? tabById(String id) => tabs.where((t) => t.id == id).firstOrNull;
   void changed() => notifyListeners();
   void show(WorkPage value) {
+    AppRunLog.instance.event(AppLogEvent.pageChanged, count: value.index);
     page = value;
     changed();
   }

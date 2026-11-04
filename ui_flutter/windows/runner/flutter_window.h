@@ -5,6 +5,8 @@
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
 #include <flutter/encodable_value.h>
+#include <windows.h>
+#include <commctrl.h>
 
 #include <memory>
 
@@ -37,6 +39,13 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<ExplorerDropBridge> explorer_drop_;
   bool integrated_frame_ = false;
   RECT maximize_button_ = {};
+  bool child_subclassed_ = false;
+  bool startup_maximized_ = false;
+  LRESULT FrameHitTest(POINT screen) const;
+  void RestorePlacement();
+  void SavePlacement();
+  static LRESULT CALLBACK ChildWindowProc(HWND, UINT, WPARAM, LPARAM,
+                                          UINT_PTR, DWORD_PTR);
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

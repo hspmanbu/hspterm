@@ -97,6 +97,7 @@ fn store() -> &'static Mutex<Store> {
 }
 pub(crate) fn record(code: DiagnosticCode, id: Option<u32>, generation: Option<u64>) {
     store().lock().push(code, id, generation);
+    crate::run_log::state(code, id, generation);
 }
 pub(crate) fn snapshot() -> DiagnosticSnapshot {
     let mut snapshot = store().lock().snapshot();
@@ -108,6 +109,7 @@ pub(crate) fn snapshot() -> DiagnosticSnapshot {
 pub(crate) fn clear() {
     store().lock().clear();
     PANICS_NOT_QUEUED.store(0, Ordering::Relaxed);
+    crate::run_log::clear();
 }
 pub(crate) fn prepare_panic_recording() {
     let _ = store();

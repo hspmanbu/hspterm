@@ -1,5 +1,15 @@
 import 'package:flutter/material.dart';
 
+/// Floating field labels extend above the outline; reserve outside spacing,
+/// rather than relying on InputDecoration's padding inside the border.
+class SettingsField extends StatelessWidget {
+  const SettingsField({super.key, required this.child});
+  final Widget child;
+  @override
+  Widget build(BuildContext context) =>
+      Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: child);
+}
+
 /// Keep the whole settings row clickable while using the slimmer desktop
 /// switch geometry. Text, colors and keyboard semantics retain the page theme.
 class CompactSettingsToggle extends StatelessWidget {

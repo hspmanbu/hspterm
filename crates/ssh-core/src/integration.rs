@@ -40,11 +40,14 @@ pub(crate) async fn available(
 ) -> Result<bool, crate::SshError> {
     use crate::{SshError, Stage};
     use russh::ChannelMsg;
-    const PROBE: &str = "if [ -r /dev/fd/0 ] && command -v bash >/dev/null 2>&1; then bash --noprofile --norc -c '(( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) ))' </dev/null && printf HSPTERM_BASH_V1; fi";
+    let marker = format!("HSPTERM_BASH_V1_{:032x}", rand::random::<u128>());
+    let probe = format!(
+        "if [ -r /dev/fd/0 ] && command -v bash >/dev/null 2>&1; then bash --noprofile --norc -c '(( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) ))' </dev/null && printf '\\n{marker}\\n'; fi"
+    );
     budget
         .run(Stage::Shell, async {
             let mut channel = handle.channel_open_session_flow_controlled().await?;
-            channel.exec(true, PROBE.as_bytes()).await?;
+            channel.exec(true, probe.as_bytes()).await?;
             let mut output = Vec::new();
             let mut count = 0usize;
             let mut accepted = false;
@@ -82,7 +85,10 @@ pub(crate) async fn available(
                         if !accepted || status.is_none() {
                             return Err(SshError::RequestDenied(Stage::Shell));
                         }
-                        return Ok(status == Some(0) && output == b"HSPTERM_BASH_V1");
+                        // User login banners may precede the capability reply.
+                        // Match one fresh, exact framed token, never log banners.
+                        let framed = format!("\n{marker}\n");
+                        return Ok(status == Some(0) && probe_reply(&output, &framed));
                     }
                     Some(
                         ChannelMsg::ReceiveWindowError
@@ -99,9 +105,26 @@ pub(crate) async fn available(
         })
         .await
 }
+fn probe_reply(output: &[u8], framed: &str) -> bool {
+    !framed.is_empty() && output.windows(framed.len()).any(|w| w == framed.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn capability_reply_tolerates_banner_but_requires_exact_fresh_frame() {
+        let framed = "\nHSPTERM_BASH_V1_synthetic_fresh\n";
+        assert!(probe_reply(
+            b"synthetic banner\n\nHSPTERM_BASH_V1_synthetic_fresh\n",
+            framed
+        ));
+        assert!(!probe_reply(b"HSPTERM_BASH_V1_old", framed));
+        assert!(!probe_reply(
+            b"\nHSPTERM_BASH_V1_synthetic_fresh_extra\n",
+            framed
+        ));
+    }
     #[test]
     fn fresh_launches_have_distinct_fixed_size_tokens_and_no_custom_command_api() {
         let a = Launch::fresh();

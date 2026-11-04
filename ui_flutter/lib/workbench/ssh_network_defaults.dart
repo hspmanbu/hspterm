@@ -1,3 +1,4 @@
+import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
 import 'dart:async';
@@ -110,16 +111,18 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
     int max,
   ) => SizedBox(
     width: 190,
-    child: TextFormField(
-      key: ValueKey(key),
-      controller: controller,
-      enabled: _loaded && !_busy,
-      keyboardType: TextInputType.number,
-      decoration: InputDecoration(labelText: label, helperText: '$min–$max'),
-      validator: (text) {
-        final n = int.tryParse(text ?? '');
-        return n == null || n < min || n > max ? '请输入 $min–$max' : null;
-      },
+    child: SettingsField(
+      child: TextFormField(
+        key: ValueKey(key),
+        controller: controller,
+        enabled: _loaded && !_busy,
+        keyboardType: TextInputType.number,
+        decoration: InputDecoration(labelText: label, helperText: '$min–$max'),
+        validator: (text) {
+          final n = int.tryParse(text ?? '');
+          return n == null || n < min || n > max ? '请输入 $min–$max' : null;
+        },
+      ),
     ),
   );
   @override

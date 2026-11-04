@@ -155,6 +155,9 @@ impl State {
     pub fn revision(&self) -> u64 {
         self.revision
     }
+    pub fn has_prompt(&self) -> bool {
+        self.prompt != 0
+    }
     pub fn deadline(&self) -> Option<Instant> {
         self.edit
             .as_ref()

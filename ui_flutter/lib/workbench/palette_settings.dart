@@ -215,22 +215,24 @@ class _PaletteSettingsPanelState extends State<PaletteSettingsPanel> {
                 ),
               SizedBox(
                 width: 130,
-                child: DropdownButtonFormField<String>(
-                  key: ValueKey('palette-key-$_key'),
-                  initialValue: _key,
-                  isExpanded: true,
-                  items: [
-                    for (final key in PaletteBinding.keys.keys)
-                      DropdownMenuItem(
-                        key: ValueKey('palette-key-option-$key'),
-                        value: key,
-                        child: Text(_label(key, 0)),
-                      ),
-                  ],
-                  decoration: const InputDecoration(labelText: '按键'),
-                  onChanged: _busy || _source == null
-                      ? null
-                      : (v) => setState(() => _key = v!),
+                child: SettingsField(
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('palette-key-$_key'),
+                    initialValue: _key,
+                    isExpanded: true,
+                    items: [
+                      for (final key in PaletteBinding.keys.keys)
+                        DropdownMenuItem(
+                          key: ValueKey('palette-key-option-$key'),
+                          value: key,
+                          child: Text(_label(key, 0)),
+                        ),
+                    ],
+                    decoration: const InputDecoration(labelText: '按键'),
+                    onChanged: _busy || _source == null
+                        ? null
+                        : (v) => setState(() => _key = v!),
+                  ),
                 ),
               ),
             ],

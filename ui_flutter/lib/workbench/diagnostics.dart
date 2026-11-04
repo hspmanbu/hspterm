@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
 
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
+
+import '../run_log.dart';
+import '../prototype/settings_style.dart';
+
 import '../runtime_errors.dart';
 
 import '../src/rust/api.dart' as rust;
@@ -9,6 +16,7 @@ import 'model.dart';
 abstract interface class DiagnosticsGateway {
   Future<DiagnosticSnapshot> load();
   Future<void> clear();
+  Future<String> exportLog();
 }
 
 class NativeDiagnosticsGateway implements DiagnosticsGateway {
@@ -19,6 +27,8 @@ class NativeDiagnosticsGateway implements DiagnosticsGateway {
       model.runLocalSettings(rust.diagnosticSnapshot);
   @override
   Future<void> clear() => model.runLocalSettings(rust.clearDiagnostics);
+  @override
+  Future<String> exportLog() => model.runLocalSettings(rust.currentRunLog);
 }
 
 String diagnosticLabel(DiagnosticCode code) => switch (code) {
@@ -55,8 +65,13 @@ bool diagnosticIsFailure(DiagnosticCode code) => [
 ].contains(code);
 
 class DiagnosticsPanel extends StatefulWidget {
-  const DiagnosticsPanel({super.key, required this.gateway});
+  const DiagnosticsPanel({
+    super.key,
+    required this.gateway,
+    this.chooseLogFile,
+  });
   final DiagnosticsGateway gateway;
+  final Future<String?> Function(String suggestedName)? chooseLogFile;
   @override
   State<DiagnosticsPanel> createState() => _DiagnosticsPanelState();
 }
@@ -67,6 +82,50 @@ class _DiagnosticsPanelState extends State<DiagnosticsPanel> {
   String _terminal = 'all';
   String? _error, _status;
   Map<RuntimeFault, int> _runtime = const {};
+  Future<void> _export() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _status = null;
+    });
+    AppRunLog.instance.event(AppLogEvent.exportRequested);
+    try {
+      final name =
+          'HSPTerm-${DateTime.now().toUtc().toIso8601String().replaceAll(RegExp(r'[:.]'), '-')}.log';
+      final path = widget.chooseLogFile != null
+          ? await widget.chooseLogFile!(name)
+          : (await getSaveLocation(
+              suggestedName: name,
+              acceptedTypeGroups: [
+                const XTypeGroup(label: '日志文件', extensions: ['log']),
+              ],
+            ))?.path;
+      if (!mounted || path == null) return;
+      setState(() => _io = true);
+      final native = await widget.gateway.exportLog();
+      final contents = AppRunLog.instance.export(native);
+      // Replace, never append/reload any previous file or launch log.
+      await File(path).writeAsString(contents, flush: true);
+      AppRunLog.instance.event(AppLogEvent.exported, count: contents.length);
+      if (mounted) setState(() => _status = '已导出本次启动日志。');
+    } catch (error, stack) {
+      AppRunLog.instance.event(
+        AppLogEvent.exportFailed,
+        error: error,
+        stack: stack,
+      );
+      if (mounted) setState(() => _error = '日志导出失败，请检查目标文件权限后重试。');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _io = false;
+        });
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -142,6 +201,7 @@ class _DiagnosticsPanelState extends State<DiagnosticsPanel> {
       setState(() => _io = true);
       await widget.gateway.clear();
       RuntimeFaults.instance.clear();
+      AppRunLog.instance.clear();
       acknowledged = true;
       if (!mounted) return;
       setState(() {
@@ -195,7 +255,7 @@ class _DiagnosticsPanelState extends State<DiagnosticsPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('本次运行诊断 · 仅内存'),
+        const Text('本次启动日志与诊断'),
         if (_runtime.isNotEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -206,33 +266,42 @@ class _DiagnosticsPanelState extends State<DiagnosticsPanel> {
           ),
         const SizedBox(height: 8),
         const Text(
-          '最多保留1000条固定状态代码与运行编号。不记录终端正文、命令、剪贴板、地址、用户名、路径、密码或密钥；不写入文件、SQLite、备份、云同步或遥测。',
+          '自动记录本次启动的时间、操作、阶段、错误类别及代码位置。日志仅在内存保留；导出后可用于问题诊断。不会读取以前的日志。',
         ),
         const SizedBox(height: 8),
-        const Text('此处是状态摘要，不是逐包日志；已入队不表示传输完成。连接状态通知可能合并。只有打开或明确刷新时读取，无后台轮询。'),
+        const Text('不记录密码、密钥、终端内容、命令或剪贴板。日志有容量上限，导出文件会标明被淘汰的数量。下方为核心事件摘要。'),
         if (_io) const LinearProgressIndicator(),
         if (data != null)
           Text(
             '当前 ${data.events.length} / ${data.capacity} 条；容量淘汰 ${data.dropped} 条；筛选后 ${events.length} 条。',
             key: const ValueKey('diagnostics-count'),
           ),
+        const SizedBox(height: 16),
         Wrap(
           spacing: 12,
           runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             SizedBox(
-              width: 180,
-              child: DropdownButtonFormField<String>(
-                key: ValueKey('diagnostics-terminal-$_terminal'),
-                initialValue: _terminal,
-                decoration: const InputDecoration(labelText: '运行终端编号'),
-                items: [
-                  const DropdownMenuItem(value: 'all', child: Text('全部（含全局）')),
-                  for (final id in terminals)
-                    DropdownMenuItem(value: '$id', child: Text('终端 #$id')),
-                ],
-                onChanged: _busy ? null : (v) => setState(() => _terminal = v!),
+              width: 220,
+              child: SettingsField(
+                child: DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  key: ValueKey('diagnostics-terminal-$_terminal'),
+                  initialValue: _terminal,
+                  decoration: const InputDecoration(labelText: '运行终端编号'),
+                  items: [
+                    const DropdownMenuItem(
+                      value: 'all',
+                      child: Text('全部（含全局）'),
+                    ),
+                    for (final id in terminals)
+                      DropdownMenuItem(value: '$id', child: Text('终端 #$id')),
+                  ],
+                  onChanged: _busy
+                      ? null
+                      : (v) => setState(() => _terminal = v!),
+                ),
               ),
             ),
             FilterChip(
@@ -250,6 +319,12 @@ class _DiagnosticsPanelState extends State<DiagnosticsPanel> {
               key: const ValueKey('diagnostics-clear'),
               onPressed: _busy ? null : _clear,
               child: const Text('清空本次诊断'),
+            ),
+            OutlinedButton.icon(
+              key: const ValueKey('diagnostics-export'),
+              onPressed: _busy ? null : _export,
+              icon: const Icon(Icons.save_alt, size: 17),
+              label: const Text('导出本次启动日志'),
             ),
           ],
         ),

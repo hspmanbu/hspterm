@@ -126,13 +126,15 @@ class TerminalNotificationEditorState
           '在通知中显示远端内容',
           '默认关闭。开启后远端通知或规则匹配文本可能出现在应用提示和系统通知中心，可能含敏感内容。',
         ),
-        TextField(
-          key: const ValueKey('terminal-notify-quiet'),
-          controller: _quiet,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: '输出静默秒数',
-            helperText: '0关闭；5–86400秒。收到输出后只提示一次，再次输出重新计时。',
+        SettingsField(
+          child: TextField(
+            key: const ValueKey('terminal-notify-quiet'),
+            controller: _quiet,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: '输出静默秒数',
+              helperText: '0关闭；5–86400秒。收到输出后只提示一次，再次输出重新计时。',
+            ),
           ),
         ),
         const SizedBox(height: 8),
@@ -142,10 +144,12 @@ class TerminalNotificationEditorState
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: Column(
               children: [
-                TextField(
-                  key: ObjectKey(_rules[i].text),
-                  controller: _rules[i].text,
-                  decoration: InputDecoration(labelText: '规则 ${i + 1}'),
+                SettingsField(
+                  child: TextField(
+                    key: ObjectKey(_rules[i].text),
+                    controller: _rules[i].text,
+                    decoration: InputDecoration(labelText: '规则 ${i + 1}'),
+                  ),
                 ),
                 Wrap(
                   spacing: 8,

@@ -1,5 +1,8 @@
 # V1.4 全量需求覆盖清单
 
+2026-11-05 用户反馈增量：Shell resize 后路径发送修复对应 term-core::resize / ssh-core::integration / terminal_paths；当前启动日志与 `.log` 导出对应 frb-bridge::run_log / ui_flutter::run_log / workbench::diagnostics；设置留白对应 SettingsField；Windows 边缘命中与本机窗口几何对应 runner/flutter_window.cpp。适用测试结果见 PROGRESS 最新节。新增日志导出及窗口记忆以 V1.4 末尾用户修订为准；Windows 交互实测仍单列，Android 暂停。
+
+
 本表逐条索引V1.4产品条目及验收场景，复合条目只要有子要求未实现即标“部分”。“已实现Ubuntu”不表示Windows/Android实机通过；Mock只能证明布局交互。实际代码/测试为依据，历史验收见PHASE2_VALIDATION.md和PHASE3A_REVIEW.md。排除/禁止事项仍遵循V1.4 §1/§9，不作为待恢复功能。阶段条目§10用于内部追踪，已取消逐阶段暂停。
 
 当前依赖顺序：加密领域仓库→真实多会话工作台→会话SFTP与任务系统→协议语义/增强及完整网络配置→同步/备份/平台适配→Android。顺序可调整，所有条目保留到可验证完成。最新用户策略为Windows优先、Android暂缓；成批编码后已进入统一生成/编译/测试修正，FRB和两锁已正式生成。Rust完整647项及安全补丁影响范围Bridge75/SSH255项通过；Flutter143文件507个去重用例通过（中断后按清单续齐，非单条命令完整通过），GTK29适用文件通过；构建/静态/平台边界见UNIFIED_VALIDATION.md。表中已接入表示实际业务代码，不能据此宣称整个复合条目或Windows平台验收完成。

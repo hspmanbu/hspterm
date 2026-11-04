@@ -254,6 +254,10 @@ pub async fn diagnostic_snapshot() -> crate::diagnostics::DiagnosticSnapshot {
 pub async fn clear_diagnostics() {
     diagnostics::clear();
 }
+/// Current process only; writing/export location remains a user UI action.
+pub async fn current_run_log() -> String {
+    crate::run_log::export()
+}
 /// Convenient unlock may only open the same existing Vault whose non-secret
 /// identity was read before asking the OS to unprotect its cached password.
 pub async fn unlock_existing_vault(path: String, password: String, token: String) -> Result<()> {
@@ -1907,6 +1911,31 @@ fn integrated_result(
     }
     .into()
 }
+fn integration_status(entry: &Entry, generation: u64) -> &'static str {
+    if entry.session.status().generation != generation {
+        return "StaleConnection";
+    }
+    if entry.session.status().phase != SessionPhase::Connected {
+        return "Disconnected";
+    }
+    if entry.temporary_connection.load(Ordering::Acquire) {
+        return "TemporaryConnection";
+    }
+    if suggestion_context(entry, generation).is_none() {
+        return "ConnectionNotOptedIn";
+    }
+    entry.session.integration_status()
+}
+/// Non-secret capability/reason only; does not probe, inject input or reconnect.
+pub async fn terminal_integration_status(id: u32, generation: u64) -> Result<String> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        let current = entry(id)?;
+        Ok(integration_status(&current, generation).to_owned())
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
 /// Literal paths from this exact session's SFTP; no lookup, expansion, upload or
 /// download. Only the confirmed optional Bash helper can accept these bytes.
 pub async fn insert_terminal_paths(
@@ -1929,6 +1958,12 @@ pub async fn insert_terminal_paths(
             "远端路径无效或超过容量"
         );
         let entry = entry(id)?;
+        crate::run_log::decision(
+            "path.insert",
+            integration_status(&entry, generation),
+            id,
+            generation,
+        );
         let Some((scope, host, target)) = suggestion_context(&entry, generation) else {
             return Ok("Unavailable".into());
         };
@@ -1941,6 +1976,7 @@ pub async fn insert_terminal_paths(
         })
         .await??;
         if !approved {
+            crate::run_log::decision("path.insert", "PermissionRevoked", id, generation);
             return Ok("Unavailable".into());
         }
         let quoted = paths
@@ -1958,7 +1994,7 @@ pub async fn insert_terminal_paths(
         } else {
             hspterm_ssh_core::IntegratedEdit::Insert
         };
-        Ok(integrated_result(
+        let result = integrated_result(
             entry
                 .session
                 .apply_integrated(
@@ -1970,7 +2006,18 @@ pub async fn insert_terminal_paths(
                     Some(integration_guard(&entry, generation, version)),
                 )
                 .await,
-        ))
+        );
+        crate::run_log::decision(
+            "path.result",
+            match result.as_str() {
+                "Applied" => "Applied",
+                "Unavailable" => "Unavailable",
+                _ => "Unconfirmed",
+            },
+            id,
+            generation,
+        );
+        Ok(result)
     })
     .await;
     crate::public_errors::finish(outcome)
