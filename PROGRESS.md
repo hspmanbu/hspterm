@@ -865,3 +865,8 @@ Windows功能源码已接入正式工作台，本机可执行的统一验证已�
 - 已核对FRB2.13.0原始rust_path_parser.rs：省略rust_output时从已经规范化的crate-root生成同一src/frb_generated.rs，避免两种Windows路径前缀混用。现使用该默认值，不跳过生成、不改生成文件、不升级FRB。
 - 加入Bash内嵌rcfile的text/eol=lf属性；用core.autocrlf=true实际检出过滤模拟，普通Rust文本转换CRLF的同时Bash正文仍与Git blob逐字节一致，bash -n通过。避免Windows客户端将CRLF载入远端Bash。
 - Rust缓存改独立restore/save，失败时也保存已编译工具和依赖，避免后续修复反复冷编译；workflow增加.gitattributes触发。准备提交并运行第二轮，首轮真实失败保留。
+
+### Windows第二轮云构建已触发（2026-11-04）
+
+- 修正已发布为1aef4b9c6bc93db5f0019f47c19fec618e6c040a；远端树9b9192f4c38a624a3d363b940a48b7d957446921与本地修正6c4e17c完全一致，父提交411f60c保留。小文档提交可正常Git push，含workflow的push仍500，故使用Git Data API与连接器非force租约发布；本地修正历史额外保留在ci-attempt-6c4e17c/ci-local-fix。
+- 第二轮run41813471598/job126518251196： https://github.com/hspmanbu/hspterm/actions/runs/41813471598 ，已实际启动，待工具安装、正规生成/编译/分析/基础窗口启动结果。当前无可宣称成功的Windows可分发包；后续恢复直接查询本run，不重复导入源码或触发重复runner。
