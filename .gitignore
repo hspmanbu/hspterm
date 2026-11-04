@@ -18,3 +18,9 @@
 **/generated_plugins.cmake
 **/__pycache__/
 *.pyc
+
+# Generated verification screenshots; retain textual results and source assets.
+/validation/**/*.png
+/validation/**/*.jpg
+/validation/**/*.jpeg
+/validation/**/*.webp

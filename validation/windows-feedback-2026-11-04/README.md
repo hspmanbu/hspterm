@@ -1,3 +1,5 @@
+> 清理说明（2026-11-04）：按用户要求移除本机截图和构建产物，文字/JSON结果保留。截图可从 Git 历史版本查询或用现有测试重新生成。
+
 # Windows 使用反馈：七项修正
 
 用户确认上一版 Windows 启动内存约 70–80 MB；该数值为用户观测，不与 Ubuntu 图形栈 RSS 混算。本次保留延迟字体目录和虚拟列表优化。
@@ -22,7 +24,7 @@
 - Analyze 0 项、Dart 格式检查、actionlint 通过；正式 debug/release 入口恢复为 workbench_main.dart，启动/正常退出及预览租约清理结果见 JSON。
 - 早期按旧分类警告/保存按钮编写的测试失败、主题基线夹具错误和模态“取消”与新常驻按钮重名均已修正。没有跳过生产错误、删除安全确认或重写真实终端状态以通过测试。
 
-主要截图：[外观](appearance.png)、[终端](terminal-input.png)、[SFTP](sftp-transfers.png)、[加密与同步](security-sync.png)；各图 `compact-` 前缀对应较小实际窗口。
+主要截图：[外观](https://github.com/hspmanbu/hspterm/blob/17d04096c446c82c79bfad098a4135086b0e2b98/validation/windows-feedback-2026-11-04/appearance.png)、[终端](https://github.com/hspmanbu/hspterm/blob/17d04096c446c82c79bfad098a4135086b0e2b98/validation/windows-feedback-2026-11-04/terminal-input.png)、[SFTP](https://github.com/hspmanbu/hspterm/blob/17d04096c446c82c79bfad098a4135086b0e2b98/validation/windows-feedback-2026-11-04/sftp-transfers.png)、[加密与同步](https://github.com/hspmanbu/hspterm/blob/17d04096c446c82c79bfad098a4135086b0e2b98/validation/windows-feedback-2026-11-04/security-sync.png)；各图 `compact-` 前缀对应较小实际窗口。
 
 复现（ui_flutter 目录）：
 

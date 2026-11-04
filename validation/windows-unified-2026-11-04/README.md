@@ -1,3 +1,5 @@
+> 清理说明（2026-11-04）：按用户要求移除本机截图和构建产物，文字/JSON结果保留。截图可从 Git 历史版本查询或用现有测试重新生成。
+
 # Windows代码集中收尾：Ubuntu验证记录
 
 2026-11-04，Windows功能代码已接入正式工作台，当前Ubuntu可执行验证收齐。Android按用户要求暂缓。本记录不代表Windows客户端已在目标平台编译/验收，也不代表Google/WebDAV真实账号测试通过。
@@ -14,7 +16,7 @@
 | 构建与正常退出 | 正式debug/release构建、真实GTK启动、Native加载、未擅自建库/历史、预览run清理和退出0；两种包内Rust库散列与对应构建一致 |
 | 依赖安全 | crypto-bigint0.7.5→0.7.10、ctutils0.4.3→0.4.8；当前Cargo audit数据库0条漏洞/0条警告 |
 
-原始聚合数据：[results.json](results.json)、[补丁前性能](performance-before-security-patch.json)、[补丁后性能](performance-after-security-patch.json)、[debug启动](smoke-debug.json)、[release启动](smoke-release.json)。[实际命令面板截图](command-palette.png)来自合成SSH/Kitty测试，不是静态设计图。完整历史含失败与修正记录见[集中验证](../../UNIFIED_VALIDATION.md)。
+原始聚合数据：[results.json](results.json)、[补丁前性能](performance-before-security-patch.json)、[补丁后性能](performance-after-security-patch.json)、[debug启动](smoke-debug.json)、[release启动](smoke-release.json)。[实际命令面板截图](https://github.com/hspmanbu/hspterm/blob/17d04096c446c82c79bfad098a4135086b0e2b98/validation/windows-unified-2026-11-04/command-palette.png)来自合成SSH/Kitty测试，不是静态设计图。完整历史含失败与修正记录见[集中验证](../../UNIFIED_VALIDATION.md)。
 
 ## 本轮修正
 

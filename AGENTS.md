@@ -1,5 +1,7 @@
 # HSPTerm 开发恢复约定
 
+- **最新环境状态（2026-11-04，用户授权清理后）**：已清理本机Cargo target、Flutter build/.dart_tool/ephemeral、旧验证SO/日志/截图及旧源码zip，释放约13.94GiB，项目约391MiB；源码、vendor、字体/图标、测试夹具、锁文件、正式桥接源码、文字/JSON结果和Git历史保留。103组件/7GTK/两模式构建结果不作废，但旧bundle已不存在；下次构建须先python3 tools/prepare_native_extensions.py，再ui_flutter/flutter pub get，勿直接运行旧测试runner或猜测重新生成Rust API。当前不重新编译。96张截图已移出HEAD，历史可查；validation新增图像忽略规则。
+
 - **当前任务（2026-11-04）**：Windows七项反馈修正源码已完成并通过当前环境检查，修正已发布165ae67，Windows新构建run41849076983正在运行，下一步先查询该run（不重复触发）。已有Vault识别、TerminalView必须的viewId、设置全页草稿/应用/取消/确定、较小开关/排版、SFTP单位/去Alt提示、Shell路径启用说明均已接。103组件/17文件、7个不同GTK用例、Analyze0、格式/actionlint过；九分类两窗口18图已归档validation/windows-feedback-2026-11-04，正式debug/release最后重建并启动/关闭0。本地源码原提交保留windows-feedback-local-f4cd1a7，勿覆盖；V1.4末尾新设置修订优先。没有Rust/FRB变更，别重做已通过核心。已记录新run链接，恢复时查看Windows构建/扩大的组件/启动结果；真实Win11 IME仍需用户复测，不能由Ubuntu冒充。
 
 - **最新恢复入口（2026-11-04，Ubuntu适用统一验证已收齐）**：Windows正式源码98fb042及后续测试风格修正已验证；完整Rust647、新锁Bridge75/SSH255、VTE56/alacritty178通过。Flutter按53中断+56续测去重507项/143文件均过；最终57号Analyze0项、305Dart格式/Rust格式、正式debug/release启动清理退出及Native散列全过。GTK29及新锁Kitty/Codex/SSH、19场景性能已过。没有在途runner或暂停进程，别重启旧53/56/57脚本；读PROGRESS顶部和validation/windows-unified-2026-11-04/README.md/results.json即可恢复。Windows MSVC/C++实际构建及系统行为、真实云账号仍待环境；Android暂缓。后文“静态阶段/未生成/待Shell决定”是历史，不能重复开发或恢复旧问题。
