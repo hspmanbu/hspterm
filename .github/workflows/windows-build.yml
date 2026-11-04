@@ -109,6 +109,10 @@ jobs:
         working-directory: ui_flutter
         run: flutter analyze --no-pub
 
+      - name: Test font settings and navigation
+        working-directory: ui_flutter
+        run: flutter test --no-pub test/typography_settings_test.dart test/host_typography_test.dart test/settings_leave_guard_test.dart --reporter expanded
+
       - name: Check native Windows startup and normal exit
         run: |
           $exe = Join-Path $env:GITHUB_WORKSPACE 'ui_flutter/build/windows/x64/runner/Release/hspterm.exe'
@@ -126,6 +130,26 @@ jobs:
             } while ($process.MainWindowHandle -eq 0 -and [DateTime]::UtcNow -lt $deadline)
             if ($process.MainWindowHandle -eq 0) { throw 'HSPTerm did not create its main window' }
             Start-Sleep -Seconds 2
+            $samples = @()
+            foreach ($index in 0..2) {
+              $process.Refresh()
+              if ($process.HasExited) { throw 'HSPTerm exited during startup memory sampling' }
+              $samples += [PSCustomObject]@{
+                sample = $index
+                working_set_bytes = $process.WorkingSet64
+                private_bytes = $process.PrivateMemorySize64
+                thread_count = $process.Threads.Count
+              }
+              if ($index -lt 2) { Start-Sleep -Seconds 2 }
+            }
+            $report = @{
+              scenario = 'locked startup, no Vault unlock or SSH connection'
+              platform = 'Windows Server 2022 Actions runner; not Windows 11 user hardware'
+              commit = $env:GITHUB_SHA
+              samples = $samples
+            } | ConvertTo-Json -Depth 5
+            $report | Set-Content -LiteralPath (Join-Path $scratch 'memory.json') -Encoding utf8
+            Write-Output $report
             if (-not $process.CloseMainWindow()) { throw 'Main window close request was rejected' }
             if (-not $process.WaitForExit(30000)) { throw 'Normal window exit did not finish' }
             if ($process.ExitCode -ne 0) { throw "HSPTerm exit code: $($process.ExitCode)" }
@@ -154,6 +178,15 @@ jobs:
           path: ${{ runner.temp }}/hspterm-startup/*.log
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Upload Windows startup memory samples
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-startup-memory
+          path: ${{ runner.temp }}/hspterm-startup/memory.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Save Rust dependencies and tools
         if: ${{ !cancelled() && steps.rust-cache.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}

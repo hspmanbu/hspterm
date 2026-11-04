@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../terminal/typography.dart';
 import '../terminal/font_licenses.dart';
 import 'typography_store.dart';
+import 'font_picker.dart';
 
 class TypographySettingsPanel extends StatefulWidget {
   const TypographySettingsPanel({
@@ -27,10 +28,9 @@ class TypographySettingsPanel extends StatefulWidget {
 class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
   TypographySnapshot? _source;
   TerminalTypography _draft = const TerminalTypography();
-  List<String> _systems = const [];
   bool _working = false;
   bool _inherit = false;
-  String? _error, _status, _systemError;
+  String? _error, _status;
   TerminalTypographyController get c => widget.controller;
   bool get _busy => _working || c.busy;
   bool get _host => widget.hostId != null;
@@ -49,7 +49,6 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
     registerTerminalFontLicenses();
     c.addListener(_changed);
     if (c.snapshot != null) _accept(c.snapshot!);
-    unawaited(_systemsLoad());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _source == null && !c.busy) unawaited(_load());
     });
@@ -77,19 +76,36 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
     super.dispose();
   }
 
-  Future<void> _systemsLoad() async {
-    try {
-      final names = await c.gateway.systemFamilies();
-      if (mounted) {
-        setState(() {
-          _systems = names;
-          _systemError = null;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _systemError = '系统字体列表暂不可用，仍可选择内置或已导入字体。');
+  Map<String, String> get _fontChoices => {
+    'builtin:JetBrainsMono': '内置 · JetBrains Mono',
+    'builtin:NotoSansCJK': '内置 · Noto Sans CJK',
+    'builtin:JetBrainsMonoNerd': '内置 · JetBrains Mono + Nerd 符号（许可子集）',
+    for (final font in _source?.fonts ?? <ImportedTerminalFont>[])
+      'imported:${font.id}': '导入 · ${font.label}',
+  };
+
+  Future<void> _pickFont() async {
+    if (!_editable) return;
+    final source = _source;
+    final selected = '${_draft.kind}:${_draft.family}';
+    final choice = await showTerminalFontPicker(
+      context,
+      selected: selected,
+      choices: _fontChoices..putIfAbsent(selected, () => _selectedLabel),
+      systemFamilies: c.gateway.systemFamilies,
+    );
+    if (!mounted ||
+        !_editable ||
+        !identical(source, _source) ||
+        choice == null) {
+      return;
     }
+    await _choose(choice);
   }
+
+  String get _selectedLabel =>
+      _fontChoices['${_draft.kind}:${_draft.family}'] ??
+      '${_draft.kind == 'system' ? '系统' : '已保存'} · ${_draft.family}';
 
   Future<void> _perform(
     Future<TypographySnapshot> Function() operation,
@@ -275,16 +291,7 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
   );
   @override
   Widget build(BuildContext context) {
-    final choices = <String, String>{
-      'builtin:JetBrainsMono': '内置 · JetBrains Mono',
-      'builtin:NotoSansCJK': '内置 · Noto Sans CJK',
-      'builtin:JetBrainsMonoNerd': '内置 · JetBrains Mono + Nerd 符号（许可子集）',
-      for (final name in _systems) 'system:$name': '系统 · $name',
-      for (final font in _source?.fonts ?? <ImportedTerminalFont>[])
-        'imported:${font.id}': '导入 · ${font.label}',
-    };
     final selected = '${_draft.kind}:${_draft.family}';
-    choices.putIfAbsent(selected, () => '已保存 · ${_draft.family}（本机可能缺失）');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -326,23 +333,23 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
         ),
         if (_busy) const LinearProgressIndicator(),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
+        OutlinedButton(
           key: ValueKey('typography-family-$selected'),
-          initialValue: selected,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: '字体'),
-          items: [
-            for (final entry in choices.entries)
-              DropdownMenuItem(
-                value: entry.key,
-                child: Text(entry.value, overflow: TextOverflow.ellipsis),
-              ),
-          ],
-          onChanged: !_editable
-              ? null
-              : (v) {
-                  if (v != null) unawaited(_choose(v));
-                },
+          onPressed: _editable ? _pickFont : null,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '字体 · $_selectedLabel',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const Icon(Icons.arrow_drop_down),
+              ],
+            ),
+          ),
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -389,7 +396,6 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
             style: _draft.textStyle(),
           ),
         ),
-        if (_systemError != null) Text(_systemError!),
         if (_error != null)
           Text(
             _error!,

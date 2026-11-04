@@ -1,0 +1,73 @@
+{
+  "platform": "linux",
+  "release": true,
+  "font_count": 4096,
+  "note": "Synthetic catalogue; real settings panel; no Vault/SSH. RSS includes engine/graphics/allocator and is not a Windows measurement.",
+  "samples": [
+    {
+      "stage": "baseline",
+      "rss_bytes": 263839744,
+      "peak_rss_bytes": 266027008,
+      "paragraph_elements": 2,
+      "catalog_reads": 0
+    },
+    {
+      "stage": "settings-0",
+      "rss_bytes": 453120000,
+      "peak_rss_bytes": 461103104,
+      "paragraph_elements": 8392,
+      "catalog_reads": 1
+    },
+    {
+      "stage": "closed-0",
+      "rss_bytes": 426946560,
+      "peak_rss_bytes": 461103104,
+      "paragraph_elements": 2,
+      "catalog_reads": 1
+    },
+    {
+      "stage": "settings-1",
+      "rss_bytes": 451248128,
+      "peak_rss_bytes": 466599936,
+      "paragraph_elements": 8390,
+      "catalog_reads": 2
+    },
+    {
+      "stage": "closed-1",
+      "rss_bytes": 457166848,
+      "peak_rss_bytes": 466599936,
+      "paragraph_elements": 2,
+      "catalog_reads": 2
+    },
+    {
+      "stage": "settings-2",
+      "rss_bytes": 452595712,
+      "peak_rss_bytes": 480714752,
+      "paragraph_elements": 8390,
+      "catalog_reads": 3
+    },
+    {
+      "stage": "closed-2",
+      "rss_bytes": 440373248,
+      "peak_rss_bytes": 480714752,
+      "paragraph_elements": 2,
+      "catalog_reads": 3
+    },
+    {
+      "stage": "settings-3",
+      "rss_bytes": 455360512,
+      "peak_rss_bytes": 480714752,
+      "paragraph_elements": 8390,
+      "catalog_reads": 4
+    },
+    {
+      "stage": "closed-3",
+      "rss_bytes": 461266944,
+      "peak_rss_bytes": 480714752,
+      "paragraph_elements": 2,
+      "catalog_reads": 4
+    }
+  ],
+  "baseline_source": "0b9b170 (before); lazy font picker changes (after)",
+  "fixture": "ui_flutter/benchmark/settings_memory.dart; identical 4096-name catalogue and four mount/unmount cycles"
+}

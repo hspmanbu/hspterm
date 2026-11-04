@@ -1,8 +1,17 @@
 # HSPTerm 开发进度
 
+## 最新用户反馈：设置页面内存优化（2026-11-04）
+
+- Windows首个成功包来自run41813471598，Artifact13314479216（39,819,157字节）；实际正规FRB生成、MSVC/Rust/C++编译、Analyze、窗口启动/正常关闭及打包全部通过。此前尚未成功的条目保留作历史，不能再将Windows MSVC标为未编译；这仍不等于Windows11完整系统交互验收。
+- 用户反馈启动200多MB/设置300多MB。定位到TypographySettingsPanel初始化立即枚举系统字体，普通DropdownButton的IndexedStack即使未展开也为最多4096个选项创建/布局隐藏文本。现在改为打开字体选择器才枚举，并以搜索+虚拟列表显示；关闭设置不保留目录缓存，仍只改草稿、显式保存。内置/系统/导入字体及主机覆盖保留。
+- 相同4096项合成目录、两个独立Ubuntu Release进程、四次进入/退出的实际对照：首个设置RSS432.13→289.71MiB，各自基线增量180.51→35.52MiB，目录读取4→0（从未展开选择器）；完整原始JSON与说明见validation/settings-memory-2026-11-04。不能把Linux压力场景当用户Windows实际降幅；启动基础内存尚未完成Windows分层归因，未宣称长期无泄漏。
+- 新增大型目录不预读/隐藏不创建、搜索末项/仅改草稿/明确保存、枚举失败内置兜底、取消后异步完成安全、窄窗1.5倍字号/键盘Enter选择；相关19项测试通过，Analyze0项，实际OpenSSH导入字体/保存/PTY尺寸调整/同会话身份GTK1项通过。首次基准缺少导入和ScrollCacheExtent未导出导致编译失败已修；初次Analyze的unused/deprecation也已修，最后运行日志/tmp/hspterm-font-lazy-final19.log、*-final-analyze.log、*-gtk-final.log。
+- 正式release已恢复lib/workbench_main.dart并构建成功，实际GTK启动/缩放/正常关闭退出0，Rust库已加载、无终端历史/编辑工作文件创建、preview run残留0。19项最终组件测试、GTK1项、Analyze0项、5个Dart文件格式0变更、actionlint通过，checks.json已存档。本次未改Rust/协议/加密，未重复无关647项。
+- Windows workflow新增相同19项组件测试及锁库无SSH的三个内存样本（工作集/专用字节/线程数），作为单独windows-startup-memory Artifact；不读取配置、账号或凭据，不能当用户Win11设置页复测。即将提交/推送修正并读取新Windows run结果，不交付benchmark或integration_test入口。
+
 ## 当前阶段与恢复（2026-11-04，Ubuntu适用统一验证收尾完成）
 
-Windows功能源码已接入正式工作台，本机可执行的统一验证已收齐；Android按用户要求暂缓。Windows Flutter/MSVC/C++实际构建、Windows系统行为及真实云服务账号测试仍待对应环境，不能将Ubuntu结果视为Windows客户端已验收。V1.4、标签组及逐主机可选Shell修订仍为基线；Shell许可已获确认，不重复询问、不默认启用。
+Windows功能源码已接入正式工作台，本机可执行的统一验证已收齐；Android按用户要求暂缓。Windows Server2022/MSVC/C++正式云构建及基础窗口启动退出已通过（run41813471598）；Windows11系统行为及真实云服务账号测试仍待对应环境，不能将Ubuntu结果视为Windows客户端已验收。V1.4、标签组及逐主机可选Shell修订仍为基线；Shell许可已获确认，不重复询问、不默认启用。
 
 - 源码修正检查点`98fb042`；后续仅测试辅助函数花括号风格修正和验证记录，最新提交以Git日志为准。正式键位即时应用、原SSH修饰键释放、取消错误稳定、真实通道/worker退休、停用同步取消和两项密码学安全补丁均已实测。
 - Rust完整workspace647项通过；安全补丁后Bridge75/SSH255项重跑通过；VTE56/alacritty178项通过。Linux/Windows GNU全目标严格Clippy0警告，Rust格式通过；Cargo audit当前数据库0漏洞/0警告。

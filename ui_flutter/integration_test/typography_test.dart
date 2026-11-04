@@ -100,10 +100,18 @@ void main() {
         final oldColumns = terminal.metadata!.columns;
         model.show(WorkPage.settings);
         await tester.pumpAndSettle();
-        final fontChoice = tester.widget<DropdownButtonFormField<String>>(
-          find.byKey(const ValueKey('typography-family-builtin:JetBrainsMono')),
+        final fontChoice = find.byKey(
+          const ValueKey('typography-family-builtin:JetBrainsMono'),
         );
-        fontChoice.onChanged!('imported:$family');
+        await tester.ensureVisible(fontChoice);
+        await tester.tap(fontChoice);
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const ValueKey('font-picker-search')),
+          'Synthetic imported mono',
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(ValueKey('font-option-imported:$family')));
         await tester.pumpAndSettle();
         tester
             .widget<DropdownButtonFormField<double>>(

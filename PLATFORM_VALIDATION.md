@@ -1,6 +1,6 @@
 # Phase 2 后续平台验收
 
-> 2026-11-04更新：Windows功能已接入正式源码；当前Ubuntu适用统一验证收齐，详[最终记录](validation/windows-unified-2026-11-04/README.md)。新锁Windows GNU全workspace/all-targets严格Clippy0警告通过，正式Ubuntu debug/release构建和正常退出通过；**Windows Flutter/MSVC/原生C++尚未实际编译或运行**。下方早期“未编码”属于历史节点，现状以本段、需求覆盖及最终记录为准。Android专项按用户要求暂缓。真实Google Drive OAuth客户端/账号和WebDAV服务商端到端仍需外部测试资源；隔离HTTP/GTK通过不算真实服务商验收。
+> 2026-11-04更新：Windows功能已接入正式源码；当前Ubuntu适用统一验证收齐，详[最终记录](validation/windows-unified-2026-11-04/README.md)。新锁Windows GNU全workspace/all-targets严格Clippy0警告通过，正式Ubuntu debug/release构建和正常退出通过；**Windows Server2022 Actions run41813471598已通过正规FRB生成、MSVC/Rust/原生C++ release构建、Analyze、窗口启动正常关闭，并产出HSPTerm-windows-x64包；Windows11全面系统交互仍未验证**。下方早期“未编码”属于历史节点，现状以本段、需求覆盖及最终记录为准。Android专项按用户要求暂缓。真实Google Drive OAuth客户端/账号和WebDAV服务商端到端仍需外部测试资源；隔离HTTP/GTK通过不算真实服务商验收。
 
 本机只有 Ubuntu；Linux runner 是开发验收工具，不新增正式产品平台。本文件不能作为 Windows/Android 实机通过证明。Ubuntu 本轮结果和性能数据见 `PHASE2_VALIDATION.md`、`validation/phase2-ubuntu/`，恢复入口见 `PROGRESS.md`。
 

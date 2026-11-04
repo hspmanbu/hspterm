@@ -17,6 +17,10 @@ class _Gateway implements TypographyGateway {
   Object? loadError, saveError;
   Completer<void>? saving;
   int saves = 0, loads = 0;
+  int catalogReads = 0;
+  List<String> families = ['Synthetic Mono'];
+  Object? catalogError;
+  Completer<List<String>>? catalog;
   @override
   Future<TypographySnapshot> load() async {
     loads++;
@@ -43,7 +47,12 @@ class _Gateway implements TypographyGateway {
   }
 
   @override
-  Future<List<String>> systemFamilies() async => ['Synthetic Mono'];
+  Future<List<String>> systemFamilies() async {
+    catalogReads++;
+    if (catalogError != null) throw catalogError!;
+    return catalog?.future ?? families;
+  }
+
   @override
   Future<Uint8List> fontBytes(TypographySnapshot source, String id) =>
       throw UnimplementedError('not requested by builtin tests');
@@ -92,6 +101,117 @@ void main() {
   });
 
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets(
+    'large font catalog is lazy, searchable, and selection stays a draft',
+    (tester) async {
+      final gateway = _Gateway()
+        ..families = List.generate(4096, (i) => 'Synthetic Mono $i');
+      final c = TerminalTypographyController(gateway: gateway);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: TypographySettingsPanel(controller: c),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(gateway.catalogReads, 0);
+      expect(
+        find.textContaining('Synthetic Mono', skipOffstage: false),
+        findsNothing,
+      );
+      final choice = find.byKey(
+        const ValueKey('typography-family-builtin:JetBrainsMono'),
+      );
+      await tester.ensureVisible(choice);
+      await tester.tap(choice);
+      await tester.pumpAndSettle();
+      expect(gateway.catalogReads, 1);
+      expect(
+        find
+            .textContaining('系统 · Synthetic Mono', skipOffstage: false)
+            .evaluate()
+            .length,
+        lessThan(20),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('font-picker-search')),
+        'Synthetic Mono 4095',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('font-option-system:Synthetic Mono 4095')),
+      );
+      await tester.pumpAndSettle();
+      expect(c.value.family, 'JetBrainsMono');
+      expect(gateway.saves, 0);
+      expect(
+        find.byKey(
+          const ValueKey('typography-family-system:Synthetic Mono 4095'),
+        ),
+        findsOneWidget,
+      );
+      final save = find.byKey(const ValueKey('typography-save'));
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(c.value.kind, 'system');
+      expect(c.value.family, 'Synthetic Mono 4095');
+      expect(gateway.saves, 1);
+      await tester.pumpWidget(const SizedBox());
+      await c.shutdown();
+      c.dispose();
+    },
+  );
+
+  testWidgets(
+    'catalog errors keep builtin choices and cancelling preserves the draft',
+    (tester) async {
+      final gateway = _Gateway()
+        ..catalogError = StateError('synthetic font failure');
+      final c = TerminalTypographyController(gateway: gateway);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: TypographySettingsPanel(controller: c),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final choice = find.byKey(
+        const ValueKey('typography-family-builtin:JetBrainsMono'),
+      );
+      await tester.ensureVisible(choice);
+      await tester.tap(choice);
+      await tester.pumpAndSettle();
+      expect(find.text('系统字体列表暂不可用，仍可选择内置或已导入字体。'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('font-option-builtin:NotoSansCJK')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(c.value.family, 'JetBrainsMono');
+      expect(gateway.saves, 0);
+      gateway.catalogError = null;
+      gateway.catalog = Completer<List<String>>();
+      await tester.tap(choice);
+      await tester.pump();
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      gateway.catalog!.complete(['Late Synthetic Mono']);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(gateway.catalogReads, 2);
+      await tester.pumpWidget(const SizedBox());
+      await c.shutdown();
+      c.dispose();
+    },
+  );
   test('layout validation, fallback and cache invalidation do not alter terminal data', () {
     const original = TerminalTypography();
     expect(original.ligatures, false);
@@ -239,6 +359,24 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    final picker = find.byKey(
+      const ValueKey('typography-family-builtin:JetBrainsMono'),
+    );
+    await tester.ensureVisible(picker);
+    await tester.tap(picker);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.enterText(
+      find.byKey(const ValueKey('font-picker-search')),
+      'Synthetic Mono',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('typography-family-system:Synthetic Mono')),
+      findsOneWidget,
+    );
+    expect(c.value.kind, 'builtin');
     await tester.ensureVisible(find.byKey(const ValueKey('typography-import')));
     await tester.pumpWidget(const SizedBox());
     await c.shutdown();
