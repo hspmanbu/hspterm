@@ -1,3 +1,4 @@
+import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
 import 'dart:async';
@@ -161,6 +162,25 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
     await _perform(c.load, '已载入原配置。');
   }
 
+  Future<void> _saveDraft() async {
+    if (_busy || !_dirty || _source == null) return;
+    final draft = _draft;
+    var source = _source!;
+    await _perform(() async {
+      if (SettingsLeaveScope.of(context) != null) {
+        source = await c.refreshForSettingsApply(source);
+        if (mounted) _source = source;
+      }
+      return _host
+          ? c.saveHost(
+              widget.hostId!,
+              _inherit ? null : draft,
+              expected: source,
+            )
+          : c.save(draft, expected: source);
+    }, '已保存并应用。');
+  }
+
   Future<void> _choose(String choice) async {
     final source = _source;
     if (_busy || source == null) return;
@@ -298,31 +318,26 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
         const Text('终端字体与排版 · 本机加密保存'),
         if (_host) ...[
           Text('主机：${widget.hostLabel ?? widget.hostId}'),
-          SwitchListTile(
-            key: const ValueKey('typography-inherit'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('继承全局字体与排版'),
-            subtitle: const Text('仅作用于该主机；保存后应用，不重新建立 SSH 连接。'),
-            value: _inherit,
-            onChanged: _busy || _source == null
-                ? null
-                : (v) => setState(() {
-                    _inherit = v;
-                    if (v) _draft = _source!.settings;
-                  }),
+          CompactSettingsToggle(
+            child: SwitchListTile(
+              key: const ValueKey('typography-inherit'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('继承全局字体与排版'),
+              subtitle: const Text('仅作用于该主机；保存后应用，不重新建立 SSH 连接。'),
+              value: _inherit,
+              onChanged: _busy || _source == null
+                  ? null
+                  : (v) => setState(() {
+                      _inherit = v;
+                      if (v) _draft = _source!.settings;
+                    }),
+            ),
           ),
         ],
         const SizedBox(height: 8),
-        const Text(
-          '使用系统字体或导入的 TTF / OTF。字符仍按终端网格定位；非等宽字体可能被裁切。字体文件与本机字体映射不参与云同步。',
-        ),
-        if (!_host)
-          const Text(
-            '内置字体选择、全局字号、行高、内边距与连字作为通用终端偏好参加已配置的加密同步。系统/导入字体映射和主机本机覆盖独立保存。',
-          ),
-        const Text(
-          'Nerd 候选含 Devicon、Octicons、Seti、Powerline 和 Powerline Extra 的 1111 个已许可字形；其他 Nerd 图标仍可通过明确导入字体使用。',
-        ),
+        const Text('支持内置、系统和 TTF / OTF 字体。非等宽字体可能裁切。'),
+        if (!_host) const Text('通用排版参与加密同步；字体文件、本机映射和主机覆盖不同步。'),
+        const Text('Nerd 预设含 1111 个已许可符号；更多符号可导入字体。'),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton(
@@ -379,14 +394,16 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
             ),
           ],
         ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('编程连字'),
-          subtitle: const Text('默认关闭；仅在整段字形宽度与网格吻合时使用连字。'),
-          value: _draft.ligatures,
-          onChanged: !_editable
-              ? null
-              : (v) => setState(() => _draft = _draft.copyWith(ligatures: v)),
+        CompactSettingsToggle(
+          child: SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('编程连字'),
+            subtitle: const Text('默认关闭；仅在整段字形宽度与网格吻合时使用连字。'),
+            value: _draft.ligatures,
+            onChanged: !_editable
+                ? null
+                : (v) => setState(() => _draft = _draft.copyWith(ligatures: v)),
+          ),
         ),
         Container(
           padding: const EdgeInsets.all(12),
@@ -409,26 +426,13 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            FilledButton(
-              key: const ValueKey('typography-save'),
-              onPressed: _busy || !_dirty
-                  ? null
-                  : () {
-                      final draft = _draft, source = _source!;
-                      unawaited(
-                        _perform(
-                          () => _host
-                              ? c.saveHost(
-                                  widget.hostId!,
-                                  _inherit ? null : draft,
-                                  expected: source,
-                                )
-                              : c.save(draft, expected: source),
-                          '已加密保存并应用到终端；SSH 会话保持。',
-                        ),
-                      );
-                    },
-              child: const Text('保存字体与排版'),
+            Visibility(
+              visible: SettingsLeaveScope.of(context) == null,
+              child: FilledButton(
+                key: const ValueKey('typography-save'),
+                onPressed: _busy || !_dirty ? null : _saveDraft,
+                child: const Text('保存字体与排版'),
+              ),
             ),
             TextButton(
               key: const ValueKey('typography-reload'),
@@ -467,6 +471,8 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
         const SizedBox(height: 16),
       ],
     ).guardSettings(
+      confirmed: () => _source != null && _error == null,
+      apply: _saveDraft,
       label: '终端字体与排版',
       dirty: () => _dirty,
       busy: () => _working,

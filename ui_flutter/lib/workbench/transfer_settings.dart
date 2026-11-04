@@ -1,3 +1,4 @@
+import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
 import 'package:flutter/material.dart';
@@ -175,19 +176,21 @@ class _TransferSettingsPanelState extends State<TransferSettingsPanel> {
             '同名策略仅对保存后新入队任务生效，旧任务保持入队时策略；逐项明确决定优先。'
             '覆盖会替换目标文件内容，无法撤销。目录或文件类型不兼容仍报错。',
           ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('手动重连后恢复本次中断的传输'),
-            subtitle: const Text(
-              '默认关闭。只恢复原标签、原账户和指纹的待传项目；不自动建立SSH，主动暂停/取消、失败项、冲突和跨应用启动任务仍需手动处理。跨服务器任务需要两端均已手动连接。',
+          CompactSettingsToggle(
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('手动重连后恢复本次中断的传输'),
+              subtitle: const Text(
+                '默认关闭。只恢复原标签、原账户和指纹的待传项目；不自动建立SSH，主动暂停/取消、失败项、冲突和跨应用启动任务仍需手动处理。跨服务器任务需要两端均已手动连接。',
+              ),
+              value: _resumeOnReconnect,
+              onChanged: _saving
+                  ? null
+                  : (v) => setState(() {
+                      _resumeOnReconnect = v;
+                      _saved = false;
+                    }),
             ),
-            value: _resumeOnReconnect,
-            onChanged: _saving
-                ? null
-                : (v) => setState(() {
-                    _resumeOnReconnect = v;
-                    _saved = false;
-                  }),
           ),
           const SizedBox(height: 10),
           const Text(
@@ -203,15 +206,24 @@ class _TransferSettingsPanelState extends State<TransferSettingsPanel> {
           if (_saved) const Text('已加密保存并生效'),
           Align(
             alignment: Alignment.centerLeft,
-            child: FilledButton(
-              key: const ValueKey('save-transfer-settings'),
-              onPressed: _saving ? null : _save,
-              child: Text(_saving ? '正在保存…' : '保存传输配置'),
+            child: Visibility(
+              visible: SettingsLeaveScope.of(context) == null,
+              child: FilledButton(
+                key: const ValueKey('save-transfer-settings'),
+                onPressed: _saving ? null : _save,
+                child: Text(_saving ? '正在保存…' : '保存传输配置'),
+              ),
             ),
           ),
           const SizedBox(height: 16),
         ],
       ),
-    ).guardSettings(label: '传输设置', dirty: () => _dirty, busy: () => _saving);
+    ).guardSettings(
+      confirmed: () => _loaded && _error == null,
+      apply: _save,
+      label: '传输设置',
+      dirty: () => _dirty,
+      busy: () => _saving,
+    );
   }
 }

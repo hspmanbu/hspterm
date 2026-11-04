@@ -660,10 +660,13 @@ class _ConfigurationSyncSettingsPanelState
               spacing: 8,
               runSpacing: 8,
               children: [
-                FilledButton(
-                  key: const ValueKey('sync-settings-save'),
-                  onPressed: _busy || _source == null ? null : _save,
-                  child: Text(_saving ? '正在保存…' : '保存同步设置'),
+                Visibility(
+                  visible: SettingsLeaveScope.of(context) == null,
+                  child: FilledButton(
+                    key: const ValueKey('sync-settings-save'),
+                    onPressed: _busy || _source == null ? null : _save,
+                    child: Text(_saving ? '正在保存…' : '保存同步设置'),
+                  ),
                 ),
                 OutlinedButton(
                   onPressed: _busy ? null : _load,
@@ -675,6 +678,8 @@ class _ConfigurationSyncSettingsPanelState
           ],
         ),
       ).guardSettings(
+        confirmed: () => _source != null && _error == null,
+        apply: _save,
         label: '配置同步目标',
         dirty: () => _edited || _webDavOverride,
         busy: () => _saving,

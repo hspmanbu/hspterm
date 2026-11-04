@@ -98,7 +98,7 @@ void main() {
         await tester.ensureVisible(accept);
         await tester.tap(accept);
         await tester.pumpAndSettle();
-        final save = find.byKey(const ValueKey('display-save'));
+        final save = find.byKey(const ValueKey('settings-apply'));
         await tester.ensureVisible(save);
         await tester.tap(save);
         await tester.pumpAndSettle();

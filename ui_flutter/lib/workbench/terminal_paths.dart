@@ -62,9 +62,48 @@ Future<void> sendSessionPaths(
     'Unavailable' =>
       enterDirectory
           ? '无法确认空白的普通Shell输入，已复制安全cd命令；未执行。'
-          : '未启用可选集成或输入状态不可靠，已复制Shell引用路径；未发送按键。',
+          : source.host.shellIntegration
+          ? '当前Shell输入状态不可确认，已复制安全路径。'
+          : '已复制安全路径；直接填入需先启用此主机的Shell集成。',
     _ => '路径操作结果未确认，请检查原关联终端；未自动重试或改为粘贴。',
   };
-  ScaffoldMessenger.maybeOf(context)
-      ?.showSnackBar(SnackBar(content: Text(message)));
+  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+    SnackBar(
+      content: Text(message),
+      action: result == 'Unavailable'
+          ? SnackBarAction(
+              label: '发送说明',
+              onPressed: () {
+                if (!context.mounted) return;
+                showDialog<void>(
+                  context: context,
+                  builder: (dialog) => AlertDialog(
+                    title: const Text('将路径填入关联终端'),
+                    content: const Text(
+                      '在“主机管理 → 终端”启用“可选 Bash Shell 集成”，保存后手动重新连接此标签。\n\n集成支持 Bash 5.1+，用于确认输入位置。Vim、Codex、密码提示、tmux 内层或集成未就绪时只复制路径，避免误输入。仅填入路径不会执行命令。',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialog),
+                        child: const Text('关闭'),
+                      ),
+                      if (model.hosts.any((host) => host.id == source.host.id))
+                        FilledButton(
+                          onPressed: () {
+                            Navigator.pop(dialog);
+                            model.editHostSettings(
+                              source.host.id,
+                              category: '终端',
+                            );
+                          },
+                          child: const Text('配置此主机'),
+                        ),
+                    ],
+                  ),
+                );
+              },
+            )
+          : null,
+    ),
+  );
 }

@@ -104,8 +104,8 @@ void main() {
         await until(
           () =>
               tester
-                  .widget<FilledButton>(
-                    find.byKey(const ValueKey('terminal-preferences-save')),
+                  .widget<ButtonStyleButton>(
+                    find.byKey(const ValueKey('settings-apply')),
                   )
                   .onPressed !=
               null,
@@ -115,9 +115,8 @@ void main() {
         final color = find.byKey(const ValueKey('terminal-color-2'));
         await tester.ensureVisible(color);
         await tester.enterText(color, '123456');
-        await tap(find.byKey(const ValueKey('terminal-preferences-save')));
-        await snapshot('confirmation');
-        await tap(find.byKey(const ValueKey('terminal-preferences-confirm')));
+        await tap(find.byKey(const ValueKey('settings-apply')));
+        await snapshot('applied');
         await until(() => find.textContaining('已加密保存').evaluate().isNotEmpty);
         model.show(WorkPage.workspace);
         await tester.pump();

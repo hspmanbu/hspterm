@@ -1,3 +1,4 @@
+import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
 import 'package:flutter/material.dart';
@@ -258,16 +259,18 @@ class _DisplaySettingsPanelState extends State<DisplaySettingsPanel> {
     bool value,
     void Function(bool)? change, {
     String? detail,
-  }) => SwitchListTile(
-    key: ValueKey(key),
-    dense: true,
-    contentPadding: EdgeInsets.zero,
-    title: Text(label, style: const TextStyle(fontSize: 13)),
-    subtitle: detail == null
-        ? null
-        : Text(detail, style: const TextStyle(fontSize: 11)),
-    value: value,
-    onChanged: change,
+  }) => CompactSettingsToggle(
+    child: SwitchListTile(
+      key: ValueKey(key),
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      title: Text(label, style: const TextStyle(fontSize: 13)),
+      subtitle: detail == null
+          ? null
+          : Text(detail, style: const TextStyle(fontSize: 11)),
+      value: value,
+      onChanged: change,
+    ),
   );
   @override
   Widget build(BuildContext context) {
@@ -498,10 +501,13 @@ class _DisplaySettingsPanelState extends State<DisplaySettingsPanel> {
         Wrap(
           spacing: 10,
           children: [
-            FilledButton(
-              key: const ValueKey('display-save'),
-              onPressed: busy || document == null ? null : _save,
-              child: const Text('保存显示设置'),
+            Visibility(
+              visible: SettingsLeaveScope.of(context) == null,
+              child: FilledButton(
+                key: const ValueKey('display-save'),
+                onPressed: busy || document == null ? null : _save,
+                child: const Text('保存显示设置'),
+              ),
             ),
             TextButton(
               onPressed: busy ? null : () => _select(host),
@@ -516,6 +522,8 @@ class _DisplaySettingsPanelState extends State<DisplaySettingsPanel> {
         ),
       ],
     ).guardSettings(
+      confirmed: () => document != null && error == null,
+      apply: _save,
       label: '彩色高亮',
       dirty: () => dirty,
       busy: () => busy && config != null,
@@ -634,17 +642,21 @@ class _DisplayRuleEditorState extends State<DisplayRuleEditor> {
               maxLength: 512,
               decoration: const InputDecoration(labelText: '关键词或正则'),
             ),
-            SwitchListTile(
-              dense: true,
-              title: const Text('正则表达式'),
-              value: regex,
-              onChanged: busy ? null : (v) => setState(() => regex = v),
+            CompactSettingsToggle(
+              child: SwitchListTile(
+                dense: true,
+                title: const Text('正则表达式'),
+                value: regex,
+                onChanged: busy ? null : (v) => setState(() => regex = v),
+              ),
             ),
-            SwitchListTile(
-              dense: true,
-              title: const Text('区分大小写'),
-              value: sensitive,
-              onChanged: busy ? null : (v) => setState(() => sensitive = v),
+            CompactSettingsToggle(
+              child: SwitchListTile(
+                dense: true,
+                title: const Text('区分大小写'),
+                value: sensitive,
+                onChanged: busy ? null : (v) => setState(() => sensitive = v),
+              ),
             ),
             TextField(
               key: const ValueKey('display-rule-foreground'),
@@ -658,17 +670,21 @@ class _DisplayRuleEditorState extends State<DisplayRuleEditor> {
               controller: bg,
               decoration: const InputDecoration(labelText: '背景颜色 RGB（空白保留）'),
             ),
-            SwitchListTile(
-              dense: true,
-              title: const Text('下划线'),
-              value: underline,
-              onChanged: busy ? null : (v) => setState(() => underline = v),
+            CompactSettingsToggle(
+              child: SwitchListTile(
+                dense: true,
+                title: const Text('下划线'),
+                value: underline,
+                onChanged: busy ? null : (v) => setState(() => underline = v),
+              ),
             ),
-            SwitchListTile(
-              dense: true,
-              title: const Text('明确强制覆盖远端颜色'),
-              value: force,
-              onChanged: busy ? null : (v) => setState(() => force = v),
+            CompactSettingsToggle(
+              child: SwitchListTile(
+                dense: true,
+                title: const Text('明确强制覆盖远端颜色'),
+                value: force,
+                onChanged: busy ? null : (v) => setState(() => force = v),
+              ),
             ),
             if (error != null)
               Text(

@@ -70,6 +70,19 @@ void main() {
             : isEmpty,
       );
       expect(other.controller.generation, 7);
+      if (outcome == 'Unavailable') {
+        await tester.tap(find.text('发送说明'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Bash 5.1+'), findsOneWidget);
+        expect(original.host.shellIntegration, false);
+        expect(
+          calls.length,
+          1,
+          reason: 'help never enables integration or repeats input',
+        );
+        await tester.tap(find.text('关闭'));
+        await tester.pumpAndSettle();
+      }
       await tester.pumpWidget(const SizedBox());
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,

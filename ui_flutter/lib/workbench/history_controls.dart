@@ -1,3 +1,5 @@
+import '../prototype/settings_style.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -185,15 +187,17 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
           style: TextStyle(fontSize: 12),
         ),
         if (_committing) const LinearProgressIndicator(),
-        SwitchListTile(
-          key: const ValueKey('history-enabled'),
-          contentPadding: EdgeInsets.zero,
-          title: const Text('允许记录合格单行命令'),
-          subtitle: const Text('关闭后停止记录与建议，已有加密历史保留。'),
-          value: _enabled,
-          onChanged: _busy || source == null
-              ? null
-              : (value) => setState(() => _enabled = value),
+        CompactSettingsToggle(
+          child: SwitchListTile(
+            key: const ValueKey('history-enabled'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('允许记录合格单行命令'),
+            subtitle: const Text('关闭后停止记录与建议，已有加密历史保留。'),
+            value: _enabled,
+            onChanged: _busy || source == null
+                ? null
+                : (value) => setState(() => _enabled = value),
+          ),
         ),
         if (_error != null)
           Text(
@@ -207,12 +211,15 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            FilledButton(
-              key: const ValueKey('history-save'),
-              onPressed: _busy || source == null || source.enabled == _enabled
-                  ? null
-                  : _save,
-              child: const Text('保存历史设置'),
+            Visibility(
+              visible: SettingsLeaveScope.of(context) == null,
+              child: FilledButton(
+                key: const ValueKey('history-save'),
+                onPressed: _busy || source == null || source.enabled == _enabled
+                    ? null
+                    : _save,
+                child: const Text('保存历史设置'),
+              ),
             ),
             TextButton(
               key: const ValueKey('history-reload'),
@@ -266,6 +273,8 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
         ],
       ],
     ).guardSettings(
+      confirmed: () => _view != null && _error == null,
+      apply: _save,
       label: '历史命令记录设置',
       dirty: () => _view != null && _enabled != _view!.enabled,
       busy: () => _committing && _view != null,

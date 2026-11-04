@@ -432,7 +432,11 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
       }
+      final previousTheme = m.light;
       await tester.tap(find.byKey(const ValueKey('theme-light')));
+      await tester.pumpAndSettle();
+      expect(m.light, previousTheme);
+      await tester.tap(find.byKey(const ValueKey('settings-apply')));
       await tester.pumpAndSettle();
       expect(m.light, true);
       await tester.pumpWidget(const SizedBox());

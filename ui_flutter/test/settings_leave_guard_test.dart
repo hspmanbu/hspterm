@@ -14,23 +14,162 @@ class _DraftEditor extends StatefulWidget {
 class _DraftEditorState extends State<_DraftEditor> {
   bool dirty = false;
   @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      TextField(
-        key: const ValueKey('fixture-draft'),
-        onChanged: (_) => setState(() => dirty = true),
-      ),
-      TextButton(
-        onPressed: () => setState(() => dirty = false),
-        child: const Text('save-fixture'),
-      ),
-    ],
-  ).guardSettings(label: 'Fixture', dirty: () => dirty, busy: () => false);
+  Widget build(BuildContext context) =>
+      Column(
+        children: [
+          TextField(
+            key: const ValueKey('fixture-draft'),
+            onChanged: (_) => setState(() => dirty = true),
+          ),
+          TextButton(
+            onPressed: () => setState(() => dirty = false),
+            child: const Text('save-fixture'),
+          ),
+        ],
+      ).guardSettings(
+        label: 'Fixture',
+        dirty: () => dirty,
+        busy: () => false,
+        apply: () async => setState(() => dirty = false),
+      );
 }
 
 void main() {
   testWidgets(
-    'settings category cancel preserves draft and explicit discard permits navigation',
+    'an unavailable source after a failed acknowledgement cannot silently pass a second Apply',
+    (tester) async {
+      final registry = SettingsLeaveRegistry();
+      var dirty = true, confirmed = false, attempts = 0;
+      final owner = Object();
+      registry.register(
+        owner,
+        'receipt',
+        () => dirty,
+        () => false,
+        apply: () async {
+          attempts++;
+          dirty = false;
+        },
+        confirmed: () => confirmed,
+      );
+      late BuildContext context;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (value) {
+                context = value;
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      );
+      expect(await registry.applyAll(context), false);
+      expect(await registry.applyAll(context), false);
+      expect(attempts, 2);
+      confirmed = true;
+      expect(await registry.applyAll(context), true);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'Apply leaves failed drafts open and never repeats an acknowledged save',
+    (tester) async {
+      final registry = SettingsLeaveRegistry();
+      var first = true, second = true, writes = 0;
+      final one = Object(), two = Object();
+      registry.register(
+        one,
+        'first',
+        () => first,
+        () => false,
+        category: '外观',
+        apply: () async {
+          writes++;
+          first = false;
+        },
+      );
+      registry.register(
+        two,
+        'second',
+        () => second,
+        () => false,
+        category: 'SSH 连接',
+        apply: () async {},
+      );
+      late BuildContext context;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (value) {
+                context = value;
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      );
+      expect(await registry.applyAll(context), false);
+      expect(registry.failedCategory, 'SSH 连接');
+      expect(writes, 1);
+      registry.register(
+        two,
+        'second',
+        () => second,
+        () => false,
+        category: 'SSH 连接',
+        apply: () async {
+          second = false;
+        },
+      );
+      expect(await registry.applyAll(context), true);
+      expect(writes, 1);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'Cancel discards local drafts and OK applies before leaving settings',
+    (tester) async {
+      final model = WorkbenchModel()..show(WorkPage.settings);
+      await tester.pumpWidget(
+        PrototypeApp(
+          model: model,
+          displaySettingsBuilder: (_) => const _DraftEditor(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-彩色高亮')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('fixture-draft')),
+        'cancel fixture',
+      );
+      await tester.tap(find.byKey(const ValueKey('settings-cancel')));
+      await tester.pumpAndSettle();
+      expect(model.page, WorkPage.workspace);
+      expect(find.byType(AlertDialog), findsNothing);
+      model.show(WorkPage.settings);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-彩色高亮')));
+      await tester.pumpAndSettle();
+      expect(find.text('cancel fixture'), findsNothing);
+      await tester.enterText(
+        find.byKey(const ValueKey('fixture-draft')),
+        'ok fixture',
+      );
+      await tester.tap(find.byKey(const ValueKey('settings-ok')));
+      await tester.pumpAndSettle();
+      expect(model.page, WorkPage.workspace);
+      expect(find.byType(AlertDialog), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      model.dispose();
+    },
+  );
+  testWidgets(
+    'category changes retain drafts and common Apply saves hidden editors',
     (tester) async {
       final model = WorkbenchModel();
       await tester.pumpWidget(
@@ -51,25 +190,21 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('settings-快捷键')));
       await tester.pumpAndSettle();
-      expect(find.text('放弃未保存的设置？'), findsOneWidget);
-      await tester.tap(find.text('返回编辑'));
-      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byKey(const ValueKey('fixture-draft')), findsNothing);
       expect(
-        tester
-            .widget<TextField>(find.byKey(const ValueKey('fixture-draft')))
-            .controller,
-        isNull,
+        find.byKey(const ValueKey('fixture-draft'), skipOffstage: false),
+        findsOneWidget,
       );
+      await tester.tap(find.byKey(const ValueKey('settings-彩色高亮')));
+      await tester.pumpAndSettle();
       expect(find.text('unsaved fixture'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('settings-快捷键')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('放弃并离开'));
+      await tester.tap(find.byKey(const ValueKey('settings-apply')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('fixture-draft')), findsNothing);
-      expect(
-        find.byKey(const ValueKey('settings-content-快捷键')),
-        findsOneWidget,
-      );
+      final key = tester.state<SettingsPageState>(find.byType(SettingsPage));
+      expect(await key.canLeave(), true);
       await tester.pumpWidget(const SizedBox());
       model.dispose();
     },
@@ -226,34 +361,36 @@ void main() {
     },
   );
 
-  testWidgets('external category requests also respect dirty settings', (
-    tester,
-  ) async {
-    final model = WorkbenchModel();
-    final key = GlobalKey<SettingsPageState>();
-    Widget page(String category) => MaterialApp(
-      home: Scaffold(
-        body: SettingsPage(
-          key: key,
-          model: model,
-          initialCategory: category,
-          displaySettingsBuilder: (_) => const _DraftEditor(),
+  testWidgets(
+    'external category requests preserve pending drafts without prompting',
+    (tester) async {
+      final model = WorkbenchModel();
+      final key = GlobalKey<SettingsPageState>();
+      Widget page(String category) => MaterialApp(
+        home: Scaffold(
+          body: SettingsPage(
+            key: key,
+            model: model,
+            initialCategory: category,
+            displaySettingsBuilder: (_) => const _DraftEditor(),
+          ),
         ),
-      ),
-    );
-    await tester.pumpWidget(page('彩色高亮'));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('fixture-draft')),
-      'unsaved fixture',
-    );
-    await tester.pumpWidget(page('快捷键'));
-    await tester.pumpAndSettle();
-    expect(find.text('放弃未保存的设置？'), findsOneWidget);
-    await tester.tap(find.text('返回编辑'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('fixture-draft')), findsOneWidget);
-    await tester.pumpWidget(const SizedBox());
-    model.dispose();
-  });
+      );
+      await tester.pumpWidget(page('彩色高亮'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('fixture-draft')),
+        'external draft',
+      );
+      await tester.pumpWidget(page('外观'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byKey(const ValueKey('settings-content-外观')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('settings-彩色高亮')));
+      await tester.pumpAndSettle();
+      expect(find.text('external draft'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      model.dispose();
+    },
+  );
 }

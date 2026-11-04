@@ -182,6 +182,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('theme-light')));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-apply')));
+      await tester.pumpAndSettle();
       expect(model.light, true);
       await shot('11-settings-light');
       await tester.tap(find.byKey(const ValueKey('session-list')));

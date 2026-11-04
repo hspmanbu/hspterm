@@ -68,6 +68,34 @@ class _Gateway implements TypographyGateway {
 }
 
 void main() {
+  test('common Apply can rebase a non-font revision but refuses changed font settings', () async {
+    final gateway = _Gateway();
+    final c = TerminalTypographyController(gateway: gateway);
+    final original = await c.load();
+    c.zoom(1);
+    gateway.value = TypographySnapshot(
+      scope: original.scope,
+      revision: 'portable-settings-changed',
+      settings: original.settings,
+    );
+    final fresh = await c.refreshForSettingsApply(original);
+    expect(fresh.revision, 'portable-settings-changed');
+    expect(
+      c.value.size,
+      16,
+      reason: 'a CAS token refresh does not reset runtime zoom',
+    );
+    gateway.value = TypographySnapshot(
+      scope: original.scope,
+      revision: 'other-font-edit',
+      settings: original.settings.copyWith(size: 22),
+    );
+    await expectLater(c.refreshForSettingsApply(fresh), throwsStateError);
+    expect(c.snapshot!.revision, fresh.revision);
+    expect(gateway.saves, 0);
+    await c.shutdown();
+    c.dispose();
+  });
   test('configuration refresh waits for the real previous font save and then reads current settings', () async {
     final gateway = _Gateway()..saving = Completer<void>();
     final c = TerminalTypographyController(gateway: gateway);

@@ -131,9 +131,7 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
           children: [
             const Text('SSH 全局默认参数'),
             const SizedBox(height: 8),
-            const Text(
-              '仅对选择“使用全局默认”的主机生效。旧主机保留各自参数；心跳间隔 0 完全关闭心跳。响应超时只等待 SSH 心跳 ACK，普通终端输出不能替代响应。',
-            ),
+            const Text('仅对使用全局参数的主机生效。心跳间隔0关闭；心跳响应以SSH ACK为准。'),
             const SizedBox(height: 12),
             if (_busy) const LinearProgressIndicator(),
             Wrap(
@@ -156,9 +154,12 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
             Wrap(
               spacing: 8,
               children: [
-                FilledButton(
-                  onPressed: !_loaded || _busy ? null : _save,
-                  child: const Text('保存 SSH 默认参数'),
+                Visibility(
+                  visible: SettingsLeaveScope.of(context) == null,
+                  child: FilledButton(
+                    onPressed: !_loaded || _busy ? null : _save,
+                    child: const Text('保存 SSH 默认参数'),
+                  ),
                 ),
                 TextButton(
                   onPressed: _busy ? null : _load,
@@ -170,6 +171,8 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
           ],
         ),
       ).guardSettings(
+        confirmed: () => _loaded && _error == null,
+        apply: _save,
         label: 'SSH连接默认值',
         dirty: () => _dirty,
         busy: () => _busy && _loaded,

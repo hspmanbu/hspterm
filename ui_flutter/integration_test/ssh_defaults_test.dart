@@ -75,7 +75,7 @@ void main() {
           await tester.ensureVisible(field);
           await tester.enterText(field, value);
         }
-        final save = find.text('保存 SSH 默认参数');
+        final save = find.byKey(const ValueKey('settings-apply'));
         await tester.ensureVisible(save);
         await tester.tap(save);
         await tester.pumpAndSettle();

@@ -120,10 +120,7 @@ class _ExplorerExportDragState extends State<ExplorerExportDrag> {
         isLocationDraggable: (_) => explorerExportGesture,
         onDragConfiguration: (config, session) =>
             batch?.configuration(config, session),
-        child: Tooltip(
-          message: '按住Alt拖到Explorer下载文件或目录；普通拖动保留应用内操作',
-          child: child,
-        ),
+        child: child,
       ),
     );
   }

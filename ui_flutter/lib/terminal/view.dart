@@ -221,7 +221,10 @@ class TerminalViewState extends State<TerminalView>
       _preedit.value = '';
       _connection = TextInput.attach(
         this,
-        const TextInputConfiguration(
+        TextInputConfiguration(
+          // Windows rejects setClient with a null viewId before creating its
+          // text model. Control keys still work, hiding the missing IME client.
+          viewId: View.of(context).viewId,
           inputType: TextInputType.text,
           inputAction: TextInputAction.done,
           autocorrect: false,

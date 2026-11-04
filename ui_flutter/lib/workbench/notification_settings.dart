@@ -1,3 +1,5 @@
+import '../prototype/settings_style.dart';
+
 import 'package:flutter/material.dart';
 
 import '../terminal/notifications.dart';
@@ -92,25 +94,24 @@ class TerminalNotificationEditorState
 
   @override
   Widget build(BuildContext context) {
-    Widget toggle(String key, String name, String hint) => SwitchListTile(
-      key: ValueKey('terminal-notify-$key'),
-      dense: true,
-      contentPadding: EdgeInsets.zero,
-      title: Text(name),
-      subtitle: hint.isEmpty ? null : Text(hint),
-      value: _values[key] as bool,
-      onChanged: (v) => setState(() => _values[key] = v),
-    );
+    Widget toggle(String key, String name, String hint) =>
+        CompactSettingsToggle(
+          child: SwitchListTile(
+            key: ValueKey('terminal-notify-$key'),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: Text(name),
+            subtitle: hint.isEmpty ? null : Text(hint),
+            value: _values[key] as bool,
+            onChanged: (v) => setState(() => _values[key] = v),
+          ),
+        );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Divider(),
         const Text('终端通知 · 不包含 SFTP 任务'),
-        toggle(
-          'enabled',
-          '启用终端通知',
-          'BEL、OSC 9/777、明确配置的输出规则与静默提示；同一通知去重5秒，单终端最多每250ms一条。',
-        ),
+        toggle('enabled', '启用终端通知', '响铃、远端通知、输出规则与静默提醒；自动合并重复提示。'),
         toggle('bell', '终端响铃通知', ''),
         toggle('osc', '远端 OSC 通知', '只显示文本，不执行动作、打开链接或获取网页内容。'),
         toggle('foreground', '当前焦点终端通知', '应用在前台且终端有焦点时，也显示应用内提示。'),
@@ -135,9 +136,7 @@ class TerminalNotificationEditorState
           ),
         ),
         const SizedBox(height: 8),
-        const Text(
-          '可选输出规则：最多16项，每项256 UTF-8字节；普通屏幕按CR/LF完成的文本片段匹配，跨读取保留、自动换行不中断，超4KiB片段与备用屏幕不匹配。正则由Rust有界验证，不读取历史。',
-        ),
+        const Text('最多16条规则，每条256字节。仅匹配普通输出，不扫描历史或备用屏幕。'),
         for (var i = 0; i < _rules.length; i++)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),

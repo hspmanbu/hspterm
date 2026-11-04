@@ -384,6 +384,23 @@ class TerminalTypographyController extends ChangeNotifier {
     await loader.ensure(gateway, source, value);
     return gateway.save(source, value);
   });
+
+  /// Rebase a common Apply only while all font data is still unchanged.
+  Future<TypographySnapshot> refreshForSettingsApply(
+    TypographySnapshot expected,
+  ) => _run((_) async {
+    final fresh = await gateway.load();
+    String fonts(TypographySnapshot s) => jsonEncode([
+      for (final f in s.fonts) [f.id, f.label, f.bytes],
+    ]);
+    if (fresh.scope != expected.scope ||
+        fresh.settings != expected.settings ||
+        !mapEquals(fresh.hosts, expected.hosts) ||
+        fonts(fresh) != fonts(expected)) {
+      throw StateError('字体设置已由其他操作修改，请重新载入');
+    }
+    return fresh;
+  });
   Future<TypographySnapshot> saveHost(
     String hostId,
     TerminalTypography? value, {

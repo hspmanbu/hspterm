@@ -69,7 +69,7 @@ class DisplayFixture implements DisplaySettingsGateway {
 
 void main() {
   testWidgets(
-    'formal display edits survive cancelled category navigation and stop prompting after save',
+    'formal display drafts survive category navigation and save through common Apply',
     (tester) async {
       final fixture = DisplayFixture();
       final model = WorkbenchModel();
@@ -90,8 +90,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('settings-快捷键')));
       await tester.pumpAndSettle();
-      expect(find.text('放弃未保存的设置？'), findsOneWidget);
-      await tester.tap(find.text('返回编辑'));
+      expect(find.byType(AlertDialog), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('settings-彩色高亮')));
       await tester.pumpAndSettle();
       expect(
         tester
@@ -102,9 +102,9 @@ void main() {
         true,
       );
       expect(fixture.writes, 0);
-      await tester.ensureVisible(find.byKey(const ValueKey('display-save')));
+      await tester.ensureVisible(find.byKey(const ValueKey('settings-apply')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('display-save')));
+      await tester.tap(find.byKey(const ValueKey('settings-apply')));
       await tester.pumpAndSettle();
       expect(fixture.writes, 1);
       await tester.tap(find.byKey(const ValueKey('settings-快捷键')));

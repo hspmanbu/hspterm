@@ -1,9 +1,12 @@
+import '../prototype/settings_style.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
 import '../src/rust/api.dart' as rust;
+import '../prototype/settings_leave.dart';
 
 class SftpViewSettings {
   const SftpViewSettings({
@@ -179,14 +182,42 @@ class SftpViewSettingsController extends ChangeNotifier {
   }
 }
 
-class SftpViewSettingsPanel extends StatelessWidget {
+class SftpViewSettingsPanel extends StatefulWidget {
   const SftpViewSettingsPanel({super.key, required this.controller});
   final SftpViewSettingsController controller;
+  @override
+  State<SftpViewSettingsPanel> createState() => _SftpViewSettingsPanelState();
+}
+
+class _SftpViewSettingsPanelState extends State<SftpViewSettingsPanel> {
+  SftpViewSettingsController get controller => widget.controller;
+  SftpViewSettings? _draft;
+  SftpViewSnapshot? _original;
+  bool get _dirty =>
+      _draft != null && !(_original?.settings.sameAs(_draft!) ?? true);
+  Future<void> _apply() async {
+    final source = controller.value, draft = _draft;
+    if (!_dirty || draft == null) return;
+    if (source == null ||
+        source.scope != _original?.scope ||
+        source.revision != _original?.revision) {
+      throw StateError('文件浏览默认值已改变，请重新载入');
+    }
+    await controller.choose(draft);
+    if (mounted && controller.value?.settings.sameAs(draft) == true) {
+      setState(() {
+        _draft = null;
+        _original = null;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) {
       final settings =
+          _draft ??
           controller.value?.settings ??
           controller.confirmed?.settings ??
           const SftpViewSettings();
@@ -195,12 +226,25 @@ class SftpViewSettingsPanel extends StatelessWidget {
         String label,
         bool value,
         SftpViewSettings next,
-      ) => SwitchListTile(
-        key: ValueKey(key),
-        contentPadding: EdgeInsets.zero,
-        title: Text(label),
-        value: value,
-        onChanged: controller.available ? (_) => controller.choose(next) : null,
+      ) => CompactSettingsToggle(
+        child: SwitchListTile(
+          key: ValueKey(key),
+          contentPadding: EdgeInsets.zero,
+          title: Text(label),
+          value: value,
+          onChanged: controller.available
+              ? (_) {
+                  if (SettingsLeaveScope.of(context) == null) {
+                    controller.choose(next);
+                  } else {
+                    setState(() {
+                      _original ??= controller.value;
+                      _draft = next;
+                    });
+                  }
+                }
+              : null,
+        ),
       );
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -233,11 +277,27 @@ class SftpViewSettingsPanel extends StatelessWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton(
-              onPressed: controller.busy ? null : controller.load,
+              onPressed: controller.busy
+                  ? null
+                  : () async {
+                      await controller.load();
+                      if (mounted) {
+                        setState(() {
+                          _draft = null;
+                          _original = null;
+                        });
+                      }
+                    },
               child: const Text('重新读取浏览默认值'),
             ),
           ),
         ],
+      ).guardSettings(
+        confirmed: () => controller.value != null && controller.error == null,
+        label: 'SFTP浏览默认值',
+        dirty: () => _dirty,
+        busy: () => controller.busy,
+        apply: _apply,
       );
     },
   );

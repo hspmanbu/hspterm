@@ -84,8 +84,8 @@ void main() {
         await tester.tap(keyed('history-enabled'));
         await tester.pump();
         expect((await rust.commandHistoryControls()).revision, first.revision);
-        await tester.ensureVisible(keyed('history-save'));
-        await tester.tap(keyed('history-save'));
+        await tester.ensureVisible(keyed('settings-apply'));
+        await tester.tap(keyed('settings-apply'));
         await until(() => keyed('history-status').evaluate().isNotEmpty);
         expect((await rust.commandHistoryControls()).enabled, false);
         await screenshot('settings');
@@ -93,7 +93,12 @@ void main() {
         await tester.tap(keyed('history-clear-${host.id}'));
         await tester.pumpAndSettle();
         expect(find.text('清空此主机命令历史？'), findsOneWidget);
-        await tester.tap(find.text('取消'));
+        await tester.tap(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.text('取消'),
+          ),
+        );
         await tester.pumpAndSettle();
         final before = await rust.commandHistoryControls();
         await tester.ensureVisible(keyed('history-clear-all'));

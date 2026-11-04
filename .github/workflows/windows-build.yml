@@ -111,7 +111,7 @@ jobs:
 
       - name: Test font settings and navigation
         working-directory: ui_flutter
-        run: flutter test --no-pub test/typography_settings_test.dart test/host_typography_test.dart test/settings_leave_guard_test.dart --reporter expanded
+        run: flutter test --no-pub test/typography_settings_test.dart test/host_typography_test.dart test/settings_leave_guard_test.dart test/widget_test.dart test/directory_reader_test.dart test/terminal_paths_send_test.dart --reporter expanded
 
       - name: Check native Windows startup and normal exit
         run: |

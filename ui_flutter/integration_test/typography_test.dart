@@ -120,10 +120,10 @@ void main() {
             .onChanged!(18);
         await tester.pumpAndSettle();
         await tester.ensureVisible(
-          find.byKey(const ValueKey('typography-save')),
+          find.byKey(const ValueKey('settings-apply')),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('typography-save')));
+        await tester.tap(find.byKey(const ValueKey('settings-apply')));
         await tester.pumpAndSettle();
         expect(model.typography.value.family, family);
         expect(model.fontSize, 18);

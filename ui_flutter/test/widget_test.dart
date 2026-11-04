@@ -116,6 +116,15 @@ void main() {
     );
     await tester.tap(find.byType(TerminalView));
     await tester.pump();
+    final clients = tester.testTextInput.log.where(
+      (call) => call.method == 'TextInput.setClient',
+    );
+    expect(clients, isNotEmpty);
+    expect(
+      (clients.last.arguments as List)[1]['viewId'],
+      tester.view.viewId,
+      reason: 'Windows requires an actual view ID to create its native text/IME model',
+    );
     for (final key in [
       LogicalKeyboardKey.arrowUp,
       LogicalKeyboardKey.enter,

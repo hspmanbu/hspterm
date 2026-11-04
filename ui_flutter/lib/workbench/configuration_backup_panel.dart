@@ -177,7 +177,7 @@ class _ConfigurationBackupPanelState extends State<ConfigurationBackupPanel> {
         const Text('完整加密备份与恢复'),
         const SizedBox(height: 8),
         const Text(
-          'Argon2id + AES-256-GCM 流式加密。备份包含正式主机及独立凭据、信任、书签、允许的配置、单行命令历史和导入字体副本；不包含终端画面、滚动历史、编辑正文、草稿、任务或窗口布局。不会自动联网。',
+          '加密备份包含主机、凭据、信任、书签、设置、命令历史和导入字体；不包含终端画面、滚动历史、编辑正文、草稿、任务或布局。',
         ),
         const SizedBox(height: 12),
         if (c.busy) const LinearProgressIndicator(),
@@ -316,7 +316,7 @@ class _ConfigurationBackupPanelState extends State<ConfigurationBackupPanel> {
           ),
         ],
         const Divider(height: 24),
-        const Text('WebDAV / Google Drive 配置同步仍待独立接入；本页操作仅处理本机加密备份。'),
+        const Text('此处备份到本机文件；配置同步在下方设置。'),
       ],
     );
   }

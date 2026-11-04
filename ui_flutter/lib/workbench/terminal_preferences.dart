@@ -1,3 +1,4 @@
+import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
 import 'dart:convert';
@@ -336,8 +337,22 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
   }
 
   Future<void> _save() async {
-    final source = _source;
+    var source = _source;
     if (_busy || source == null) return;
+    if (SettingsLeaveScope.of(context) != null) {
+      final original = source;
+      final fresh = await widget.gateway.load();
+      if (!mounted) return;
+      Map<String, Object?> editable(TerminalPreferencesSnapshot s) =>
+          Map<String, Object?>.from(s.value.toJson())..remove('typography');
+      if (fresh.scope != original.scope ||
+          jsonEncode(editable(fresh)) != jsonEncode(editable(original))) {
+        setState(() => _error = '终端设置已由其他操作修改，请重新载入');
+        return;
+      }
+      source = fresh;
+      _source = fresh;
+    }
     if ([_history, ..._colors].any(
           (c) => c.value.composing.isValid && !c.value.composing.isCollapsed,
         ) ||
@@ -362,28 +377,33 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
       _status = null;
     });
     try {
-      final yes = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          scrollable: true,
-          title: const Text('保存终端设置？'),
-          content: Text(
-            '历史上限 ${value.historyLines} 行仅作用于新建终端，不裁剪现有历史。光标和配色作为默认值更新，远端控制序列仍可临时覆盖。OSC52 ${value.osc52 ? '允许读写' : '关闭读写'}。右键${value.rightPaste ? '粘贴（Shift+右键菜单）' : '菜单'}；远端鼠标捕获优先。多行粘贴安全预览始终保留。\n终端通知${value.notifications.enabled ? '开启' : '关闭'}；Windows桌面通知${value.notifications.desktop ? '开启' : '关闭'}；远端正文预览${value.notifications.preview ? '开启，可能含敏感内容' : '关闭'}。SFTP任务不发送桌面通知。',
-          ),
-          actions: [
-            TextButton(
-              autofocus: true,
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              key: const ValueKey('terminal-preferences-confirm'),
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('保存并应用'),
-            ),
-          ],
-        ),
-      );
+      final yes =
+          SettingsLeaveScope.of(context) != null &&
+              !(value.notifications.preview &&
+                  !source.value.notifications.preview)
+          ? true
+          : await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                scrollable: true,
+                title: const Text('保存终端设置？'),
+                content: Text(
+                  '历史上限 ${value.historyLines} 行仅作用于新建终端，不裁剪现有历史。光标和配色作为默认值更新，远端控制序列仍可临时覆盖。OSC52 ${value.osc52 ? '允许读写' : '关闭读写'}。右键${value.rightPaste ? '粘贴（Shift+右键菜单）' : '菜单'}；远端鼠标捕获优先。多行粘贴安全预览始终保留。\n终端通知${value.notifications.enabled ? '开启' : '关闭'}；Windows桌面通知${value.notifications.desktop ? '开启' : '关闭'}；远端正文预览${value.notifications.preview ? '开启，可能含敏感内容' : '关闭'}。SFTP任务不发送桌面通知。',
+                ),
+                actions: [
+                  TextButton(
+                    autofocus: true,
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('取消'),
+                  ),
+                  FilledButton(
+                    key: const ValueKey('terminal-preferences-confirm'),
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('保存并应用'),
+                  ),
+                ],
+              ),
+            );
       if (!mounted || yes != true) return;
       setState(() => _io = true);
       final result = await widget.gateway.save(source, value);
@@ -426,7 +446,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
   Widget build(BuildContext context) {
     final source = _source;
     Widget color(int index, String label) => SizedBox(
-      width: 112,
+      width: 136,
       child: TextField(
         key: ValueKey('terminal-color-$index'),
         controller: _colors[index],
@@ -475,27 +495,33 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
                 ],
                 onChanged: (v) => setState(() => _shape = v!),
               ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('默认光标闪烁'),
-                value: _blink,
-                onChanged: (v) => setState(() => _blink = v),
+              CompactSettingsToggle(
+                child: SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('默认光标闪烁'),
+                  value: _blink,
+                  onChanged: (v) => setState(() => _blink = v),
+                ),
               ),
-              SwitchListTile(
-                key: const ValueKey('terminal-osc52'),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('OSC52 剪贴板读写'),
-                subtitle: const Text('默认允许；远端可读取和更改本机剪贴板，解码上限10MiB。可完整关闭。'),
-                value: _osc,
-                onChanged: (v) => setState(() => _osc = v),
+              CompactSettingsToggle(
+                child: SwitchListTile(
+                  key: const ValueKey('terminal-osc52'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('OSC52 剪贴板读写'),
+                  subtitle: const Text('默认允许；远端可读取和更改本机剪贴板，解码上限10MiB。可完整关闭。'),
+                  value: _osc,
+                  onChanged: (v) => setState(() => _osc = v),
+                ),
               ),
-              SwitchListTile(
-                key: const ValueKey('terminal-right-paste'),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('右键粘贴'),
-                subtitle: const Text('Shift+右键强制本地菜单；远端鼠标报告仍优先，多行粘贴仍确认。'),
-                value: _right,
-                onChanged: (v) => setState(() => _right = v),
+              CompactSettingsToggle(
+                child: SwitchListTile(
+                  key: const ValueKey('terminal-right-paste'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('右键粘贴'),
+                  subtitle: const Text('Shift+右键强制本地菜单；远端鼠标报告仍优先，多行粘贴仍确认。'),
+                  value: _right,
+                  onChanged: (v) => setState(() => _right = v),
+                ),
               ),
               const Text('多行粘贴预览始终保留；不提供关闭安全确认或清空终端历史的按钮。'),
               if (source != null)
@@ -504,7 +530,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
                   source: source.value.notifications,
                   revision: '${source.scope}/${source.revision}',
                 ),
-              const Divider(),
+              const Divider(height: 32),
               Wrap(
                 spacing: 8,
                 children: [
@@ -518,8 +544,9 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
                   ),
                 ],
               ),
+              const SizedBox(height: 18),
               Wrap(
-                spacing: 10,
+                spacing: 16,
                 runSpacing: 10,
                 children: [
                   color(0, '默认文字'),
@@ -572,15 +599,20 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
               onPressed: _busy ? null : _load,
               child: const Text('重新载入'),
             ),
-            FilledButton(
-              key: const ValueKey('terminal-preferences-save'),
-              onPressed: _busy || source == null ? null : _save,
-              child: const Text('预览确认并保存'),
+            Visibility(
+              visible: SettingsLeaveScope.of(context) == null,
+              child: FilledButton(
+                key: const ValueKey('terminal-preferences-save'),
+                onPressed: _busy || source == null ? null : _save,
+                child: const Text('预览确认并保存'),
+              ),
             ),
           ],
         ),
       ],
     ).guardSettings(
+      confirmed: () => _source != null && _error == null,
+      apply: _save,
       label: '终端颜色与输入偏好',
       dirty: () => _dirty,
       busy: () => _busy && !_io,

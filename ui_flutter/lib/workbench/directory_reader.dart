@@ -1,5 +1,6 @@
 import '../prototype/model.dart';
 import '../src/rust/api.dart' as rust;
+import 'file_size.dart';
 
 typedef OpenDirectory = Future<String> Function({
   required int id,
@@ -77,7 +78,7 @@ class PagedDirectoryReader {
             symlink: f.symlink,
             byteSize: f.size,
             modifiedEpoch: f.modified,
-            size: f.size == null ? '—' : '${f.size} B',
+            size: f.directory ? '—' : remoteFileSize(f.size),
             kind: f.symlink
                 ? '符号链接'
                 : f.directory

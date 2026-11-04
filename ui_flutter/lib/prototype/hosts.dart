@@ -87,7 +87,18 @@ class HostManagerState extends State<HostManager> {
   @override
   void initState() {
     super.initState();
-    load(m.hosts.firstOrNull ?? m.recoverableDrafts.firstOrNull);
+    final requested = m.requestedHostId;
+    final page = m.requestedHostCategory;
+    m.requestedHostId = null;
+    m.requestedHostCategory = null;
+    load(
+      m.hosts.where((host) => host.id == requested).firstOrNull ??
+          m.hosts.firstOrNull ??
+          m.recoverableDrafts.firstOrNull,
+    );
+    if (requested != null && editingId == requested && page != null) {
+      category = page;
+    }
   }
 
   @override

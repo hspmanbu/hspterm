@@ -114,9 +114,8 @@ class _FileOpenSettingsPanelState extends State<FileOpenSettingsPanel> {
           ),
           const SizedBox(height: 8),
           const Text(
-            '默认 100 MiB，严格超过阈值时先确认；0 表示每次都确认（含空文件）。'
-            '保存后对下一次文件打开生效；已弹出的确认保持原阈值。'
-            '每次打开重新下载，临时预览退出清理，不会回传修改。',
+            '超过阈值时询问；0表示始终询问。对下次打开生效。'
+            '临时副本退出时清理，不回传修改。',
           ),
           if (_error != null)
             Text(
@@ -126,16 +125,21 @@ class _FileOpenSettingsPanelState extends State<FileOpenSettingsPanel> {
           if (_saved) const Text('文件打开设置已加密保存'),
           Align(
             alignment: Alignment.centerLeft,
-            child: FilledButton(
-              key: const ValueKey('save-file-open-settings'),
-              onPressed: _saving ? null : _save,
-              child: Text(_saving ? '正在保存…' : '保存文件打开设置'),
+            child: Visibility(
+              visible: SettingsLeaveScope.of(context) == null,
+              child: FilledButton(
+                key: const ValueKey('save-file-open-settings'),
+                onPressed: _saving ? null : _save,
+                child: Text(_saving ? '正在保存…' : '保存文件打开设置'),
+              ),
             ),
           ),
           const SizedBox(height: 14),
         ],
       ),
     ).guardSettings(
+      confirmed: () => _loaded && _error == null,
+      apply: _save,
       label: '文件打开确认设置',
       dirty: () => _dirty,
       busy: () => _saving,

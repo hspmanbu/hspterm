@@ -202,10 +202,10 @@ print('\r\nOWNERSHIP_CAPTURE_DONE', flush=True)
         await tester.tap(find.text('F8').last);
         await tester.pumpAndSettle();
         await tester.ensureVisible(
-          find.byKey(const ValueKey('palette-settings-save')),
+          find.byKey(const ValueKey('settings-apply')),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('palette-settings-save')));
+        await tester.tap(find.byKey(const ValueKey('settings-apply')));
         await tester.pumpAndSettle();
         expect(
           (await rust.commandPaletteShortcut()).applicationInTerminal,

@@ -1,3 +1,4 @@
+import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
 import 'dart:async';
@@ -183,14 +184,16 @@ class _PaletteSettingsPanelState extends State<PaletteSettingsPanel> {
             '默认终端内远端优先。选择应用优先并保存后，只拦截此组合键；其他按键继续使用原终端协议。系统/本地文本编辑保留键不被改写。',
           ),
           if (_io) const LinearProgressIndicator(),
-          SwitchListTile(
-            key: const ValueKey('palette-binding-enabled'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('启用面板快捷键'),
-            value: _enabled,
-            onChanged: _busy || _source == null
-                ? null
-                : (v) => setState(() => _enabled = v),
+          CompactSettingsToggle(
+            child: SwitchListTile(
+              key: const ValueKey('palette-binding-enabled'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('启用面板快捷键'),
+              value: _enabled,
+              onChanged: _busy || _source == null
+                  ? null
+                  : (v) => setState(() => _enabled = v),
+            ),
           ),
           Wrap(
             spacing: 8,
@@ -232,15 +235,17 @@ class _PaletteSettingsPanelState extends State<PaletteSettingsPanel> {
               ),
             ],
           ),
-          SwitchListTile(
-            key: const ValueKey('palette-binding-application'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('终端内此组合键应用优先'),
-            subtitle: const Text('关闭时保留远端 TUI 优先；面板始终可从应用菜单打开。'),
-            value: _application,
-            onChanged: _busy || _source == null
-                ? null
-                : (v) => setState(() => _application = v),
+          CompactSettingsToggle(
+            child: SwitchListTile(
+              key: const ValueKey('palette-binding-application'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('终端内此组合键应用优先'),
+              subtitle: const Text('关闭时保留远端 TUI 优先；面板始终可从应用菜单打开。'),
+              value: _application,
+              onChanged: _busy || _source == null
+                  ? null
+                  : (v) => setState(() => _application = v),
+            ),
           ),
           if (_error != null)
             Text(
@@ -254,10 +259,13 @@ class _PaletteSettingsPanelState extends State<PaletteSettingsPanel> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              FilledButton(
-                key: const ValueKey('palette-settings-save'),
-                onPressed: _busy || !_dirty ? null : _save,
-                child: const Text('保存面板快捷键'),
+              Visibility(
+                visible: SettingsLeaveScope.of(context) == null,
+                child: FilledButton(
+                  key: const ValueKey('palette-settings-save'),
+                  onPressed: _busy || !_dirty ? null : _save,
+                  child: const Text('保存面板快捷键'),
+                ),
               ),
               TextButton(
                 key: const ValueKey('palette-settings-reload'),
@@ -269,6 +277,8 @@ class _PaletteSettingsPanelState extends State<PaletteSettingsPanel> {
           const SizedBox(height: 16),
         ],
       ).guardSettings(
+        confirmed: () => _source != null && _error == null,
+        apply: _save,
         label: '应用命令面板快捷键',
         dirty: () => _dirty,
         busy: () => _busy && !_io,

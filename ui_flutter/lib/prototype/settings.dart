@@ -1,3 +1,5 @@
+import 'settings_style.dart';
+
 import 'package:flutter/material.dart';
 
 import 'design.dart';
@@ -42,14 +44,36 @@ class SettingsPage extends StatefulWidget {
 
 class SettingsPageState extends State<SettingsPage> {
   final _leave = SettingsLeaveRegistry();
-  int _categoryRequest = 0;
+  final _panels = <String, Widget>{};
+  bool _applying = false;
+  bool? _themeDraft;
   Future<bool> canLeave() => _leave.canLeave(context);
   Future<void> _chooseCategory(String value) async {
     if (value == category) return;
-    final request = ++_categoryRequest;
-    if (await canLeave() && mounted && request == _categoryRequest) {
+    if (mounted && !_applying) {
+      FocusManager.instance.primaryFocus?.unfocus();
       setState(() => category = value);
     }
+  }
+
+  Future<void> _apply({bool close = false}) async {
+    if (_applying) return;
+    setState(() => _applying = true);
+    final saved = await _leave.applyAll(context);
+    if (!mounted) return;
+    setState(() {
+      _applying = false;
+      if (_leave.failedCategory != null) category = _leave.failedCategory!;
+    });
+    if (saved && close) m.show(WorkPage.workspace);
+  }
+
+  void _cancel() {
+    if (_leave.busy || _applying) {
+      notice(context, '设置正在保存，请稍候。');
+      return;
+    }
+    m.show(WorkPage.workspace);
   }
 
   String category = '外观';
@@ -84,18 +108,20 @@ class SettingsPageState extends State<SettingsPage> {
   WorkbenchModel get m => widget.model;
   final rules = ['ERROR · FAIL', 'WARN', 'SUCCESS'];
   Widget toggle(String title, String subtitle, {bool initial = true}) =>
-      SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        title: Text(title, style: const TextStyle(fontSize: 12)),
-        subtitle: Text(
-          subtitle,
-          style: TextStyle(fontSize: 10, color: Theme.of(context).hintColor),
+      CompactSettingsToggle(
+        child: SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(title, style: const TextStyle(fontSize: 12)),
+          subtitle: Text(
+            subtitle,
+            style: TextStyle(fontSize: 10, color: Theme.of(context).hintColor),
+          ),
+          value: (m.settings[title] ?? initial) as bool,
+          onChanged: (v) {
+            m.settings[title] = v;
+            m.changed();
+          },
         ),
-        value: (m.settings[title] ?? initial) as bool,
-        onChanged: (v) {
-          m.settings[title] = v;
-          m.changed();
-        },
       );
   Widget select(String label, List<String> options) => Padding(
     padding: const EdgeInsets.only(bottom: 16),
@@ -123,7 +149,15 @@ class SettingsPageState extends State<SettingsPage> {
   );
   List<Widget> get controls => switch (category) {
     '外观' => [
-      heading('主题与布局'),
+      heading('主题与布局').guardSettings(
+        label: '界面主题',
+        dirty: () => _themeDraft != null && _themeDraft != m.light,
+        busy: () => false,
+        apply: () async {
+          final draft = _themeDraft;
+          if (draft != null) await m.applyTheme(draft);
+        },
+      ),
       Row(
         children: [
           for (final light in [false, true])
@@ -133,7 +167,9 @@ class SettingsPageState extends State<SettingsPage> {
                 child: InkWell(
                   key: ValueKey(light ? 'theme-light' : 'theme-dark'),
                   borderRadius: BorderRadius.circular(7),
-                  onTap: m.themeAvailable ? () => m.chooseTheme(light) : null,
+                  onTap: m.themeAvailable
+                      ? () => setState(() => _themeDraft = light)
+                      : null,
                   child: Container(
                     height: 94,
                     padding: const EdgeInsets.all(12),
@@ -142,10 +178,10 @@ class SettingsPageState extends State<SettingsPage> {
                           ? const Color(0xffeff3f7)
                           : const Color(0xff111820),
                       border: Border.all(
-                        color: m.light == light
+                        color: (_themeDraft ?? m.light) == light
                             ? Theme.of(context).colorScheme.primary
                             : Theme.of(context).dividerColor,
-                        width: m.light == light ? 2 : 1,
+                        width: (_themeDraft ?? m.light) == light ? 2 : 1,
                       ),
                       borderRadius: BorderRadius.circular(7),
                     ),
@@ -449,113 +485,166 @@ class SettingsPageState extends State<SettingsPage> {
       ],
     ],
   };
-  @override
-  Widget build(BuildContext context) => SettingsLeaveScope(
-    registry: _leave,
-    child: Column(
-      children: [
-        Container(
-          height: 49,
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          child: Row(
+  Widget _buildCategory(BuildContext context) => ListView(
+    key: ValueKey('settings-content-$category'),
+    padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
+    children: [
+      Align(
+        alignment: Alignment.topLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 800),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                '设置',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+              Text(
+                category,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              const SizedBox(width: 12),
-              DeskBadge(
-                widget.transferSettingsBuilder == null
-                    ? '交互原型 · 不持久化'
-                    : '本机加密设置',
-              ),
+              const SizedBox(height: 8),
+              const SizedBox(height: 12),
+              for (final control in controls)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: control,
+                ),
             ],
           ),
         ),
-        const Divider(height: 1),
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, bounds) => Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SizedBox(
-                  width: bounds.maxWidth < 850 ? 166 : 210,
-                  child: ListView(
-                    padding: const EdgeInsets.all(9),
-                    children: [
-                      for (final entry in categories.entries)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: ListTile(
-                            key: ValueKey('settings-${entry.key}'),
-                            dense: true,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(5),
-                            ),
-                            selected: category == entry.key,
-                            selectedTileColor: Theme.of(context)
-                                .colorScheme
-                                .primary
-                                .withValues(alpha: .1),
-                            leading: Icon(entry.value, size: 17),
-                            minLeadingWidth: 16,
-                            title: Text(
-                              entry.key,
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            onTap: () => _chooseCategory(entry.key),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                VerticalDivider(
-                  width: 1,
-                  color: Theme.of(context).dividerColor,
-                ),
-                Expanded(
-                  child: ListView(
-                    key: ValueKey('settings-content-$category'),
-                    padding: const EdgeInsets.fromLTRB(28, 20, 28, 30),
-                    children: [
-                      Align(
-                        alignment: Alignment.topLeft,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 620),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Text(
-                                category,
-                                style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                widget.transferSettingsBuilder == null
-                                    ? '修改仅用于本次界面预览。业务接入前不影响真实终端。'
-                                    : 'SSH、文件打开、传输、显示规则及命令历史管理可加密保存。其他控件仍是界面预览。',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Theme.of(context).hintColor,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              ...controls,
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+      ),
+    ],
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    _panels[category] = _buildCategory(context);
+    final theme = Theme.of(context);
+    return Theme(
+      data: theme.copyWith(
+        inputDecorationTheme: theme.inputDecorationTheme.copyWith(
+          helperMaxLines: 3,
+          errorMaxLines: 3,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 14,
           ),
         ),
-      ],
-    ),
-  );
+      ),
+      child: SettingsLeaveScope(
+        registry: _leave,
+        child: Column(
+          children: [
+            Container(
+              height: 49,
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: Row(
+                children: [
+                  const Text(
+                    '设置',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(width: 12),
+                  if (MediaQuery.sizeOf(context).width >= 900)
+                    DeskBadge(
+                      widget.transferSettingsBuilder == null
+                          ? '交互原型 · 不持久化'
+                          : '本机加密设置',
+                    ),
+                  const Spacer(),
+                  TextButton(
+                    key: const ValueKey('settings-cancel'),
+                    onPressed: _applying ? null : _cancel,
+                    child: const Text('取消'),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    key: const ValueKey('settings-apply'),
+                    onPressed: _applying ? null : _apply,
+                    child: Text(_applying ? '应用中…' : '应用'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    key: const ValueKey('settings-ok'),
+                    onPressed: _applying ? null : () => _apply(close: true),
+                    child: const Text('确定'),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, bounds) => Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      width: bounds.maxWidth < 850 ? 166 : 210,
+                      child: ListView(
+                        padding: const EdgeInsets.all(9),
+                        children: [
+                          for (final entry in categories.entries)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: ListTile(
+                                key: ValueKey('settings-${entry.key}'),
+                                dense: true,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(5),
+                                ),
+                                selected: category == entry.key,
+                                selectedTileColor: Theme.of(context)
+                                    .colorScheme
+                                    .primary
+                                    .withValues(alpha: .1),
+                                leading: Icon(entry.value, size: 17),
+                                minLeadingWidth: 16,
+                                title: Text(
+                                  entry.key,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                                onTap: () => _chooseCategory(entry.key),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    VerticalDivider(
+                      width: 1,
+                      color: Theme.of(context).dividerColor,
+                    ),
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          for (final entry in _panels.entries)
+                            Positioned.fill(
+                              key: ValueKey('settings-category-${entry.key}'),
+                              child: Offstage(
+                                offstage: entry.key != category,
+                                child: TickerMode(
+                                  enabled: entry.key == category,
+                                  child: ExcludeFocus(
+                                    excluding: entry.key != category,
+                                    child: SettingsLeaveScope(
+                                      registry: _leave,
+                                      category: entry.key,
+                                      child: entry.value,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

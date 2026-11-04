@@ -83,6 +83,8 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
   late final VoidCallback _resumeNotices;
   late PaletteBinding _lastPaletteBinding;
   bool _unlocked = false, _busy = false;
+  bool? _vaultExists;
+  String? _vaultInspectionError;
   bool _lockedClosing = false;
   Future<void>? _openingVault;
   String? _error;
@@ -150,6 +152,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
     };
     m.requestTmuxChoice ??= _tmuxRequest;
     _unlocked = widget.model != null;
+    if (!_unlocked) unawaited(_inspectVault());
     _lockedExit = AppLifecycleListener(
       onExitRequested: () async {
         // The unlocked workbench owns the activity confirmation. Before unlock,
@@ -280,6 +283,28 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
     }
   }
 
+  Future<File> _vaultFile() async {
+    if (widget.vaultPath != null) return File(widget.vaultPath!);
+    final directory = await getApplicationSupportDirectory();
+    return File('${directory.path}${Platform.pathSeparator}hspterm.vault');
+  }
+
+  Future<void> _inspectVault() async {
+    try {
+      final exists = await (await _vaultFile()).exists();
+      if (mounted) {
+        setState(() {
+          _vaultExists = exists;
+          _vaultInspectionError = null;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _vaultInspectionError = '无法读取本机配置库位置，请检查目录权限后重试。');
+      }
+    }
+  }
+
   Future<void> _unlock({bool withWindows = false}) {
     if (_busy || _lockedClosing || (!withWindows && _password.text.isEmpty)) {
       return Future.value();
@@ -304,13 +329,10 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
       _error = null;
     });
     try {
-      final directory = widget.vaultPath == null
-          ? await getApplicationSupportDirectory()
-          : File(widget.vaultPath!).parent;
-      final path =
-          widget.vaultPath ??
-          '${directory.path}${Platform.pathSeparator}hspterm.vault';
+      final file = await _vaultFile();
+      final directory = file.parent, path = file.path;
       final exists = await File(path).exists();
+      if (mounted) setState(() => _vaultExists = exists);
       if (withWindows && !exists) throw StateError('尚未创建配置库，请先设置主密码');
       if (!withWindows && !exists && _password.text != _confirmation.text) {
         throw StateError('首次创建配置库时，两次主密码必须一致');
@@ -396,16 +418,22 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
             WindowsUnlockSettingsPanel(
               run: (action) => m.runLocalSettings(action),
             ),
+            const SizedBox(height: 20),
             ConfigurationBackupPanel(
               controller: m.configurationBackups,
               files: widget.backupFiles,
             ),
+            const SizedBox(height: 24),
             ConfigurationSyncSettingsPanel(
               gateway: NativeConfigurationSyncSettingsGateway(m),
             ),
+            const SizedBox(height: 24),
             ConfigurationSyncRuntimePanel(controller: m.configurationSync),
+            const SizedBox(height: 20),
             GoogleDriveAccountPanel(controller: m.googleDriveAccount),
+            const SizedBox(height: 20),
             GoogleDriveObjectsPanel(controller: m.googleDriveObjects),
+            const SizedBox(height: 20),
             ConfigurationSyncArchivesPanel(
               gateway: NativeConfigurationSyncArchivesGateway(m),
             ),
@@ -575,30 +603,43 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
                     style: TextStyle(fontSize: 22),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    '打开本机加密配置库。首次使用请设置主密码。不会自动建立 SSH 连接。',
+                  Text(
+                    _vaultExists == null
+                        ? '正在检查本机配置库…'
+                        : _vaultExists!
+                        ? '输入已有主密码解锁配置库。'
+                        : '首次使用，请设置主密码。',
                     style: TextStyle(fontSize: 12),
                   ),
                   const SizedBox(height: 20),
                   TextField(
                     key: const ValueKey('vault-password'),
-                    enabled: !_busy && !_lockedClosing,
+                    enabled: !_busy && !_lockedClosing && _vaultExists != null,
                     controller: _password,
                     obscureText: true,
                     autofocus: true,
-                    decoration: const InputDecoration(labelText: '主密码'),
+                    decoration: InputDecoration(
+                      labelText: _vaultExists == false ? '设置主密码' : '主密码',
+                    ),
+                    onSubmitted: (_) {
+                      if (_vaultExists == true) _unlock();
+                    },
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    key: const ValueKey('vault-confirm'),
-                    enabled: !_busy && !_lockedClosing,
-                    controller: _confirmation,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: '首次创建时再次输入主密码',
+                  if (_vaultExists == false)
+                    TextField(
+                      key: const ValueKey('vault-confirm'),
+                      enabled: !_busy && !_lockedClosing,
+                      controller: _confirmation,
+                      obscureText: true,
+                      decoration: const InputDecoration(labelText: '确认主密码'),
                     ),
-                  ),
                   const SizedBox(height: 16),
+                  if (_vaultInspectionError != null)
+                    TextButton(
+                      onPressed: _inspectVault,
+                      child: Text(_vaultInspectionError!),
+                    ),
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 10),
@@ -609,16 +650,20 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
                     ),
                   FilledButton(
                     key: const ValueKey('unlock-vault'),
-                    onPressed: _busy || _lockedClosing ? null : _unlock,
+                    onPressed: _busy || _lockedClosing || _vaultExists == null
+                        ? null
+                        : _unlock,
                     child: Text(
                       _lockedClosing
                           ? '正在退出…'
                           : _busy
                           ? '正在打开…'
-                          : '打开配置库',
+                          : _vaultExists == false
+                          ? '创建配置库'
+                          : '解锁配置库',
                     ),
                   ),
-                  if (Platform.isWindows)
+                  if (Platform.isWindows && _vaultExists == true)
                     TextButton.icon(
                       key: const ValueKey('unlock-vault-windows'),
                       onPressed: _busy || _lockedClosing

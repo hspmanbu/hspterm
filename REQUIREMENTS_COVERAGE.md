@@ -189,3 +189,20 @@
 - Windows单主窗口，空白启动，关闭退出，无托盘；Android单终端显示、全屏SFTP，不移植桌面分屏。
 - 凭据/私钥等机密不明文落盘/日志/仓库；终端历史只本次运行；命令历史需加密持久化及默认参与已启用的加密同步。临时预览退出清理；外部编辑工作副本另行持久保留，仅明确确认后清理；两者均不入云端/配置备份，见FILE_PREVIEWS.md和REMOTE_EDITING.md。
 - 真实账号/付费任务/生产资源未经授权不使用。Windows、Android、Claude未提供运行条件时保留具体待测项目，不伪报。
+
+
+## 2026-11-04 Windows 使用反馈修订覆盖
+
+此节是既有条目的行为修正，不把模拟功能计入完成数，也不另行虚增基线175条。V1.4末尾修订优先于早期分类切换警告记录。
+
+| 反馈 | 源码 | 验证 |
+| --- | --- | --- |
+| 已有库解锁而非重新设置 | workbench/app.dart | settings_feedback_test 实际临时Vault首次/已有界面 |
+| Windows字母/中文输入 | terminal/view.dart | 固定引擎setClient要求实际viewId；widget_test原键盘/IME断言；Windows实机待复测 |
+| 路径填入启用说明 | workbench/terminal_paths.dart；prototype/{model,hosts}.dart | terminal_paths_send_test保护、说明不重复注入；原受控输入核心不变 |
+| 设置统一应用/取消/确定 | prototype/{settings,settings_leave}.dart；workbench各设置表单 | 跨类别草稿、失败/丢回执、实际加密回读、CAS冲突保护 |
+| 设置排版 | prototype/settings_style.dart；workbench设置面板 | 九分类两实际窗口18张截图；组件大字号/窄窗及GTK |
+| SFTP大小单位 | workbench/{file_size,directory_reader}.dart | 格式/原byteSize保留回归 |
+| 去除悬停说明 | workbench/explorer_export.dart | 只去Tooltip，原拖放租约/队列测试保留 |
+
+具体103项组件、7个GTK及平台边界见validation/windows-feedback-2026-11-04/README.md和checks.json。

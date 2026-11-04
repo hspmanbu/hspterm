@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hspterm/src/rust/api.dart' as rust;
 import 'package:hspterm/workbench/directory_reader.dart';
+import 'package:hspterm/workbench/file_size.dart';
 
 rust.RemoteFile item(String name) => rust.RemoteFile(
   name: name,
@@ -14,6 +15,14 @@ rust.RemoteFile item(String name) => rust.RemoteFile(
   permissions: 33152,
 );
 void main() {
+  test('display units scale without changing metadata byte counts', () {
+    expect(remoteFileSize(null), '—');
+    expect(remoteFileSize(0), '0.00 KB');
+    expect(remoteFileSize(512), '0.50 KB');
+    expect(remoteFileSize(1024), '1.00 KB');
+    expect(remoteFileSize(1024 * 1024), '1.00 MB');
+    expect(remoteFileSize(1024 * 1024 * 1024), '1.00 GB');
+  });
   test(
     'paged collection preserves metadata and waits for successful close',
     () async {

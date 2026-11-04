@@ -196,7 +196,7 @@ void main() {
     },
   );
   testWidgets(
-    'history draft survives category cancel and a clear does not discard its unsaved switch',
+    'history draft survives category navigation and a clear does not discard its unsaved switch',
     (tester) async {
       final gateway = _Gateway();
       final model = WorkbenchModel();
@@ -221,8 +221,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(keyed('settings-快捷键'));
       await tester.pumpAndSettle();
-      expect(find.text('放弃未保存的设置？'), findsOneWidget);
-      await tester.tap(find.text('返回编辑'));
+      expect(find.byType(AlertDialog), findsNothing);
+      await tester.tap(keyed('settings-历史命令联想'));
       await tester.pumpAndSettle();
       expect(
         tester.widget<SwitchListTile>(keyed('history-enabled')).value,
@@ -230,7 +230,7 @@ void main() {
       );
       expect(gateway.value.enabled, true);
       expect(gateway.value.total, 0);
-      await tester.tap(keyed('history-save'));
+      await tester.tap(keyed('settings-apply'));
       await tester.pumpAndSettle();
       await tester.tap(keyed('settings-快捷键'));
       await tester.pumpAndSettle();
@@ -261,7 +261,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(keyed('history-enabled'));
       await tester.pump();
-      await tester.tap(keyed('history-save'));
+      await tester.tap(keyed('settings-apply'));
       await tester.pump();
       await tester.tap(keyed('settings-快捷键'));
       await tester.pump();

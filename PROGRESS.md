@@ -1,5 +1,15 @@
 # HSPTerm 开发进度
 
+## 最新任务：Windows首轮使用反馈七项修正（2026-11-04，Ubuntu回归通过，准备Windows构建）
+
+- 用户确认新包启动约70–80MB；这是用户Windows观测，未与Ubuntu压力数据混为同一口径。
+- 主机配置重开仍存在；原首页总显示首次创建文案，已改为启动先读取固定应用数据目录是否已有Vault，只在新建显示确认密码，已有库显示解锁。未取消加密、不自动建立连接。
+- 用户确认Enter/方向/Ctrl有效，只有字母/中文无效。已核对固定Flutter Windows text_input_plugin.cc：setClient的viewId必须是整数，否则在创建active_model_之前拒绝。TerminalView自定义TextInputConfiguration遗漏viewId，现明确使用View.of(context).viewId，已补原文字/IME组合测试中的配置断言，不采用猜测性延时键盘回退。
+- 设置页按新修订保留懒创建的各分类状态/草稿、隐藏页停Ticker/焦点，右上角统一取消/应用/确定；不因切分类弹窗，离开整页才提示。九类表单加应用回调，原独立/主机编辑入口保存按钮保留。SFTP默认值/主题在设置页也变草稿。应用失败保留/定位分类、已确认保存不重做。字体与终端偏好共享portable记录时仅可对确认未变的非本页字段重新取得CAS，实际跨分类Native集成已过。
+- 增加设置留白/字段辅助文本换行/小开关，缩短纯技术说明；不隐藏必要安全提示。SFTP大小改KB/MB/GB，保留byteSize排序/传输；移除Explorer拖出行提示。路径安全复制保留，新增发送说明及配置原主机入口（不自动启用/重连）。V1.4末尾已写最新用户修订。
+- 最后17文件103项回归全部通过（1:01），新增丢回执仍不能假成功的保护/测试。7个不同GTK用例均通过：新设置/实际Vault与跨类别回读，真实OpenSSH字体/PTY、终端偏好、历史、显示、SSH默认值、Kitty快捷键；重复运行不虚增用例。早期旧交互断言、主题基线和模态取消重名失败均已修，原失败日志保留。九分类1280×720/760×620的18张真实截图已归档，人工检查还修正加密页面板间距及过时说明。
+- 归档入口validation/windows-feedback-2026-11-04/README.md、checks.json及18张截图；组件最终日志/tmp/hspterm-feedback-103.log，GTK最终数据/tmp/hspterm-feedback-gtk-suite-resume.json及新设置all-settings/delivery-settings日志。Analyze0项、164文件格式0变更、actionlint通过；正式debug/release已恢复并正常启动/退出0、Rust加载和preview run清理通过。最后加密页间距补修后GTK九分类/18图再次通过，正式debug/release也已最终重建/实际启动关闭0（日志/tmp/hspterm-feedback-delivery-*），不是集成测试入口。即将提交/推送新Windows构建。不重复Rust/FRB测试，本轮未改核心协议或绑定。
+
 ## 最新用户反馈：设置页面内存优化（2026-11-04）
 
 - Windows首个成功包来自run41813471598，Artifact13314479216（39,819,157字节）；实际正规FRB生成、MSVC/Rust/C++编译、Analyze、窗口启动/正常关闭及打包全部通过。此前尚未成功的条目保留作历史，不能再将Windows MSVC标为未编译；这仍不等于Windows11完整系统交互验收。

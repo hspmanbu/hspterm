@@ -449,6 +449,15 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     if (themeAvailable) unawaited(appearance.choose(value));
   }
 
+  @override
+  Future<void> applyTheme(bool value) async {
+    if (!themeAvailable) throw StateError('外观设置尚未就绪');
+    await appearance.choose(value);
+    if (appearance.value?.light != value) {
+      throw StateError(appearance.error ?? '外观设置未确认保存');
+    }
+  }
+
   late final configurationBackups = ConfigurationBackupController(
     onRestored: _afterBackupRestored,
   );

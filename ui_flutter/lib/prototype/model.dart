@@ -411,8 +411,18 @@ class WorkbenchModel extends ChangeNotifier {
     changed();
   }
 
+  Future<void> applyTheme(bool value) async => chooseTheme(value);
+
   double sidebarWidth = 380, queueHeight = 238, hostListWidth = 290;
   final settings = <String, Object>{};
+  String? requestedHostId, requestedHostCategory;
+  void editHostSettings(String id, {String category = '连接'}) {
+    if (!hosts.any((host) => host.id == id)) return;
+    requestedHostId = id;
+    requestedHostCategory = category;
+    show(WorkPage.hosts);
+  }
+
   bool get fileFoldersFirst => (settings['目录优先'] ?? true) as bool;
   bool get fileShowHidden => (settings['显示隐藏文件'] ?? false) as bool;
   bool get fileCompact => settings['默认视图'] == '紧凑列表';
