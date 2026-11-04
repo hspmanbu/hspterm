@@ -879,3 +879,8 @@ Windows功能源码已接入正式工作台，本机可执行的统一验证已�
 
 - 修正已发布为1aef4b9c6bc93db5f0019f47c19fec618e6c040a；远端树9b9192f4c38a624a3d363b940a48b7d957446921与本地修正6c4e17c完全一致，父提交411f60c保留。小文档提交可正常Git push，含workflow的push仍500，故使用Git Data API与连接器非force租约发布；本地修正历史额外保留在ci-attempt-6c4e17c/ci-local-fix。
 - 第二轮run41813471598/job126518251196： https://github.com/hspmanbu/hspterm/actions/runs/41813471598 ，已实际启动，待工具安装、正规生成/编译/分析/基础窗口启动结果。当前无可宣称成功的Windows可分发包；后续恢复直接查询本run，不重复导入源码或触发重复runner。
+
+### 内存修正已发布并触发Windows构建（2026-11-04）
+
+- 本次修正已发布df2fd9ef93ecf65efc4840cb3e879ec0d94e67aa，树773d00e33f0954b484167f0b26f4a503d192b591与本地ebe0aaa完全一致；API保留原父提交0b9b170并以预期head非force更新。本地额外历史在settings-memory-local-ebe0aaa，main跟踪远端且工作区内容一致。
+- 新Windows run41820174611已实际运行： https://github.com/hspmanbu/hspterm/actions/runs/41820174611 。等待正式生成/构建/Analyze/19组件测试/启动退出；成功程序包仍叫HSPTerm-windows-x64，新增windows-startup-memory为锁库首屏三个工作集/专用字节样本。尚未宣称本次Windows构建通过或用户Win11设置页实际降幅；恢复先查看该run，不重复构建旧源码。
