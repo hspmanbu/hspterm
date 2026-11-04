@@ -858,3 +858,10 @@ Windows功能源码已接入正式工作台，本机可执行的统一验证已�
 - push事件已自动触发Windows x64 build，run41811094676： https://github.com/hspmanbu/hspterm/actions/runs/41811094676 ，job126510236025。截至本记录，checkout/Python/Flutter/Rust MSVC/缓存准备通过，正在首次安装固定桥接工具；尚未完成编译或产生可宣称通过的Windows包。
 - GitHub连接器可查询作业/日志/Artifacts，但不提供本次push run列表和批量大文件上传接口；这两项使用本机现有Git凭据在内存调用GitHub API，不写入/打印令牌。/tmp/hspterm_github_ci.py可读取run/手动dispatch；/tmp/hspterm-github-import-state.json仅保存对象SHA/状态不含认证。已经发布，不能盲重跑旧import脚本覆盖新main。
 - 接续：优先读取上述run/job状态及首次Windows编译失败日志，自主修复普通编译/打包/启动问题；最终Artifact名HSPTerm-windows-x64，下载解压即完整Release目录。仍不将Windows Server2022基础启动视为Windows11键盘/IME/OLE/DPAPI验收。
+
+### 首次Windows Actions失败与修正（2026-11-04）
+
+- run41811094676已实际结束失败；Python/Flutter/Rust MSVC/两桥接工具及Windows/VS doctor均通过。失败发生在正规FRB生成的compute_mod_from_rust_path：显式相对rust_output变为普通D:\a路径，而规范crate-root是\\?\D:\a，strip_prefix报prefix not found；尚未编译C++或产生程序包。不是Android doctor的Java/许可证提示导致。
+- 已核对FRB2.13.0原始rust_path_parser.rs：省略rust_output时从已经规范化的crate-root生成同一src/frb_generated.rs，避免两种Windows路径前缀混用。现使用该默认值，不跳过生成、不改生成文件、不升级FRB。
+- 加入Bash内嵌rcfile的text/eol=lf属性；用core.autocrlf=true实际检出过滤模拟，普通Rust文本转换CRLF的同时Bash正文仍与Git blob逐字节一致，bash -n通过。避免Windows客户端将CRLF载入远端Bash。
+- Rust缓存改独立restore/save，失败时也保存已编译工具和依赖，避免后续修复反复冷编译；workflow增加.gitattributes触发。准备提交并运行第二轮，首轮真实失败保留。

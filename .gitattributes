@@ -2,3 +2,6 @@
 vendor/alacritty_terminal/tests/ref/** -text -diff
 # Keep the published SFTP sources' mixed LF/CRLF endings during small patches.
 vendor/russh-sftp/** whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
+# Embedded remote Bash rcfile must retain LF on Windows checkouts.
+crates/ssh-core/src/integration/*.bash text eol=lf
