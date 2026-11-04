@@ -1,0 +1,37 @@
+{
+  "environment": "Ubuntu release CPU-only synthetic visible grid",
+  "columns": 4096,
+  "rows": 2,
+  "input": "8000 ASCII A bytes",
+  "pattern": "(?:.*[^A-Z]|[A-Z])",
+  "before": [
+    {
+      "rules": 1,
+      "elapsed_ms": 1.258,
+      "limited": true,
+      "painted_cells": 4224
+    },
+    {
+      "rules": 32,
+      "elapsed_ms": 32.174,
+      "limited": true,
+      "painted_cells": 4224
+    }
+  ],
+  "after": [
+    {
+      "rules": 1,
+      "elapsed_ms": 1.286,
+      "limited": true,
+      "painted_cells": 4224
+    },
+    {
+      "rules": 32,
+      "elapsed_ms": 8.007,
+      "limited": true,
+      "painted_cells": 0
+    }
+  ],
+  "frame_budget_ms": 8,
+  "scope": "budget checked between bounded regex matches; no hard realtime or end-to-end latency claim"
+}

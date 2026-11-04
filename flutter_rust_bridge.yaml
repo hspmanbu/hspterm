@@ -1,0 +1,7 @@
+rust_input: crate::api
+rust_root: crates/frb-bridge
+dart_output: ui_flutter/lib/src/rust
+rust_output: crates/frb-bridge/src/frb_generated.rs
+web: false
+auto_upgrade_dependency: false
+type_64bit_int: true

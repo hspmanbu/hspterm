@@ -1,0 +1,37 @@
+[package]
+name = "hspterm-frb-bridge"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+# Flutter loads the shared library; rlib supports core tests. No consumer links a static archive.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+flutter_rust_bridge = "=2.13.0"
+hspterm-ssh-core = { path = "../ssh-core" }
+hspterm-term-core = { path = "../term-core" }
+hspterm-storage-sync = { path = "../storage-sync" }
+russh-sftp.workspace = true
+alacritty_terminal.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rand.workspace = true
+zeroize.workspace = true
+anyhow = "1"
+sha2 = "0.11"
+# Application-private boundary: packet logs cannot bypass bounded diagnostics.
+log = { version = "0.4", features = ["max_level_off"] }
+futures-util = "0.3"
+
+tempfile.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

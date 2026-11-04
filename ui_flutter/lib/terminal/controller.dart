@@ -1,0 +1,973 @@
+import 'dart:async';
+import 'dart:math';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_rust_bridge/flutter_rust_bridge.dart'
+    show AnyhowException;
+
+import '../src/rust/api.dart' as rust;
+import '../src/rust/tmux.dart' as tmx;
+import 'backend.dart';
+import 'notifications.dart';
+
+typedef TerminalTransportInfo = ({
+  int? rttMicros,
+  int? columns,
+  int? rows,
+  bool? sizeLocked,
+});
+
+class TerminalController extends ChangeNotifier {
+  final transportInfo = ValueNotifier<TerminalTransportInfo>((
+    rttMicros: null,
+    columns: null,
+    rows: null,
+    sizeLocked: null,
+  ));
+  void _roundTrip(int? sample) {
+    final old = transportInfo.value;
+    transportInfo.value = (
+      rttMicros: sample,
+      columns: old.columns,
+      rows: old.rows,
+      sizeLocked: old.sizeLocked,
+    );
+  }
+
+  TerminalController(this.backend);
+  final TerminalBackend backend;
+  int? id;
+  String phase = 'Idle';
+  String? error;
+  String? reconnectNotice;
+  int _connectNoticeEpoch = 0;
+  void dismissReconnectNotice() {
+    reconnectNotice = null;
+    if (!_disposed) notifyListeners();
+  }
+
+  String? profileId;
+  String connectionLabel = '当前SSH终端';
+  String title = 'HSPTerm';
+  bool visible = true;
+  rust.RenderFrame? metadata;
+  List<List<rust.RenderCell>> rows = [];
+  List<int> rowVersions = [];
+  List<List<rust.RenderHyperlink>> hyperlinks = [];
+  Point<int>? selectionStart, selectionEnd;
+  int frameCount = 0;
+  int reconnectCount = 0;
+  int generation = 0;
+  int directoryReportVersion = 0;
+  String? reportedDirectory;
+  Future<void> _inputTail = Future.value();
+  Future<void> _ordered(Future<void> Function(int) action) {
+    final value = id, expected = generation;
+    if (value == null) return Future.value();
+    return _inputTail = _inputTail
+        .then((_) async {
+          if (!_disposed && connected && expected == generation) {
+            await action(value);
+          }
+        })
+        .catchError(report);
+  }
+
+  bool _disposed = false;
+  bool _notifiersDisposed = false;
+  Future<void>? _startFuture;
+  StreamSubscription<rust.BridgeEvent>? _subscription;
+  final _streamClosed = Completer<void>();
+  Future<void> _frameTail = Future.value();
+  Future<void> _visibilityTail = Future.value();
+  Future<void> _nativeVisibility(int value, bool shown) =>
+      _visibilityTail = _visibilityTail
+          .then((_) async {
+            if (!_disposed) await backend.visible(value, shown);
+          })
+          .catchError(report);
+  Timer? _resizeTimer;
+  Timer? _searchTimer;
+  int _searchToken = 0;
+  String searchQuery = '';
+  bool searchRegex = false, searchCaseSensitive = false, searchBusy = false;
+  String? searchError;
+  rust.SearchSummary? searchSummary;
+  rust.SearchLocation? activeSearch;
+  int searchOrdinal = -1;
+  bool osc52Enabled = true;
+  bool rightClickPaste = false;
+  int newOutputLines = 0;
+  (int, int, int, int)? _desiredSize;
+  Future<bool> Function(rust.BridgeEvent)? confirmHostKey;
+  Future<tmx.TmuxSelection?> Function(tmx.TmuxPrompt)? chooseTmux;
+  int? _tmuxToken;
+  bool? tmuxReadonly;
+  int? _tmuxStateGeneration;
+  bool? _pendingTmuxMode;
+
+  /// Small runtime invalidation only; it never repaints terminal cells or
+  /// notifies the whole workbench. A visible management view may subscribe.
+  final forwardingChanges = ValueNotifier<int>(0);
+  final agentChanges = ValueNotifier<int>(0);
+  final notices = ValueNotifier<RemoteTerminalNotice?>(null);
+  String? notificationPolicy;
+  int? _notificationPolicyGeneration;
+  bool acceptsNotice(RemoteTerminalNotice notice) =>
+      !_disposed &&
+      connected &&
+      _notificationPolicyGeneration == generation &&
+      notificationPolicy == notice.policy;
+
+  /// Source-bound dialogs can retire without repainting a disposing view.
+  final closingChanges = ValueNotifier<bool>(false);
+  final shellInputChanges = ValueNotifier<int>(0);
+  Future<void> flushInput() async {
+    // Input can be appended while a controlled operation is awaiting its ACK.
+    // Read candidates only after the latest tail, not an earlier snapshot.
+    while (!_disposed) {
+      final pending = _inputTail;
+      await pending;
+      if (identical(pending, _inputTail)) return;
+    }
+  }
+
+  /// Keep controlled actions ordered with real keys/IME commits. A stale source
+  /// is proved unsent; an unknown native outcome is never repeated here.
+  Future<String> controlledInput(Future<String> Function(int, int) action) {
+    final native = id, expected = generation;
+    if (_disposed || !connected || native == null) {
+      return Future.value('Unavailable');
+    }
+    final work = _inputTail.then((_) async {
+      if (_disposed || !connected || id != native || generation != expected) {
+        return 'Unavailable';
+      }
+      return action(native, expected);
+    });
+    _inputTail = work.then<void>(
+      (_) {},
+      onError: (Object error) {
+        report(error);
+      },
+    );
+    // External controlled actions (for example an SFTP path drop) must retire
+    // visible candidates immediately, before another local Enter can select
+    // a stale prefix. This notifier never repaints the terminal grid.
+    if (!_notifiersDisposed) shellInputChanges.value++;
+    return work;
+  }
+
+  /// Refresh non-secret target metadata before an explicit connection attempt.
+  VoidCallback? prepareConnection;
+  Future<void> Function(int id, String profileId)? connectRequest;
+  Future<void> Function()? reconnectRequest;
+  bool _requestingReconnect = false;
+  bool get connected => !_disposed && phase == 'Connected';
+  bool get isClosing => _disposed;
+  bool get shutdownComplete => _shutdownComplete;
+
+  Future<void> start() {
+    if (_disposed) return Future.value();
+    return _startFuture ??= _start();
+  }
+
+  Future<void> _start() async {
+    final value = await backend.create();
+    // Shutdown owns even a late handle. Never lose it if native close fails.
+    id = value;
+    if (_disposed) return;
+    if (!visible) await _nativeVisibility(value, false);
+    if (_disposed) return;
+    _subscription = backend
+        .watch(value)
+        .listen(
+          (event) => unawaited(_event(value, event).catchError(report)),
+          onError: (Object failure) => report(failure),
+          onDone: () {
+            if (!_streamClosed.isCompleted) _streamClosed.complete();
+          },
+        );
+    final desired = _desiredSize;
+    if (desired != null) {
+      await backend.resize(
+        value,
+        desired.$1,
+        desired.$2,
+        desired.$3,
+        desired.$4,
+      );
+    }
+  }
+
+  Future<void> _chooseTmux(int value, rust.BridgeEvent event) async {
+    if (_tmuxToken == event.requestId) return;
+    final token = event.requestId, expected = event.generation;
+    _tmuxToken = token;
+    bool current() =>
+        !_disposed &&
+        id == value &&
+        generation == expected &&
+        phase == 'Connecting';
+    tmx.TmuxSelection? choice;
+    try {
+      final prompt = await backend.tmuxPrompt(value, token);
+      // The independently coalesced status event can follow this prompt. The
+      // native read validates its actual original Connecting attempt first.
+      if (!_disposed &&
+          id == value &&
+          generation < expected &&
+          prompt.generation == expected &&
+          phase != 'Closed') {
+        reportedDirectory = null;
+        directoryReportVersion++;
+        generation = expected;
+        phase = 'Connecting';
+        error = null;
+        notifyListeners();
+      }
+      if (current() && prompt.generation == expected) {
+        choice = await chooseTmux?.call(prompt);
+      }
+    } catch (failure) {
+      if (current()) report(failure);
+    } finally {
+      if (!current()) choice = null;
+      try {
+        await backend.answerTmux(
+          value,
+          expected,
+          token,
+          choice ??
+              const tmx.TmuxSelection(
+                kind: 0,
+                readonly: false,
+                takeoverConfirmed: false,
+                lockSize: false,
+              ),
+        );
+      } catch (failure) {
+        if (current()) report(failure);
+      }
+    }
+  }
+
+  void report(Object failure) {
+    if (_disposed) return;
+    // Rust has already reduced these to the audited public error boundary.
+    // Event-stream details use the same message; do not expose the FFI wrapper
+    // or change an existing cancellation merely because its Future completes late.
+    error = failure is AnyhowException ? failure.message : failure.toString();
+    notifyListeners();
+  }
+
+  // Native clipboard events exist only after SSH authentication. The separately
+  // delivered status stream may still show Connecting for the same generation.
+  bool _clipboardAllowed(int requestGeneration) =>
+      osc52Enabled &&
+      requestGeneration == generation &&
+      (phase == 'Connected' || phase == 'Connecting');
+
+  Future<void> _event(int value, rust.BridgeEvent event) async {
+    if (_disposed) return;
+    switch (event.kind) {
+      case 'frame':
+        _frameTail = _frameTail
+            .then((_) async {
+              if (_disposed) return;
+              final frame = await backend.frame(value);
+              if (!_disposed && frame != null) applyFrame(frame);
+            })
+            .catchError(report);
+        await _frameTail;
+      case 'status':
+        final newlyConnected =
+            event.text == 'Connected' &&
+            (phase != 'Connected' || generation != event.generation);
+        if (generation != event.generation ||
+            (event.text != 'Connected' && event.text != 'Connecting')) {
+          reportedDirectory = null;
+          directoryReportVersion++;
+        }
+        if (generation != event.generation) {
+          tmuxReadonly = _tmuxStateGeneration == event.generation
+              ? _pendingTmuxMode
+              : null;
+        }
+        generation = event.generation;
+        phase = event.text ?? phase;
+        error = event.detail;
+        _roundTrip(connected ? event.rttMicros : null);
+        notifyListeners();
+        // A host-key/tmux choice can outlive a layout change. Startup used its
+        // captured PTY size; replay the latest layout once after connection.
+        // Rust's actual size lock remains authoritative and rejects resizing.
+        if (newlyConnected) _scheduleResize();
+      case 'latency':
+        if (connected && generation == event.generation) {
+          _roundTrip(event.rttMicros);
+        }
+        break;
+      case 'agent':
+        if (event.generation == generation) {
+          agentChanges.value++;
+        }
+        break;
+      case 'forwardings':
+        if (event.generation == generation) {
+          forwardingChanges.value++;
+        }
+      case 'workingDirectory':
+        if (event.generation != generation ||
+            (!connected && phase != 'Connecting')) {
+          return;
+        }
+        // A trigger only. The model must validate the original actual SSH endpoint in Rust.
+        reportedDirectory = event.text;
+        directoryReportVersion++;
+        notifyListeners();
+      case 'tmuxState':
+        if (event.generation < generation ||
+            !['shell', 'readonly', 'control'].contains(event.text)) {
+          return;
+        }
+        _tmuxStateGeneration = event.generation;
+        _pendingTmuxMode = event.text == 'shell'
+            ? null
+            : event.text == 'readonly';
+        if (event.generation == generation) {
+          tmuxReadonly = _pendingTmuxMode;
+          notifyListeners();
+        }
+      case 'tmux':
+        await _chooseTmux(value, event);
+      case 'hostKey':
+      case 'jumpHostKey':
+        var accepted = false;
+        try {
+          accepted = await confirmHostKey?.call(event) ?? false;
+        } finally {
+          // A failed UI confirmation must reject, not leave the remote handshake
+          // waiting forever with its security-confirmation timeout paused.
+          if (!_disposed) {
+            await backend.hostKey(value, event.requestId, accepted);
+          }
+        }
+      case 'clipboardWrite':
+        if (!_clipboardAllowed(event.generation)) {
+          return;
+        }
+        await Clipboard.setData(ClipboardData(text: event.text ?? ''));
+      case 'clipboardRead':
+        if (!_clipboardAllowed(event.generation)) {
+          return;
+        }
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        if (!_disposed && _clipboardAllowed(event.generation)) {
+          await backend.clipboard(value, event.requestId, data?.text ?? '');
+        }
+      case 'shellInput':
+        if (event.generation == generation) shellInputChanges.value++;
+      case 'historyWarning':
+        if (event.generation == generation) {
+          report(StateError('合格命令历史未获保存确认；终端输入继续。'));
+        }
+      case 'title':
+        title = event.text ?? 'HSPTerm';
+        notifyListeners();
+      case 'reconnected':
+        reconnectCount++;
+        selectionStart = selectionEnd = null;
+        notifyListeners();
+      case 'bell':
+        // A local visual signal; no terminal output is copied into diagnostics.
+        notifyListeners();
+      case 'notification':
+        if (id == value &&
+            connected &&
+            generation == event.generation &&
+            event.text != null) {
+          final notice = RemoteTerminalNotice.decode(event.text!);
+          if (acceptsNotice(notice)) notices.value = notice;
+        }
+      case 'notificationPolicy':
+        if (id == value &&
+            event.generation >= generation &&
+            event.text != null &&
+            RegExp(r'^[1-9][0-9]{0,19}$').hasMatch(event.text!)) {
+          if (notificationPolicy != event.text ||
+              _notificationPolicyGeneration != event.generation) {
+            notices.value = null;
+          }
+          notificationPolicy = event.text;
+          _notificationPolicyGeneration = event.generation;
+        }
+    }
+  }
+
+  // Display-only refreshes must not change the user's real selection. Check
+  // raw text and mapping flags as well as the content/viewport identity; this
+  // also protects against malformed frames with an unchanged content revision.
+  bool _selectionUnchanged(rust.RenderFrame frame) {
+    final old = metadata, a = selectionStart, b = selectionEnd;
+    if (old == null ||
+        a == null ||
+        b == null ||
+        old.contentRevision != frame.contentRevision ||
+        old.columns != frame.columns ||
+        old.rows != frame.rows ||
+        old.historyLines != frame.historyLines ||
+        old.displayOffset != frame.displayOffset ||
+        old.alternateScreen != frame.alternateScreen ||
+        old.mouseReporting != frame.mouseReporting ||
+        rows.length != frame.rows) {
+      return false;
+    }
+    final reversed = a.y > b.y || (a.y == b.y && a.x > b.x);
+    final start = reversed ? b : a, end = reversed ? a : b;
+    for (final row in frame.changedRows) {
+      if (row.index < start.y || row.index > end.y) continue;
+      if (row.index >= rows.length ||
+          row.cells.length != rows[row.index].length) {
+        return false;
+      }
+      final before = rows[row.index],
+          left = row.index == start.y ? start.x : 0,
+          right = row.index == end.y ? end.x : before.length - 1;
+      if (left < 0 || right >= before.length) return false;
+      for (var x = left; x <= right; x++) {
+        if (before[x].text != row.cells[x].text ||
+            before[x].flags & (16 | 32 | 64 | 256 | 1024) !=
+                row.cells[x].flags & (16 | 32 | 64 | 256 | 1024)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  void applyFrame(rust.RenderFrame frame) {
+    if (_disposed) return;
+    if (frame.osc52Enabled != null) osc52Enabled = frame.osc52Enabled!;
+    if (frame.rightClickPaste != null) rightClickPaste = frame.rightClickPaste!;
+    if (!_selectionUnchanged(frame)) selectionStart = selectionEnd = null;
+    if (frame.full ||
+        rows.length != frame.rows ||
+        (rows.isNotEmpty && rows.first.length != frame.columns)) {
+      rows = List.generate(frame.rows, (_) => <rust.RenderCell>[]);
+      rowVersions = List.filled(frame.rows, 0);
+      hyperlinks = List.generate(frame.rows, (_) => <rust.RenderHyperlink>[]);
+    }
+    for (final row in frame.changedRows) {
+      if (row.index >= rows.length || row.cells.length != frame.columns) {
+        report(StateError('终端增量尺寸不一致'));
+        return;
+      }
+      rows[row.index] = row.cells;
+      hyperlinks[row.index] = row.hyperlinks ?? const [];
+      rowVersions[row.index] = frameCount + 1;
+    }
+    final previous = metadata;
+    if (previous != null &&
+        previous.contentRevision != frame.contentRevision &&
+        searchQuery.isNotEmpty) {
+      activeSearch = null;
+      searchSummary = null;
+      searchOrdinal = -1;
+      _searchTimer?.cancel();
+      _searchTimer = Timer(
+        const Duration(milliseconds: 300),
+        () => unawaited(runSearch(navigate: false)),
+      );
+    }
+    if (frame.displayOffset == 0) {
+      newOutputLines = 0;
+    } else if (previous != null &&
+        previous.columns == frame.columns &&
+        previous.rows == frame.rows) {
+      newOutputLines += (frame.outputLines - previous.outputLines).clamp(
+        0,
+        1000000,
+      );
+    }
+    metadata = frame;
+    transportInfo.value = (
+      rttMicros: transportInfo.value.rttMicros,
+      columns: frame.columns,
+      rows: frame.rows,
+      sizeLocked: frame.sizeLocked,
+    );
+    frameCount++;
+    notifyListeners();
+  }
+
+  Future<void> connect(String savedProfileId, {String? label}) async {
+    final value = id;
+    if (_disposed || value == null || phase == 'Connecting' || connected) {
+      return;
+    }
+    profileId = savedProfileId;
+    if (label != null) connectionLabel = label;
+    phase = 'Connecting';
+    error = null;
+    reconnectNotice = null;
+    final noticeEpoch = ++_connectNoticeEpoch;
+    try {
+      prepareConnection?.call();
+      notifyListeners();
+      await (connectRequest?.call(value, savedProfileId) ??
+          backend.connect(value, savedProfileId));
+      final notices = backend;
+      if (notices is TerminalReconnectNoticeBackend) {
+        String? message;
+        try {
+          message = await (notices as TerminalReconnectNoticeBackend)
+              .reconnectNotice(value);
+        } catch (_) {
+          message = 'SSH已连接，但未取得传输恢复报告；请检查任务队列。';
+        }
+        if (!_disposed && id == value && noticeEpoch == _connectNoticeEpoch) {
+          reconnectNotice = message;
+          notifyListeners();
+        }
+      }
+    } catch (failure) {
+      if (_disposed || noticeEpoch != _connectNoticeEpoch) return;
+      phase = 'Failed';
+      report(failure);
+    }
+  }
+
+  Future<void> reconnect() async {
+    if (_disposed ||
+        connected ||
+        phase == 'Connecting' ||
+        _requestingReconnect) {
+      return;
+    }
+    _requestingReconnect = true;
+    try {
+      if (reconnectRequest != null) {
+        await reconnectRequest!();
+      } else {
+        final profile = profileId;
+        if (profile != null) await connect(profile);
+      }
+    } catch (error) {
+      report(error);
+    } finally {
+      _requestingReconnect = false;
+    }
+  }
+
+  Future<void> key(rust.KeyboardInput input) async {
+    final value = id;
+    if (value == null) return;
+    if (!connected) {
+      if (input.key == 'Enter' &&
+          input.kind == 0 &&
+          (phase == 'Disconnected' || phase == 'Failed')) {
+        await reconnect();
+      }
+      return;
+    }
+    try {
+      await _ordered((id) => backend.key(id, input));
+    } catch (failure) {
+      report(failure);
+    }
+  }
+
+  Future<void> text(String text) async {
+    final value = id;
+    if (value != null && connected && text.isNotEmpty) {
+      try {
+        await _ordered((id) => backend.text(id, text));
+      } catch (failure) {
+        report(failure);
+      }
+    }
+  }
+
+  Future<rust.PasteResult> paste(String text, bool confirmed) {
+    final result = Completer<rust.PasteResult>();
+    final value = id, expected = generation;
+    _inputTail = _inputTail
+        .then((_) async {
+          if (value == null ||
+              _disposed ||
+              !connected ||
+              generation != expected) {
+            throw StateError('粘贴所属连接已结束');
+          }
+          result.complete(await backend.paste(value, text, confirmed));
+        })
+        .catchError((Object error, StackTrace stack) {
+          if (!result.isCompleted) result.completeError(error, stack);
+        });
+    return result.future;
+  }
+
+  Future<void> mouse(
+    int column,
+    int row,
+    int action,
+    int button,
+    int modifiers,
+  ) => _ordered(
+    (value) => backend.mouse(value, column, row, action, button, modifiers),
+  );
+  Future<void> focus(bool value) => _ordered((id) => backend.focus(id, value));
+  Future<void> scroll(int lines) async {
+    final value = id;
+    if (!_disposed && value != null) await backend.scroll(value, lines);
+  }
+
+  Future<void> seek(int topRow) async {
+    final value = id;
+    if (!_disposed && value != null) await backend.seek(value, topRow);
+  }
+
+  bool get commandOperationsAvailable => backend is TerminalCommandsBackend;
+  Future<String?> copyCommandAt(int row, int column, int revision) async {
+    final source = backend, value = id, originalGeneration = generation;
+    if (source is! TerminalCommandsBackend ||
+        value == null ||
+        _disposed ||
+        phase == 'Connecting' ||
+        phase == 'Closed') {
+      return null;
+    }
+    final text = await (source as TerminalCommandsBackend).copyCommandAt(
+      value,
+      originalGeneration,
+      revision,
+      row,
+      column,
+    );
+    if (_disposed ||
+        id != value ||
+        generation != originalGeneration ||
+        phase == 'Connecting' ||
+        phase == 'Closed') {
+      return null;
+    }
+    return text;
+  }
+
+  Future<void> navigateCommand(bool next, int topRow, int revision) async {
+    final source = backend, value = id, originalGeneration = generation;
+    if (source is! TerminalCommandsBackend ||
+        value == null ||
+        _disposed ||
+        phase == 'Connecting' ||
+        phase == 'Closed') {
+      return;
+    }
+    await (source as TerminalCommandsBackend).navigateCommand(
+      value,
+      originalGeneration,
+      revision,
+      topRow,
+      next,
+    );
+  }
+
+  Future<void> lockSize(bool locked) async {
+    if (_disposed) return;
+    final value = id;
+    if (value != null) {
+      await backend.lockSize(value, locked);
+      final desired = _desiredSize;
+      if (!_disposed && !locked && desired != null) {
+        await backend.resize(
+          value,
+          desired.$1,
+          desired.$2,
+          desired.$3,
+          desired.$4,
+        );
+      }
+    }
+  }
+
+  Future<void> setOsc52(bool enabled) async {
+    if (_disposed) return;
+    final value = id;
+    final previous = osc52Enabled;
+    osc52Enabled = enabled;
+    if (!_disposed) notifyListeners();
+    try {
+      if (value != null) await backend.clipboardEnabled(value, enabled);
+    } catch (_) {
+      osc52Enabled = previous;
+      if (!_disposed) notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> setSearch(
+    String query, {
+    bool? regex,
+    bool? caseSensitive,
+  }) async {
+    if (_disposed) return;
+    searchQuery = query;
+    searchRegex = regex ?? searchRegex;
+    searchCaseSensitive = caseSensitive ?? searchCaseSensitive;
+    _searchTimer?.cancel();
+    _searchToken++;
+    searchSummary = null;
+    activeSearch = null;
+    searchOrdinal = -1;
+    searchError = null;
+    if (query.isEmpty) {
+      final value = id;
+      if (value != null) await backend.search(value, '', false, false);
+      if (!_disposed) notifyListeners();
+      return;
+    }
+    _searchTimer = Timer(
+      const Duration(milliseconds: 200),
+      () => unawaited(runSearch()),
+    );
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> runSearch({bool navigate = true}) async {
+    final value = id;
+    if (value == null || _disposed || searchQuery.isEmpty) return;
+    _searchTimer?.cancel();
+    final token = ++_searchToken;
+    searchBusy = true;
+    searchError = null;
+    notifyListeners();
+    try {
+      final summary = await backend.search(
+        value,
+        searchQuery,
+        searchRegex,
+        searchCaseSensitive,
+      );
+      if (_disposed || token != _searchToken) return;
+      if (summary.revision != metadata?.contentRevision) {
+        searchSummary = null;
+        return;
+      }
+      searchSummary = summary;
+      searchOrdinal = -1;
+      activeSearch = null;
+      if (navigate && summary.count > 0) await navigateSearch(1);
+    } catch (error) {
+      if (!_disposed && token == _searchToken) searchError = error.toString();
+    } finally {
+      if (!_disposed && token == _searchToken) {
+        searchBusy = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> navigateSearch(int direction) async {
+    final value = id, summary = searchSummary;
+    if (_disposed ||
+        value == null ||
+        summary == null ||
+        summary.count == 0 ||
+        summary.revision != metadata?.contentRevision) {
+      return;
+    }
+    final ordinal = (searchOrdinal + direction) % summary.count;
+    try {
+      final location = await backend.navigate(value, ordinal);
+      if (!_disposed && location.revision == metadata?.contentRevision) {
+        activeSearch = location;
+        searchOrdinal = ordinal;
+        notifyListeners();
+      }
+    } catch (error) {
+      if (!_disposed) {
+        searchError = error.toString();
+        notifyListeners();
+      }
+    }
+  }
+
+  void resize(int columns, int lines, double width, double height) {
+    if (_disposed) return;
+    final desired = (
+      columns.clamp(2, 4096),
+      lines.clamp(2, 4096),
+      width.round().clamp(1, 65535),
+      height.round().clamp(1, 65535),
+    );
+    if (desired == _desiredSize) return;
+    _desiredSize = desired;
+    _scheduleResize();
+  }
+
+  void _scheduleResize() {
+    _resizeTimer?.cancel();
+    final desired = _desiredSize;
+    if (desired == null || _disposed) return;
+    _resizeTimer = Timer(const Duration(milliseconds: 60), () async {
+      final value = id;
+      if (value == null || _disposed) return;
+      final expected = generation;
+      try {
+        await backend.resize(
+          value,
+          desired.$1,
+          desired.$2,
+          desired.$3,
+          desired.$4,
+        );
+      } catch (failure) {
+        if (!_disposed && id == value && generation == expected) {
+          report(failure);
+        }
+      }
+    });
+  }
+
+  Future<void> setVisible(bool value) async {
+    if (_disposed) return;
+    if (visible == value) return;
+    visible = value;
+    final terminal = id;
+    if (terminal != null) await _nativeVisibility(terminal, value);
+    // A snapshot already taken by Rust advances its delta baseline. Drain that
+    // reply before hiding completes; discarding it would corrupt the next delta.
+    if (!value) await _frameTail;
+    if (!_disposed) notifyListeners();
+  }
+
+  void clearSelection() {
+    if (_disposed) return;
+    selectionStart = selectionEnd = null;
+    notifyListeners();
+  }
+
+  void select(Point<int> start, Point<int> end) {
+    if (_disposed) return;
+    Point<int> anchor(Point<int> p) {
+      if (p.y >= 0 &&
+          p.y < rows.length &&
+          p.x > 0 &&
+          p.x < rows[p.y].length &&
+          rows[p.y][p.x].flags & 64 != 0) {
+        return Point(p.x - 1, p.y);
+      }
+      return p;
+    }
+
+    selectionStart = anchor(start);
+    selectionEnd = anchor(end);
+    notifyListeners();
+  }
+
+  String selectedText() {
+    final a = selectionStart, b = selectionEnd;
+    if (a == null || b == null || rows.isEmpty) return '';
+    final reversed = a.y > b.y || (a.y == b.y && a.x > b.x);
+    final start = reversed ? b : a, end = reversed ? a : b;
+    final out = StringBuffer();
+    for (var y = start.y; y <= end.y && y < rows.length; y++) {
+      if (y < 0 || rows[y].isEmpty) continue;
+      final row = rows[y];
+      final left = y == start.y ? start.x : 0;
+      final right = y == end.y ? end.x : row.length - 1;
+      final text = StringBuffer();
+      for (var x = left; x <= right && x < row.length; x++) {
+        if (x >= 0 && row[x].flags & (64 | 1024) == 0) text.write(row[x].text);
+      }
+      final value = text.toString();
+      out.write(
+        row.last.flags & 16 != 0 || right < row.length - 1
+            ? value
+            : value.replaceFirst(RegExp(r' +$'), ''),
+      );
+      if (y < end.y && row.last.flags & 16 == 0) out.write('\n');
+    }
+    return out.toString();
+  }
+
+  Future<void>? _shutdownFuture;
+  bool _nativeClosed = false, _shutdownComplete = false;
+
+  /// Permanently stops interaction. Failures retain the native handle/stream
+  /// owner for an explicit retry; they never make this controller reusable.
+  Future<void> shutdown() {
+    if (!_disposed) {
+      _disposed = true;
+      phase = 'Closing';
+      _connectNoticeEpoch++;
+      _resizeTimer?.cancel();
+      _searchTimer?.cancel();
+      _searchToken++;
+      if (!_notifiersDisposed) closingChanges.value = true;
+      notifyListeners();
+    }
+    return _shutdownFuture ??= _shutdown().catchError((
+      Object error,
+      StackTrace stack,
+    ) {
+      _shutdownFuture = null;
+      this.error = '终端关闭收尾未确认，请重试关闭。不会重新连接。';
+      notifyListeners();
+      Error.throwWithStackTrace(error, stack);
+    });
+  }
+
+  Future<void> _shutdown() async {
+    // A create request cannot be cancelled. Its eventual handle must belong to
+    // this same retryable shutdown, including after ChangeNotifier disposal.
+    try {
+      await _startFuture;
+    } catch (_) {
+      // Startup reports its own failure; any allocated handle is still below.
+    }
+    await _visibilityTail;
+    await _frameTail;
+    await _inputTail;
+    if (!_nativeClosed) {
+      final value = id;
+      if (value != null) await backend.close(value);
+      _nativeClosed = true;
+      id = null;
+    }
+    // Native close confirmation and FRB port retirement are separate phases.
+    // A stream timeout must not repeat a successfully acknowledged destroy.
+    if (_subscription != null) {
+      await _streamClosed.future.timeout(const Duration(seconds: 5));
+      await _subscription!.cancel();
+      _subscription = null;
+    }
+    phase = 'Closed';
+    error = null;
+    _shutdownComplete = true;
+    notifyListeners();
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_notifiersDisposed) super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    if (_notifiersDisposed) return;
+    // The workbench retains retiring controllers and awaits shutdown itself.
+    // Dispose must not emit an unhandled error or erase its retryable owner.
+    _notifiersDisposed = true;
+    unawaited(shutdown().catchError((Object _) {}));
+    forwardingChanges.dispose();
+    agentChanges.dispose();
+    notices.dispose();
+    closingChanges.dispose();
+    shellInputChanges.dispose();
+    transportInfo.dispose();
+    super.dispose();
+  }
+}

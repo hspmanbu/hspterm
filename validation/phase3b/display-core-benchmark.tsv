@@ -1,0 +1,6 @@
+scenario	iterations	mean_ms	p95_ms	painted_cells	limited
+disabled	100	0.000051	0.000050	0	false
+keyword	100	0.136867	0.148660	295	false
+regex	100	0.165701	0.187484	295	false
+32_rules	100	0.268831	0.275238	295	false
+semantic_rainbow	100	0.351550	0.370920	2714	false

@@ -1,0 +1,4 @@
+# Upstream byte-exact terminal recordings and reference grids are test data.
+vendor/alacritty_terminal/tests/ref/** -text -diff
+# Keep the published SFTP sources' mixed LF/CRLF endings during small patches.
+vendor/russh-sftp/** whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

@@ -1,0 +1,154 @@
+name: Windows x64 build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-build.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'flutter_rust_bridge.yaml'
+      - 'crates/**'
+      - 'vendor/**'
+      - 'tools/**'
+      - 'ui_flutter/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-x64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RUSTUP_TOOLCHAIN: 1.99.1-x86_64-pc-windows-msvc
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          architecture: x64
+          cache: true
+
+      - name: Set up Rust MSVC
+        run: |
+          rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal --component rustfmt --component clippy
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain installation failed' }
+          rustup target add x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw 'Rust MSVC target installation failed' }
+
+      - name: Set tool installation directory
+        run: |
+          $root = Join-Path $env:RUNNER_TOOL_CACHE 'hspterm-cargo-tools'
+          "CARGO_INSTALL_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Cache Rust dependencies and tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            ${{ env.CARGO_INSTALL_ROOT }}
+          key: windows-msvc-rust-1.99.1-frb-2.13.0-expand-1.0.127-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install fixed bridge tools
+        run: |
+          $bin = Join-Path $env:CARGO_INSTALL_ROOT 'bin'
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:PATH = "$bin;$env:PATH"
+          if (-not (Test-Path (Join-Path $bin 'cargo-expand.exe'))) {
+            cargo install cargo-expand --version 1.0.127 --locked
+            if ($LASTEXITCODE -ne 0) { throw 'cargo-expand installation failed' }
+          }
+          if (-not (Test-Path (Join-Path $bin 'flutter_rust_bridge_codegen.exe'))) {
+            cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
+            if ($LASTEXITCODE -ne 0) { throw 'FRB codegen installation failed' }
+          }
+          cargo expand --version
+          flutter_rust_bridge_codegen --version
+
+      - name: Verify Windows toolchain
+        run: |
+          flutter config --enable-windows-desktop
+          flutter doctor -v
+          if ($LASTEXITCODE -ne 0) { throw 'Flutter doctor failed' }
+          rustc --version
+          python --version
+
+      - name: Build formal workbench
+        id: build
+        run: ./tools/build_windows.ps1 -CreateArchive
+
+      - name: Analyze Flutter
+        working-directory: ui_flutter
+        run: flutter analyze --no-pub
+
+      - name: Check native Windows startup and normal exit
+        run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'ui_flutter/build/windows/x64/runner/Release/hspterm.exe'
+          $scratch = Join-Path $env:RUNNER_TEMP 'hspterm-startup'
+          New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+          $env:TEMP = $scratch
+          $env:TMP = $scratch
+          $process = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput (Join-Path $scratch 'stdout.log') -RedirectStandardError (Join-Path $scratch 'stderr.log')
+          try {
+            $deadline = [DateTime]::UtcNow.AddSeconds(45)
+            do {
+              Start-Sleep -Milliseconds 200
+              $process.Refresh()
+              if ($process.HasExited) { throw "HSPTerm exited before its window was ready: $($process.ExitCode)" }
+            } while ($process.MainWindowHandle -eq 0 -and [DateTime]::UtcNow -lt $deadline)
+            if ($process.MainWindowHandle -eq 0) { throw 'HSPTerm did not create its main window' }
+            Start-Sleep -Seconds 2
+            if (-not $process.CloseMainWindow()) { throw 'Main window close request was rejected' }
+            if (-not $process.WaitForExit(30000)) { throw 'Normal window exit did not finish' }
+            if ($process.ExitCode -ne 0) { throw "HSPTerm exit code: $($process.ExitCode)" }
+            $leftovers = @(Get-ChildItem -LiteralPath $scratch -Recurse -Directory -Filter 'run-*')
+            if ($leftovers.Count -ne 0) { throw 'Normal exit retained a private preview run' }
+          } finally {
+            $process.Refresh()
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+            $process.Dispose()
+          }
+
+      - name: Upload Windows application
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: HSPTerm-windows-x64
+          path: ui_flutter/build/windows/x64/runner/Release/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload startup diagnostics on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-startup-diagnostics
+          path: ${{ runner.temp }}/hspterm-startup/*.log
+          if-no-files-found: ignore
+          retention-days: 7

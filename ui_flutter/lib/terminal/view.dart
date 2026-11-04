@@ -1,0 +1,1079 @@
+import 'application_keys.dart';
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../src/rust/api.dart' as rust;
+import 'controller.dart';
+import 'suggestions.dart';
+import 'suggestions_overlay.dart';
+import 'painter.dart';
+import 'scrollbar.dart';
+import 'links.dart';
+import 'typography.dart';
+
+class TerminalView extends StatefulWidget {
+  const TerminalView({
+    super.key,
+    required this.controller,
+    this.fontSize = 15,
+    this.typography,
+    this.onLocatePath,
+    this.onOpenLink,
+  });
+  final TerminalController controller;
+  final double fontSize;
+  final TerminalTypography? typography;
+  final Future<void> Function(String)? onLocatePath;
+  final Future<void> Function(TerminalLink)? onOpenLink;
+  @override
+  State<TerminalView> createState() => TerminalViewState();
+}
+
+class TerminalViewState extends State<TerminalView>
+    with WidgetsBindingObserver, TextInputClient {
+  final _searchField = TextEditingController();
+  final _searchFocus = FocusNode(debugLabel: "terminal search");
+  bool _searchOpen = false;
+  late TerminalSuggestionsController _suggestions;
+  final _suggestionOwned = <PhysicalKeyboardKey>{};
+  final _focus = FocusNode(debugLabel: 'SSH terminal');
+  final _cache = TerminalPaintCache();
+  final _blink = ValueNotifier(true);
+  final _preedit = ValueNotifier('');
+  final _hoverLink = ValueNotifier<TerminalLink?>(null);
+  TextInputConnection? _connection;
+  Timer? _blinkTimer;
+  bool _active = true, _tickerVisible = true;
+  Point<int>? _anchor;
+  int _button = 3;
+  bool _remoteDrag = false;
+  Size _cell = const Size(9, 20);
+  static const _empty = TextEditingValue(
+    text: '\u200b',
+    selection: TextSelection.collapsed(offset: 1),
+  );
+  TextEditingValue _editing = _empty;
+  rust.KeyboardInput? _pendingTextKey;
+  TerminalController get c => widget.controller;
+  TerminalTypography get _typography =>
+      widget.typography ?? TerminalTypography(size: widget.fontSize);
+  void focusTerminal() => _focus.requestFocus();
+
+  Map<String, int> get debugCacheStats => {
+    "paints": _cache.paints,
+    "row_builds": _cache.rowBuilds,
+    "glyphs": _cache.glyphCount,
+    "row_pictures": _cache.rowCount,
+  };
+  void _run(Future<void> future) => unawaited(future.catchError(c.report));
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _focus.addListener(_focusChanged);
+    _searchFocus.onKeyEvent = (node, event) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.escape) {
+        hideSearch();
+        return KeyEventResult.handled;
+      }
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.enter) {
+        _run(
+          c.navigateSearch(HardwareKeyboard.instance.isShiftPressed ? -1 : 1),
+        );
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    };
+    c.addListener(_changed);
+    _suggestions = TerminalSuggestionsController(c);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _tickerVisible = TickerMode.valuesOf(context).enabled;
+    _visibility();
+  }
+
+  @override
+  void didUpdateWidget(TerminalView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != c) {
+      oldWidget.controller.removeListener(_changed);
+      _suggestions.dispose();
+      _suggestions = TerminalSuggestionsController(c);
+      c.addListener(_changed);
+      _cache.clear();
+      _pendingTextKey = null;
+      _editing = _empty;
+      _preedit.value = '';
+      _connection?.setEditingState(_empty);
+      _visibility();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _active = state == AppLifecycleState.resumed;
+    _visibility();
+  }
+
+  void _visibility() {
+    _run(c.setVisible(_active && _tickerVisible));
+    _changed();
+  }
+
+  void _syncSuggestions() {
+    final f = c.metadata;
+    _suggestions.setWanted(
+      _focus.hasFocus &&
+          _active &&
+          _tickerVisible &&
+          c.visible &&
+          c.connected &&
+          !_searchOpen &&
+          _pendingTextKey == null &&
+          !(_editing.composing.isValid && !_editing.composing.isCollapsed) &&
+          f != null &&
+          f.displayOffset == 0 &&
+          !f.alternateScreen &&
+          !f.mouseReporting,
+    );
+  }
+
+  Future<void> _chooseSuggestion(
+    bool execute, {
+    int? index,
+    String? ticket,
+  }) async {
+    final result = await _suggestions.choose(
+      execute: execute,
+      index: index,
+      expectedTicket: ticket,
+    );
+    if (!mounted || result == 'Applied') return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        content: Text(
+          result == 'Unavailable'
+              ? '普通Shell输入状态已改变，未发送候选。请继续正常输入。'
+              : '候选提交结果未确认，请检查终端；未自动重试。',
+        ),
+      ),
+    );
+  }
+
+  void _changed() {
+    _syncSuggestions();
+    _hoverLink.value = null;
+    final f = c.metadata;
+    final animate =
+        c.visible &&
+        _focus.hasFocus &&
+        f != null &&
+        f.cursorVisible &&
+        f.cursorBlink &&
+        f.cursorRow >= 0 &&
+        f.cursorRow < f.rows;
+    if (animate && _blinkTimer == null) {
+      _blinkTimer = Timer.periodic(
+        const Duration(milliseconds: 600),
+        (_) => _blink.value = !_blink.value,
+      );
+    }
+    if (!animate) {
+      _blinkTimer?.cancel();
+      _blinkTimer = null;
+      _blink.value = true;
+    }
+    if (_connection?.attached ?? false) {
+      final box = context.findRenderObject();
+      if (box is RenderBox && box.hasSize) {
+        _connection!.setEditableSizeAndTransform(
+          box.size,
+          box.getTransformTo(null),
+        );
+        if (f != null) {
+          _connection!.setCaretRect(
+            Rect.fromLTWH(
+              f.cursorColumn * _cell.width,
+              f.cursorRow.clamp(0, f.rows - 1) * _cell.height,
+              _cell.width,
+              _cell.height,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  void _focusChanged() {
+    if (_focus.hasFocus) {
+      _editing = _empty;
+      _preedit.value = '';
+      _connection = TextInput.attach(
+        this,
+        const TextInputConfiguration(
+          inputType: TextInputType.text,
+          inputAction: TextInputAction.done,
+          autocorrect: false,
+          enableSuggestions: false,
+        ),
+      );
+      _connection!
+        ..setEditingState(_editing)
+        ..show();
+    } else {
+      _connection?.close();
+      _connection = null;
+    }
+    final id = c.id;
+    if (id != null && c.connected) _run(c.focus(_focus.hasFocus));
+    _changed();
+    if (mounted) setState(() {});
+  }
+
+  int get _mods =>
+      (HardwareKeyboard.instance.isShiftPressed ? 1 : 0) |
+      (HardwareKeyboard.instance.isAltPressed ? 2 : 0) |
+      (HardwareKeyboard.instance.isControlPressed ? 4 : 0) |
+      (HardwareKeyboard.instance.isMetaPressed ? 8 : 0) |
+      (HardwareKeyboard.instance.lockModesEnabled.contains(
+            KeyboardLockMode.capsLock,
+          )
+          ? 64
+          : 0) |
+      (HardwareKeyboard.instance.lockModesEnabled.contains(
+            KeyboardLockMode.numLock,
+          )
+          ? 128
+          : 0);
+  static final _keys = <LogicalKeyboardKey, String>{
+    LogicalKeyboardKey.shiftLeft: 'ShiftLeft',
+    LogicalKeyboardKey.controlLeft: 'ControlLeft',
+    LogicalKeyboardKey.altLeft: 'AltLeft',
+    LogicalKeyboardKey.metaLeft: 'MetaLeft',
+    LogicalKeyboardKey.shiftRight: 'ShiftRight',
+    LogicalKeyboardKey.controlRight: 'ControlRight',
+    LogicalKeyboardKey.altRight: 'AltRight',
+    LogicalKeyboardKey.metaRight: 'MetaRight',
+    LogicalKeyboardKey.capsLock: 'CapsLock',
+    LogicalKeyboardKey.numLock: 'NumLock',
+    LogicalKeyboardKey.scrollLock: 'ScrollLock',
+    LogicalKeyboardKey.enter: 'Enter',
+    LogicalKeyboardKey.numpadEnter: 'Enter',
+    LogicalKeyboardKey.tab: 'Tab',
+    LogicalKeyboardKey.escape: 'Escape',
+    LogicalKeyboardKey.backspace: 'Backspace',
+    LogicalKeyboardKey.delete: 'Delete',
+    LogicalKeyboardKey.insert: 'Insert',
+    LogicalKeyboardKey.arrowUp: 'ArrowUp',
+    LogicalKeyboardKey.arrowDown: 'ArrowDown',
+    LogicalKeyboardKey.arrowLeft: 'ArrowLeft',
+    LogicalKeyboardKey.arrowRight: 'ArrowRight',
+    LogicalKeyboardKey.home: 'Home',
+    LogicalKeyboardKey.end: 'End',
+    LogicalKeyboardKey.pageUp: 'PageUp',
+    LogicalKeyboardKey.pageDown: 'PageDown',
+    LogicalKeyboardKey.f1: 'F1',
+    LogicalKeyboardKey.f2: 'F2',
+    LogicalKeyboardKey.f3: 'F3',
+    LogicalKeyboardKey.f4: 'F4',
+    LogicalKeyboardKey.f5: 'F5',
+    LogicalKeyboardKey.f6: 'F6',
+    LogicalKeyboardKey.f7: 'F7',
+    LogicalKeyboardKey.f8: 'F8',
+    LogicalKeyboardKey.f9: 'F9',
+    LogicalKeyboardKey.f10: 'F10',
+    LogicalKeyboardKey.f11: 'F11',
+    LogicalKeyboardKey.f12: 'F12',
+  };
+  bool _isModifier(LogicalKeyboardKey key) => {
+    LogicalKeyboardKey.shiftLeft,
+    LogicalKeyboardKey.shiftRight,
+    LogicalKeyboardKey.controlLeft,
+    LogicalKeyboardKey.controlRight,
+    LogicalKeyboardKey.altLeft,
+    LogicalKeyboardKey.altRight,
+    LogicalKeyboardKey.metaLeft,
+    LogicalKeyboardKey.metaRight,
+  }.contains(key);
+  KeyEventResult _key(FocusNode node, KeyEvent event) {
+    final mods = _mods, down = event is! KeyUpEvent, key = event.logicalKey;
+    final composing =
+        _editing.composing.isValid && !_editing.composing.isCollapsed;
+    final local = ApplicationKeyScope.terminal(
+      context,
+      event,
+      composing: composing,
+    );
+    if (local != KeyEventResult.ignored) {
+      if (event is KeyUpEvent) _suggestionOwned.remove(event.physicalKey);
+      return local;
+    }
+    if (event is KeyUpEvent && _suggestionOwned.remove(event.physicalKey)) {
+      return KeyEventResult.handled;
+    }
+    if (event is KeyRepeatEvent &&
+        _suggestionOwned.contains(event.physicalKey)) {
+      return KeyEventResult.handled;
+    }
+    if (event is KeyDownEvent) _suggestionOwned.remove(event.physicalKey);
+    if (!composing &&
+        mods == 0 &&
+        _suggestions.showing &&
+        {
+          LogicalKeyboardKey.arrowUp,
+          LogicalKeyboardKey.arrowDown,
+          LogicalKeyboardKey.enter,
+          LogicalKeyboardKey.numpadEnter,
+          LogicalKeyboardKey.tab,
+          LogicalKeyboardKey.escape,
+        }.contains(key)) {
+      if (down) {
+        ApplicationKeyScope.claim(context, event);
+        _suggestionOwned.add(event.physicalKey);
+        if (key == LogicalKeyboardKey.arrowUp) {
+          _suggestions.move(-1);
+        } else if (key == LogicalKeyboardKey.arrowDown) {
+          _suggestions.move(1);
+        } else if (key == LogicalKeyboardKey.escape) {
+          _suggestions.dismiss();
+        } else {
+          _run(_chooseSuggestion(key != LogicalKeyboardKey.tab));
+        }
+      }
+      return KeyEventResult.handled;
+    }
+    if (down && !_isModifier(key)) _suggestions.inputChanged();
+    if (composing && mods & 6 == 0) return KeyEventResult.ignored;
+    if (mods & 4 != 0 &&
+            mods & 1 != 0 &&
+            (key == LogicalKeyboardKey.keyC ||
+                key == LogicalKeyboardKey.keyV) ||
+        mods & 1 != 0 && key == LogicalKeyboardKey.insert) {
+      if (down) {
+        if (key == LogicalKeyboardKey.keyC) {
+          _run(copy());
+        } else {
+          _run(paste());
+        }
+      }
+      return KeyEventResult.handled;
+    }
+    if (mods & 63 == 4 &&
+        key == LogicalKeyboardKey.keyC &&
+        c.selectedText().isNotEmpty) {
+      if (down) _run(copy());
+      return KeyEventResult.handled;
+    }
+    if (mods & 63 == 1 &&
+        (key == LogicalKeyboardKey.pageUp ||
+            key == LogicalKeyboardKey.pageDown)) {
+      if (down && c.id != null) {
+        _run(
+          c.scroll(
+            (key == LogicalKeyboardKey.pageUp ? 1 : -1) *
+                (c.metadata?.rows ?? 24),
+          ),
+        );
+      }
+      return KeyEventResult.handled;
+    }
+    final special = _keys[key];
+    final label = key.keyLabel.toLowerCase();
+    if (special == null && label.runes.length != 1) {
+      return KeyEventResult.ignored;
+    }
+    if (special == null && mods & 14 == 0 && down) {
+      _pendingTextKey = rust.KeyboardInput(
+        key: label,
+        text: event.character,
+        modifiers: mods,
+        kind: event is KeyRepeatEvent ? 1 : 0,
+        shifted: event.character,
+        base: label,
+      );
+      _syncSuggestions();
+      return KeyEventResult.ignored;
+    }
+    if (_isModifier(key) && event is KeyDownEvent) {
+      final target = c, id = c.id, generation = c.generation;
+      ApplicationKeyScope.forwardedModifier(context, event, (release) {
+        if (!target.connected ||
+            target.id != id ||
+            target.generation != generation) {
+          return;
+        }
+        unawaited(
+          target
+              .key(rust.KeyboardInput(key: special!, modifiers: _mods, kind: 2))
+              .catchError(target.report),
+        );
+      });
+    }
+    _run(
+      c.key(
+        rust.KeyboardInput(
+          key: special ?? label,
+          text: event.character,
+          modifiers: mods,
+          kind: event is KeyUpEvent
+              ? 2
+              : event is KeyRepeatEvent
+              ? 1
+              : 0,
+          shifted: event.character,
+          base: label.runes.length == 1 ? label : null,
+        ),
+      ),
+    );
+    return KeyEventResult.handled;
+  }
+
+  Future<void> copy() async {
+    final text = c.selectedText();
+    if (text.isNotEmpty) await Clipboard.setData(ClipboardData(text: text));
+  }
+
+  Future<void> paste() async {
+    final source = c, id = c.id, generation = c.generation;
+    bool current() =>
+        mounted &&
+        identical(source, c) &&
+        source.id == id &&
+        source.generation == generation &&
+        source.connected;
+    if (id == null || !current()) return;
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (!mounted || !current() || data?.text == null) return;
+    final result = await source.paste(data!.text!, false);
+    if (!mounted || !result.needsConfirmation || !current()) return;
+    final confirmed = await showDialog<String>(
+      context: context,
+      builder: (_) => TerminalPastePreview(
+        text: data.text!,
+        target: source.connectionLabel,
+        lines: result.lines,
+        bytes: result.bytes,
+      ),
+    );
+    if (confirmed != null && current()) await source.paste(confirmed, true);
+  }
+
+  Point<int> _point(Offset position) => Point(
+    (position.dx / _cell.width).floor().clamp(
+      0,
+      (c.metadata?.columns ?? 80) - 1,
+    ),
+    (position.dy / _cell.height).floor().clamp(0, (c.metadata?.rows ?? 24) - 1),
+  );
+  bool get _capture =>
+      c.metadata?.mouseReporting == true && _mods & 1 == 0 && c.connected;
+  void _mouse(Offset position, int action, int button) {
+    final id = c.id;
+    final p = _point(position);
+    if (id != null && c.connected) {
+      _run(c.mouse(p.x, p.y, action, button, _mods));
+    }
+  }
+
+  void down(PointerDownEvent event) {
+    _suggestions.dismiss();
+    _focus.requestFocus();
+    _button = event.buttons & kPrimaryMouseButton != 0
+        ? 0
+        : event.buttons & kMiddleMouseButton != 0
+        ? 1
+        : 2;
+    _remoteDrag = _capture;
+    if (_remoteDrag) {
+      _mouse(event.localPosition, 0, _button);
+      return;
+    }
+    final point = _point(event.localPosition);
+    final link = TerminalLink.atGrid(
+      c.rows,
+      point.y,
+      point.x,
+      hyperlinks: c.hyperlinks,
+    );
+    if (_button == 0 &&
+        HardwareKeyboard.instance.isControlPressed &&
+        link != null &&
+        (link.canForward ||
+            link.uri != null ||
+            link.remoteFileUri != null ||
+            link.remotePath != null) &&
+        widget.onOpenLink != null) {
+      _anchor = null;
+      _button = 3;
+      _run(widget.onOpenLink!(link));
+      return;
+    }
+    if (_button == 0) {
+      _anchor = _point(event.localPosition);
+      c.clearSelection();
+    }
+    if (_button == 2) {
+      if (c.rightClickPaste && _mods & 1 == 0) {
+        _anchor = null;
+        _run(paste());
+        return;
+      }
+      final source = c, generation = c.generation, terminalId = c.id;
+      final commandFrame = c.metadata;
+      final commandRow = commandFrame == null
+          ? null
+          : commandFrame.historyLines - commandFrame.displayOffset + point.y;
+      final selectedPath = c.selectedText();
+      final locate = widget.onLocatePath;
+      final openLink = widget.onOpenLink;
+      final selectedReference = TerminalLink.parse(selectedPath);
+      showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(
+          event.position.dx,
+          event.position.dy,
+          event.position.dx,
+          event.position.dy,
+        ),
+        items: [
+          const PopupMenuItem(value: 'copy', child: Text('复制')),
+          const PopupMenuItem(value: 'paste', child: Text('粘贴')),
+          if (c.commandOperationsAvailable && commandFrame != null) ...[
+            const PopupMenuItem(
+              value: 'commandCopy',
+              child: Text('复制所在命令的输出（OSC133）'),
+            ),
+            const PopupMenuItem(
+              value: 'commandPrevious',
+              child: Text('上一命令标记'),
+            ),
+            const PopupMenuItem(value: 'commandNext', child: Text('下一命令标记')),
+          ],
+          if (link != null) ...[
+            const PopupMenuItem(value: 'copyLink', child: Text('复制链接文本')),
+            if (link.address.isNotEmpty)
+              const PopupMenuItem(
+                value: 'copyAddress',
+                child: Text('复制 IP / 地址'),
+              ),
+            if (openLink != null &&
+                (link.canForward ||
+                    link.uri != null ||
+                    link.remoteFileUri != null ||
+                    link.remotePath != null))
+              PopupMenuItem(
+                value: 'openLink',
+                child: Text(
+                  link.remoteFileUri != null
+                      ? '在关联 SFTP 中定位文件链接'
+                      : link.remotePath != null
+                      ? '在关联 SFTP 中定位路径…'
+                      : link.canForward
+                      ? '确认后临时转发'
+                      : '确认后打开链接',
+                ),
+              ),
+          ],
+          if (openLink != null &&
+              selectedReference?.remotePath?.hasLocation == true &&
+              c.connected)
+            const PopupMenuItem(
+              value: 'locateReference',
+              child: Text('定位选中路径（含行列提示）…'),
+            ),
+          if (locate != null && selectedPath.isNotEmpty && c.connected)
+            const PopupMenuItem(value: 'locate', child: Text('在关联 SFTP 中定位')),
+        ],
+      ).then((v) {
+        if (!mounted ||
+            !identical(source, c) ||
+            generation != c.generation ||
+            terminalId != c.id) {
+          return;
+        }
+        if (v == 'locateReference' &&
+            selectedReference != null &&
+            openLink != null) {
+          _run(openLink(selectedReference));
+        }
+        if (v == 'copy') _run(copy());
+        if (v == 'paste') _run(paste());
+        if (commandFrame != null && commandRow != null) {
+          if (v == 'commandCopy') {
+            _run(() async {
+              final text = await source.copyCommandAt(
+                commandRow,
+                point.x,
+                commandFrame.contentRevision,
+              );
+              if (text != null &&
+                  mounted &&
+                  identical(source, c) &&
+                  generation == c.generation &&
+                  terminalId == c.id) {
+                await Clipboard.setData(ClipboardData(text: text));
+              }
+            }());
+          }
+          if (v == 'commandPrevious' || v == 'commandNext') {
+            _run(
+              source.navigateCommand(
+                v == 'commandNext',
+                commandFrame.historyLines - commandFrame.displayOffset,
+                commandFrame.contentRevision,
+              ),
+            );
+          }
+        }
+        if (link != null && v == 'copyLink') {
+          _run(Clipboard.setData(ClipboardData(text: link.text)));
+        }
+        if (link != null && v == 'copyAddress') {
+          _run(Clipboard.setData(ClipboardData(text: link.address)));
+        }
+        if (v == 'openLink' && link != null && openLink != null) {
+          _run(openLink(link));
+        }
+        if (v == 'locate' && locate != null) {
+          _run(Future<void>.sync(() => locate(selectedPath)));
+        }
+      });
+    }
+  }
+
+  void showSearch() {
+    _suggestions.setWanted(false);
+    setState(() => _searchOpen = true);
+    _searchFocus.requestFocus();
+  }
+
+  void hideSearch() {
+    setState(() => _searchOpen = false);
+    _run(c.setSearch(''));
+    _focus.requestFocus();
+  }
+
+  Future<void> exportHistory() async {
+    final editor = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('导出当前终端历史'),
+        content: TextField(
+          controller: editor,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: '保存为 UTF-8 文件路径',
+            helperText: '只写入新文件；不自动覆盖已有文件。',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('导出'),
+          ),
+        ],
+      ),
+    );
+    final path = editor.text;
+    editor.dispose();
+    final id = c.id;
+    if (confirmed == true && id != null && path.isNotEmpty) {
+      try {
+        await c.backend.exportHistory(id, path);
+      } catch (error) {
+        c.report(error);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final typography = _typography;
+    final metric = TextPainter(
+      text: TextSpan(text: 'M', style: typography.textStyle()),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    _cell = Size(
+      max(1.0, metric.width),
+      max(1.0, (typography.size * typography.lineHeight).ceilToDouble()),
+    );
+    metric.dispose();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        c.resize(
+          ((constraints.maxWidth - 12) / _cell.width).floor(),
+          (constraints.maxHeight / _cell.height).floor(),
+          _cell.width,
+          _cell.height,
+        );
+        return Stack(
+          children: [
+            Positioned.fill(
+              right: 12,
+              child: Focus(
+                focusNode: _focus,
+                onKeyEvent: _key,
+                child: Listener(
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: down,
+                  onPointerUp: (e) {
+                    if (_remoteDrag) _mouse(e.localPosition, 1, _button);
+                    _remoteDrag = false;
+                    _anchor = null;
+                    _button = 3;
+                  },
+                  onPointerCancel: (e) {
+                    if (_remoteDrag) _mouse(e.localPosition, 1, _button);
+                    _remoteDrag = false;
+                    _anchor = null;
+                    _button = 3;
+                  },
+                  onPointerMove: (e) {
+                    if (_remoteDrag || _capture) {
+                      _mouse(e.localPosition, 2, _button);
+                    } else if (_anchor != null) {
+                      c.select(_anchor!, _point(e.localPosition));
+                    }
+                  },
+                  onPointerHover: (e) {
+                    if (_capture) {
+                      _mouse(e.localPosition, 2, 3);
+                    } else {
+                      final point = _point(e.localPosition);
+                      _hoverLink.value = TerminalLink.atGrid(
+                        c.rows,
+                        point.y,
+                        point.x,
+                        hyperlinks: c.hyperlinks,
+                      );
+                    }
+                  },
+                  onPointerSignal: (e) {
+                    if (e is PointerScrollEvent && e.scrollDelta.dy != 0) {
+                      GestureBinding.instance.pointerSignalResolver.register(
+                        e,
+                        (event) {
+                          if (_capture) {
+                            _mouse(
+                              e.localPosition,
+                              e.scrollDelta.dy < 0 ? 3 : 4,
+                              3,
+                            );
+                          } else if (c.id != null) {
+                            _run(c.scroll(e.scrollDelta.dy < 0 ? 3 : -3));
+                          }
+                        },
+                      );
+                    }
+                  },
+                  child: ValueListenableBuilder<TerminalLink?>(
+                    valueListenable: _hoverLink,
+                    builder: (_, link, child) => MouseRegion(
+                      onExit: (_) => _hoverLink.value = null,
+                      cursor: link != null && widget.onOpenLink != null
+                          ? SystemMouseCursors.click
+                          : SystemMouseCursors.basic,
+                      child: Tooltip(message: link?.text ?? '', child: child!),
+                    ),
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        painter: TerminalPainter(
+                          c,
+                          _cache,
+                          typography.size,
+                          _cell,
+                          _blink,
+                          _focus.hasFocus,
+                          _preedit,
+                          typography: typography,
+                        ),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 0,
+              bottom: 0,
+              right: 0,
+              width: 12,
+              child: HistoryScrollbar(controller: c),
+            ),
+            TerminalSuggestionsOverlay(
+              controller: _suggestions,
+              viewport: Size(constraints.maxWidth, constraints.maxHeight),
+              cell: _cell,
+              cursorColumn: c.metadata?.cursorColumn ?? 0,
+              cursorRow: c.metadata?.cursorRow ?? 0,
+              choose: (index, ticket) =>
+                  _run(_chooseSuggestion(true, index: index, ticket: ticket)),
+            ),
+            if (_searchOpen)
+              Positioned(
+                top: 0,
+                right: 16,
+                left: constraints.maxWidth > 700
+                    ? constraints.maxWidth - 650
+                    : 0,
+                child: Material(
+                  elevation: 4,
+                  color: const Color(0xff263445),
+                  child: ListenableBuilder(
+                    listenable: c,
+                    builder: (context, _) => Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                key: const ValueKey('terminal-search-field'),
+                                controller: _searchField,
+                                focusNode: _searchFocus,
+                                autofocus: true,
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  labelText: '当前终端搜索',
+                                ),
+                                onChanged: (value) => _run(c.setSearch(value)),
+                                onSubmitted: (_) => _run(c.navigateSearch(1)),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: '正则表达式',
+                              isSelected: c.searchRegex,
+                              onPressed: () => _run(
+                                c.setSearch(
+                                  _searchField.text,
+                                  regex: !c.searchRegex,
+                                ),
+                              ),
+                              icon: const Text('.*'),
+                            ),
+                            IconButton(
+                              tooltip: '区分大小写',
+                              isSelected: c.searchCaseSensitive,
+                              onPressed: () => _run(
+                                c.setSearch(
+                                  _searchField.text,
+                                  caseSensitive: !c.searchCaseSensitive,
+                                ),
+                              ),
+                              icon: const Text('Aa'),
+                            ),
+                            Text(
+                              c.searchBusy
+                                  ? '搜索中…'
+                                  : '${c.activeSearch == null ? 0 : c.searchOrdinal + 1}/${c.searchSummary?.count ?? 0}',
+                            ),
+                            IconButton(
+                              tooltip: '上一个匹配',
+                              onPressed: () => _run(c.navigateSearch(-1)),
+                              icon: const Icon(Icons.keyboard_arrow_up),
+                            ),
+                            IconButton(
+                              tooltip: '下一个匹配',
+                              onPressed: () => _run(c.navigateSearch(1)),
+                              icon: const Icon(Icons.keyboard_arrow_down),
+                            ),
+                            IconButton(
+                              tooltip: '关闭搜索',
+                              onPressed: hideSearch,
+                              icon: const Icon(Icons.close),
+                            ),
+                          ],
+                        ),
+                        if (c.searchError != null)
+                          Text(
+                            c.searchError!,
+                            style: const TextStyle(color: Colors.orangeAccent),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            Positioned(
+              right: 28,
+              bottom: 8,
+              child: ListenableBuilder(
+                listenable: c,
+                builder: (context, _) => c.newOutputLines > 0
+                    ? FilledButton.tonal(
+                        onPressed: () => _run(c.seek(c.metadata!.historyLines)),
+                        child: Text('${c.newOutputLines} 行新输出 · 回到底部'),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  TextEditingValue get currentTextEditingValue => _editing;
+  @override
+  AutofillScope? get currentAutofillScope => null;
+  @override
+  void updateEditingValue(TextEditingValue value) {
+    _editing = value;
+    _suggestions.inputChanged();
+    if (value.composing.isValid && !value.composing.isCollapsed) {
+      _pendingTextKey = null;
+      _syncSuggestions();
+      _preedit.value = value.text.substring(
+        value.composing.start,
+        value.composing.end,
+      );
+      return;
+    }
+    _preedit.value = '';
+    final text = value.text.replaceAll('\u200b', '');
+    final pending = _pendingTextKey;
+    _pendingTextKey = null;
+    if (text.isNotEmpty) {
+      if (pending != null && pending.text == text && text.runes.length == 1) {
+        _run(c.key(pending));
+      } else {
+        _run(c.text(text));
+      }
+    } else if (value.text.isEmpty) {
+      _run(c.key(rust.KeyboardInput(key: 'Backspace', modifiers: 0, kind: 0)));
+    }
+    _editing = _empty;
+    _connection?.setEditingState(_empty);
+    _syncSuggestions();
+  }
+
+  @override
+  void performAction(TextInputAction action) =>
+      _run(c.key(rust.KeyboardInput(key: 'Enter', modifiers: 0, kind: 0)));
+  @override
+  void performPrivateCommand(String action, Map<String, dynamic> data) {}
+  @override
+  void updateFloatingCursor(RawFloatingCursorPoint point) {}
+  @override
+  void showAutocorrectionPromptRect(int start, int end) {}
+  @override
+  void connectionClosed() {
+    _connection = null;
+    _focus.unfocus();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    c.removeListener(_changed);
+    _suggestions.dispose();
+    _focus.removeListener(_focusChanged);
+    _focus.dispose();
+    _searchFocus.dispose();
+    _searchField.dispose();
+    _connection?.close();
+    _blinkTimer?.cancel();
+    _blink.dispose();
+    _preedit.dispose();
+    _hoverLink.dispose();
+    _cache.dispose();
+    super.dispose();
+  }
+}
+
+/// The route owns this editor until it unmounts, including the exit animation.
+/// Only an explicit final text result can be sent to the original session.
+class TerminalPastePreview extends StatefulWidget {
+  const TerminalPastePreview({
+    super.key,
+    required this.text,
+    required this.target,
+    required this.lines,
+    required this.bytes,
+  });
+  final String text, target;
+  final int lines, bytes;
+  @override
+  State<TerminalPastePreview> createState() => _TerminalPastePreviewState();
+}
+
+class _TerminalPastePreviewState extends State<TerminalPastePreview> {
+  late final editor = TextEditingController(text: widget.text);
+  late int _lines = widget.lines, _bytes = widget.bytes;
+  @override
+  void dispose() {
+    editor.clear();
+    editor.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
+    title: Text('确认粘贴 · $_lines 行 / $_bytes 字节'),
+    content: SizedBox(
+      width: 600,
+      child: TextField(
+        key: const ValueKey('terminal-paste-editor'),
+        controller: editor,
+        onChanged: (text) => setState(() {
+          var lines = 1;
+          for (var i = 0; i < text.length; i++) {
+            if (text.codeUnitAt(i) == 10 ||
+                (text.codeUnitAt(i) == 13 &&
+                    (i + 1 == text.length || text.codeUnitAt(i + 1) != 10))) {
+              lines++;
+            }
+          }
+          _lines = lines;
+          _bytes = utf8.encode(text).length;
+        }),
+        minLines: 3,
+        maxLines: 12,
+        decoration: InputDecoration(
+          labelText: '预览并编辑粘贴内容',
+          helperText: '目标：${widget.target}。多行内容可能执行多条命令。',
+          helperMaxLines: 2,
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        autofocus: true,
+        onPressed: () => Navigator.pop(context),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        key: const ValueKey('terminal-paste-confirm'),
+        onPressed: () {
+          if (editor.value.composing.isValid &&
+              !editor.value.composing.isCollapsed) {
+            return;
+          }
+          final confirmed = editor.text;
+          editor.clear();
+          Navigator.pop(context, confirmed);
+        },
+        child: const Text('发送'),
+      ),
+    ],
+  );
+}

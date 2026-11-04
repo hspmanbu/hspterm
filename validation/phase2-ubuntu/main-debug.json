@@ -1,0 +1,13 @@
+{
+  "phase": "main_idle_and_normal_exit",
+  "mode": "debug",
+  "elapsed_ms": 5600,
+  "cpu_pct": 0.0,
+  "Rss_bytes": 422846464,
+  "Pss_bytes": 384156672,
+  "Shared_Clean_bytes": 62877696,
+  "Private_Clean_bytes": 113827840,
+  "Private_Dirty_bytes": 242454528,
+  "exit_code": 0,
+  "remaining_history_directories": 0
+}

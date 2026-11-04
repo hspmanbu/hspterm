@@ -1,0 +1,282 @@
+#include "flutter_window.h"
+
+#include <optional>
+#include <set>
+#include <cmath>
+#include <dwmapi.h>
+#include <windowsx.h>
+#include <flutter/standard_method_codec.h>
+#include "utils.h"
+#include "secure_unlock.h"
+
+#include "flutter/generated_plugin_registrant.h"
+
+namespace {
+struct FontCatalog {
+  std::set<std::string> families;
+  bool invalid = false;
+};
+int CALLBACK CollectFont(const LOGFONTW* font, const TEXTMETRICW*, DWORD,
+                         LPARAM data) {
+  auto* catalog = reinterpret_cast<FontCatalog*>(data);
+  // Skip vertical aliases, not the corresponding normal CJK family.
+  if (font->lfFaceName[0] == L'@') return 1;
+  const auto size = wcsnlen_s(font->lfFaceName, LF_FACESIZE);
+  if (size == 0 || size >= LF_FACESIZE) {
+    catalog->invalid = true;
+    return 0;
+  }
+  const std::wstring family(font->lfFaceName, size);
+  const auto name = Utf8FromUtf16(family.c_str());
+  if (name.empty()) { catalog->invalid = true; return 0; }
+  catalog->families.insert(name);
+  if (catalog->families.size() > 4096) {
+    catalog->invalid = true;
+    return 0;
+  }
+  return 1;
+}
+}  // namespace
+
+FlutterWindow::FlutterWindow(const flutter::DartProject& project)
+    : project_(project) {}
+
+FlutterWindow::~FlutterWindow() {}
+
+bool FlutterWindow::OnCreate() {
+  if (!Win32Window::OnCreate()) {
+    return false;
+  }
+
+  RECT frame = GetClientArea();
+
+  // The size here must match the window dimensions to avoid unnecessary surface
+  // creation / destruction in the startup path.
+  flutter_controller_ = std::make_unique<flutter::FlutterViewController>(
+      frame.right - frame.left, frame.bottom - frame.top, project_);
+  // Ensure that basic setup of the controller was successful.
+  if (!flutter_controller_->engine() || !flutter_controller_->view()) {
+    return false;
+  }
+  explorer_drop_ = std::make_unique<ExplorerDropBridge>(
+      flutter_controller_->engine()->messenger(), flutter_controller_->view()->GetNativeWindow());
+  if (!explorer_drop_->IsReady()) return false;
+  RegisterPlugins(flutter_controller_->engine());
+  secure_unlock_ = CreateSecureUnlockChannel(flutter_controller_->engine()->messenger());
+  window_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "hspterm/prototype_window",
+      &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler([this](const auto& call, auto result) {
+    const HWND window = GetHandle();
+    if (window == nullptr) { result->Error("window_closed", "窗口已关闭"); return; }
+    const auto& method = call.method_name();
+    if (method == "initialize") {
+      // Only workbench/mock opt into the custom frame. The Phase 2 runner
+      // retains its normal system title bar until this method is called.
+      const MARGINS margins = {1, 1, 1, 1};
+      if (FAILED(DwmExtendFrameIntoClientArea(window, &margins))) {
+        result->Error("window_frame", "无法初始化自定义窗口边框；保留系统标题栏"); return;
+      }
+      integrated_frame_ = true;
+      if (!SetWindowPos(window, nullptr, 0, 0, 0, 0,
+                       SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)) {
+        integrated_frame_ = false;
+        result->Error("window_frame", "无法更新窗口边框；保留系统标题栏"); return;
+      }
+    } else if (method == "minimize") {
+      ShowWindow(window, SW_MINIMIZE);
+    } else if (method == "maximize") {
+      ShowWindow(window, IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE);
+    } else if (method == "activate") {
+      // Explicit notification click only. Respect Windows foreground policy;
+      // no AttachThreadInput/topmost tricks and no extra window or SSH root.
+      if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
+      if (GetForegroundWindow() != window && !SetForegroundWindow(window)) {
+        result->Error("window_activate", "终端已定位，但Windows未允许激活窗口"); return;
+      }
+    } else if (method == "drag") {
+      ReleaseCapture();
+      POINT point = {};
+      if (!GetCursorPos(&point)) { result->Error("window_drag", "无法读取鼠标位置"); return; }
+      // Use the native move loop (including edge Snap), never move the window
+      // by repeated Dart coordinates. Alt+Space and system commands remain.
+      if (!PostMessage(window, WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(point.x, point.y))) {
+        result->Error("window_drag", "无法开始原生窗口移动"); return;
+      }
+    } else if (method == "systemMenu") {
+      POINT point = {};
+      if (!GetCursorPos(&point)) { result->Error("window_menu", "无法读取鼠标位置"); return; }
+      const HMENU menu = GetSystemMenu(window, FALSE);
+      if (menu == nullptr) { result->Error("window_menu", "无法打开系统菜单"); return; }
+      EnableMenuItem(menu, SC_RESTORE, MF_BYCOMMAND | (IsZoomed(window) ? MF_ENABLED : MF_GRAYED));
+      EnableMenuItem(menu, SC_MAXIMIZE, MF_BYCOMMAND | (IsZoomed(window) ? MF_GRAYED : MF_ENABLED));
+      const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+                                         point.x, point.y, 0, window, nullptr);
+      if (command != 0 && !PostMessage(window, WM_SYSCOMMAND, command, 0)) {
+        result->Error("window_menu", "无法提交系统菜单操作"); return;
+      }
+    } else if (method == "close") {
+      // Engine HandleTopLevelWindowProc below handles cancelable WM_CLOSE and
+      // calls the framework's existing AppLifecycleListener. No DestroyWindow
+      // or process exit here: active edits/transfers must finish saving first.
+      if (!PostMessage(window, WM_CLOSE, 0, 0)) {
+        result->Error("window_close", "无法提交关闭请求；窗口保持打开"); return;
+      }
+    } else if (method == "maximizeRect") {
+      const auto* args = call.arguments();
+      const auto* list = args == nullptr ? nullptr : std::get_if<flutter::EncodableList>(args);
+      if (list == nullptr || (!list->empty() && list->size() != 4)) {
+        result->Error("window_geometry", "最大化按钮区域无效"); return;
+      }
+      RECT rect = {};
+      if (!list->empty()) {
+        double values[4] = {};
+        for (size_t i = 0; i < 4; ++i) {
+          const auto* value = std::get_if<double>(&(*list)[i]);
+          if (value == nullptr || !std::isfinite(*value) || *value < 0 || *value > 100000) {
+            result->Error("window_geometry", "最大化按钮区域无效"); return;
+          }
+          values[i] = *value;
+        }
+        if (values[2] <= values[0] || values[3] <= values[1]) {
+          result->Error("window_geometry", "最大化按钮区域无效"); return;
+        }
+        rect = {static_cast<LONG>(std::floor(values[0])), static_cast<LONG>(std::floor(values[1])),
+                static_cast<LONG>(std::ceil(values[2])), static_cast<LONG>(std::ceil(values[3]))};
+      }
+      maximize_button_ = rect;
+    } else {
+      result->NotImplemented(); return;
+    }
+    result->Success();
+  });
+  font_catalog_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "hspterm/font_catalog",
+      &flutter::StandardMethodCodec::GetInstance());
+  font_catalog_->SetMethodCallHandler([](const auto& call, auto result) {
+    if (call.method_name() != "families") { result->NotImplemented(); return; }
+    HDC dc = GetDC(nullptr);
+    if (dc == nullptr) { result->Error("font_catalog", "无法读取系统字体"); return; }
+    LOGFONTW request = {};
+    request.lfCharSet = DEFAULT_CHARSET;
+    FontCatalog catalog;
+    EnumFontFamiliesExW(dc, &request, CollectFont,
+                       reinterpret_cast<LPARAM>(&catalog), 0);
+    ReleaseDC(nullptr, dc);
+    if (catalog.invalid || catalog.families.empty()) {
+      result->Error("font_catalog", "系统字体列表无效或超过4096项");
+      return;
+    }
+    flutter::EncodableList names;
+    names.reserve(catalog.families.size());
+    for (const auto& name : catalog.families) names.emplace_back(name);
+    result->Success(flutter::EncodableValue(names));
+  });
+  SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  flutter_controller_->engine()->SetNextFrameCallback([&]() {
+    this->Show();
+  });
+
+  // Flutter can complete the first frame before the "show window" callback is
+  // registered. The following call ensures a frame is pending to ensure the
+  // window is shown. It is a no-op if the first frame hasn't completed yet.
+  flutter_controller_->ForceRedraw();
+
+  return true;
+}
+
+void FlutterWindow::OnDestroy() {
+  explorer_drop_.reset();
+  if (secure_unlock_) { secure_unlock_->SetMethodCallHandler(nullptr); secure_unlock_ = nullptr; }
+  if (window_channel_) {
+    window_channel_->SetMethodCallHandler(nullptr);
+    window_channel_ = nullptr;
+  }
+  if (font_catalog_) {
+    font_catalog_->SetMethodCallHandler(nullptr);
+    font_catalog_ = nullptr;
+  }
+  if (flutter_controller_) {
+    flutter_controller_ = nullptr;
+  }
+
+  Win32Window::OnDestroy();
+}
+
+LRESULT
+FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
+                              WPARAM const wparam,
+                              LPARAM const lparam) noexcept {
+  // Give Flutter, including plugins, an opportunity to handle window messages.
+  if (flutter_controller_) {
+    std::optional<LRESULT> result =
+        flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
+                                                      lparam);
+    if (result) {
+      return *result;
+    }
+  }
+
+  switch (message) {
+    case WM_NCCALCSIZE:
+      if (integrated_frame_ && wparam != FALSE) {
+        // Keep the native resize/min/max/system-menu styles, remove only the
+        // duplicated caption area. Maximized client geometry stays in rcWork.
+        if (IsZoomed(hwnd)) {
+          MONITORINFO monitor = {sizeof(MONITORINFO)};
+          if (!GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor)) break;
+          reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam)->rgrc[0] = monitor.rcWork;
+        }
+        return 0;
+      }
+      break;
+    case WM_NCHITTEST:
+      if (integrated_frame_) {
+        POINT point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        RECT window = {};
+        if (!GetWindowRect(hwnd, &window)) break;
+        if (!IsZoomed(hwnd)) {
+          const UINT dpi = GetDpiForWindow(hwnd);
+          const int edge = GetSystemMetricsForDpi(SM_CXFRAME, dpi) +
+                           GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+          const bool left = point.x < window.left + edge;
+          const bool right = point.x >= window.right - edge;
+          const bool top = point.y < window.top + edge;
+          const bool bottom = point.y >= window.bottom - edge;
+          if (top && left) return HTTOPLEFT;
+          if (top && right) return HTTOPRIGHT;
+          if (bottom && left) return HTBOTTOMLEFT;
+          if (bottom && right) return HTBOTTOMRIGHT;
+          if (left) return HTLEFT;
+          if (right) return HTRIGHT;
+          if (top) return HTTOP;
+          if (bottom) return HTBOTTOM;
+        }
+        if (ScreenToClient(hwnd, &point) && PtInRect(&maximize_button_, point)) return HTMAXBUTTON;
+        return HTCLIENT;
+      }
+      break;
+    case WM_GETMINMAXINFO:
+      if (integrated_frame_) {
+        const UINT dpi = GetDpiForWindow(hwnd);
+        auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+        info->ptMinTrackSize.x = MulDiv(720, dpi, 96);
+        info->ptMinTrackSize.y = MulDiv(540, dpi, 96);
+        return 0;
+      }
+      break;
+    case WM_ACTIVATE:
+    case WM_DWMCOMPOSITIONCHANGED:
+      if (integrated_frame_) {
+        const MARGINS margins = {1, 1, 1, 1};
+        DwmExtendFrameIntoClientArea(hwnd, &margins);
+      }
+      break;
+    case WM_FONTCHANGE:
+      if (flutter_controller_) flutter_controller_->engine()->ReloadSystemFonts();
+      break;
+  }
+
+  return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+}

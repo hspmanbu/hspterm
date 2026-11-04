@@ -1,0 +1,49 @@
+[workspace]
+members = ["crates/term-core", "crates/ssh-core", "crates/storage-sync", "crates/frb-bridge"]
+resolver = "2"
+exclude = ["vendor/vte", "vendor/alacritty_terminal", "vendor/russh-sftp", "vendor/russh"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+alacritty_terminal = { version = "0.26", features = ["hspterm-history"] }
+russh = { version = "0.64.1", default-features = false, features = ["ring"] }
+russh-sftp = "3.0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "fs", "process"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+thiserror = "2"
+parking_lot = "0.12"
+zeroize = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+aes-gcm = { version = "0.10", features = ["zeroize"] }
+aes = { version = "0.8", features = ["zeroize"] }
+argon2 = { version = "0.5", features = ["zeroize"] }
+rand = "0.8"
+rusqlite = { version = "0.38", features = ["bundled"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.dev]
+debug = 1
+
+# Generated bridge symbols dominate local desktop link space; keep shared core
+# diagnostics while making the normal Flutter debug build match validation.
+[profile.dev.package.hspterm-frb-bridge]
+debug = 0
+strip = "debuginfo"
+
+[profile.test]
+debug = 1
+
+[patch.crates-io]
+alacritty_terminal = { path = "vendor/alacritty_terminal" }
+vte = { path = "vendor/vte" }
+russh-sftp = { path = "vendor/russh-sftp" }
+
+russh = { path = "vendor/russh" }

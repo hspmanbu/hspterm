@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-22",
+  "code_commit": "eed6889",
+  "rust_workspace": {
+    "passed": 42,
+    "failed": 0,
+    "ignored": 0
+  },
+  "vte": {
+    "passed": 56,
+    "failed": 0,
+    "ignored": 0
+  },
+  "alacritty_lib": {
+    "passed": 132,
+    "failed": 0,
+    "ignored": 0
+  },
+  "flutter": {
+    "passed": 12,
+    "failed": 0,
+    "skipped": 0
+  },
+  "linux_gui_ssh": {
+    "passed": 1,
+    "failed": 0
+  },
+  "linux_gui_codex": {
+    "passed": 1,
+    "failed": 0
+  },
+  "openssh_parallel_repeats": {
+    "runs": 5,
+    "passed": 60,
+    "failed": 0,
+    "note": "Prior one-off Protocol error remains unclassified; diagnostic fixture added; see report"
+  },
+  "checks": {
+    "rustfmt": "passed",
+    "clippy_warnings_denied": "passed",
+    "flutter_analyze": "passed",
+    "linux_debug_build": "passed",
+    "linux_release_build": "passed",
+    "linux_profile_extended": "complete",
+    "android_arm64_workspace_check": "passed; NDK25 API26",
+    "cargo_audit": "passed; 1349 advisories, 295 dependencies, no vulnerabilities reported"
+  },
+  "not_executed": [
+    "Windows build/runtime/keyboard/IME/native-close integration",
+    "Android APK/JNI/device/emulator/IME",
+    "Real Claude Code",
+    "Codex real-account/model inference",
+    "Multi-hour WAN soak"
+  ]
+}

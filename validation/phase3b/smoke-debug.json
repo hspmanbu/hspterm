@@ -1,0 +1,10 @@
+{
+  "mode": "debug",
+  "window": "real GTK/X11",
+  "rss_bytes": 439926784,
+  "idle_elapsed_ms": 5000,
+  "idle_cpu_pct": 5.1997338973845775,
+  "rust_library_loaded": true,
+  "terminal_history_created": false,
+  "exit_code": 0
+}

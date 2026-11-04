@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-22",
+  "os": "Ubuntu 24.04.5 x86_64",
+  "vcpus": 4,
+  "cpu": "AMD EPYC 7H12 virtual CPUs",
+  "display": "Xvfb; D-Bus session; Impeller OpenGLES software rendering; DRI3 unavailable",
+  "flutter": "3.47.7",
+  "dart": "3.13.5",
+  "rust": "1.99.1",
+  "frb": "2.13.0",
+  "codex": "0.163.0",
+  "baseline_core_commit": "8d39b62",
+  "final_core_commit": "eed6889",
+  "harness": "ui_flutter/benchmark/performance.dart; ordinary WidgetsFlutterBinding; profile",
+  "cpu_definition": "Linux process user+system ticks / wall time, 100% per core; CLK_TCK=100",
+  "rss_definition": "Whole app process including Dart, native core, engine and graphic mappings; bytes",
+  "idle_definition": "2s warmup plus 600ms sample; extended idle 5.6s",
+  "comparison": "Same 140x34 initial viewport and common workload through 5 reconnects; final adds search, continuous output, echo and native resizes. Do not compare final close directly to baseline close.",
+  "baseline_reproduction": "Captured with original 8d39b62 ordinary-binding instrumented workload; original matching executable+SO retained locally in ignored .local/perf/baseline-benchmark-bundle. Current FRB API cannot load the old SO. Baseline harness source was replaced during development; fresh checkout can reproduce current harness, not the exact old instrumented executable.",
+  "excluded": "LiveTestWidgetsBinding/integration_driver measurements actively schedule frames; excluded from formal comparisons. Failed partial load-finish-title sample retained locally only.",
+  "limitations": [
+    "Single-machine sequential synthetic samples, not statistical population estimates",
+    "No hardware GPU or Windows/Android measurements",
+    "No multi-hour soak or real WAN interruption benchmark",
+    "No real Codex account/model inference; loopback synthetic Responses only"
+  ]
+}

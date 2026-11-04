@@ -1,0 +1,30 @@
+[package]
+name = "hspterm-term-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alacritty_terminal.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+postcard = { version = "1.1", default-features = false, features = ["alloc"] }
+lz4_flex = "0.14"
+aes-gcm.workspace = true
+rand.workspace = true
+zeroize.workspace = true
+tempfile.workspace = true
+fs2 = "0.4"
+regex = "1"
+sha2 = "0.11"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["process", "fs"] }
+
+[dev-dependencies]
+base64 = "0.22"
+log = "0.4"

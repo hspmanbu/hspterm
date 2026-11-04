@@ -1,0 +1,106 @@
+{
+  "platform": "Ubuntu / Xvfb, actual Flutter GTK process",
+  "data": "mock only, no SSH or account access",
+  "screenshots": [
+    {
+      "file": "01-start-dark.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "16-terminal-tabs-normal.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "02-workbench-dark.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "20-tab-drop-target.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "18-split-group-tabs.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "17-terminal-group-maximized.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "03-transfer-details.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "04-file-context-menu.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "05-inline-rename.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "06-delete-confirmation.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "07-host-manager.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "08-host-validation.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "09-settings-dark.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "10-history-settings.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "11-settings-light.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "12-workbench-light.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "13-workbench-compact.png",
+      "width": 720,
+      "height": 540
+    },
+    {
+      "file": "14-sftp-maximized.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "15-exit-confirmation.png",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "19-tabs-recombined.png",
+      "width": 1440,
+      "height": 900
+    }
+  ]
+}
