@@ -1,5 +1,5 @@
 {
-  "scope": "Four Windows feedback fixes; Ubuntu verification, Windows CI pending",
+  "scope": "Four Windows feedback fixes; Ubuntu and Windows Server 2022 CI verification passed",
   "rust": {
     "bridge_serial": 77,
     "terminal_core": 104,
@@ -38,7 +38,6 @@
     "unfocused_cpu_pct": 0.0
   },
   "limitations": [
-    "Windows MSVC/native placement CI pending at commit",
     "Integrated edge dragging/Snap/DPI/IME require Windows 11 user verification",
     "Android remains paused"
   ],
@@ -52,7 +51,33 @@
     "run": 41933717144,
     "job": 126936779459,
     "url": "https://github.com/hspmanbu/hspterm/actions/runs/41933717144",
-    "status": "in_progress"
+    "status": "completed",
+    "conclusion": "success",
+    "flutter_components": 52,
+    "analyze_issues": 0,
+    "msvc_release": "pass",
+    "native_startup_normal_exit": "pass",
+    "normal_window_position_and_size_restore": "pass",
+    "artifact": {
+      "id": 13374471855,
+      "name": "HSPTerm-windows-x64",
+      "size_bytes": 39851074,
+      "sha256": "9dd96936b04ab6493ef719f64682c49e40b506aabf1263be1a463ed54d32f1b1",
+      "url": "https://github.com/hspmanbu/hspterm/actions/runs/41933717144/artifacts/13374471855"
+    },
+    "locked_startup_memory": {
+      "working_set_bytes": [
+        121274368,
+        117080064,
+        117067776
+      ],
+      "private_bytes": [
+        106479616,
+        102281216,
+        100163584
+      ],
+      "platform": "Windows Server 2022 Actions runner; not Windows 11 user hardware"
+    }
   },
   "cleanup": {
     "freed_gib": 3.29,

@@ -1,5 +1,7 @@
 # 2026-11-05 Windows 四项反馈修复
 
+Windows [run41933717144](https://github.com/hspmanbu/hspterm/actions/runs/41933717144) 已成功：正规 FRB/MSVC Release、Analyze0、52组件、原生启动/正常关闭、关闭重开的位置/大小恢复。源码cf13882。[下载完整 Windows 包](https://github.com/hspmanbu/hspterm/actions/runs/41933717144/artifacts/13374471855)，需整包解压；不要混用旧 DLL。服务器CI不是Windows11用户设备测试。
+
 实现与边界见 RUNTIME_DIAGNOSTICS.md、WINDOWS_WINDOW.md、SHELL_INTEGRATION.md，统计见 results.json。Ubuntu 的窗口/内存数据不能作为 Windows 测量。GTK 九分类×两个窗口尺寸通过，截图仅用于本轮视觉检查，不纳入 Git。
 
 实际命令：

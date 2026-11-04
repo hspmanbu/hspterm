@@ -1,3 +1,5 @@
+- **最新交付（2026-11-05）**：四项反馈源码cf13882，Windows run41933717144/job126936779459已全部成功，MSVC Release/Analyze0/52组件/原生启动退出/关闭重开位置大小恢复通过，完整包artifact13374471855。当前仅Win11用户自定义边框拖动、Snap/DPI等实机复测待确认；不要重复触发旧CI。Ubuntu证据与Windows结果在validation/windows-feedback-2026-11-05；本机构建缓存已清理释放3.29GiB，源码/正式FRB/文字JSON保留。下次先prepare_native_extensions.py、pub get再构建，不能执行旧bundle。Android暂停。
+
 - **发布/清理更新（2026-11-05）**：源码cf13882，Windows run41933717144/job126936779459正在运行，先查询不要重发。Ubuntu验证收齐后已再次移除target/build/.dart_tool/ephemeral/生成插件和临时截图，释放3.29GiB，可用12.81GiB；源码/锁/正式FRB/文字JSON保留。恢复编译仍先prepare_native_extensions.py及pub get；不能运行已删除bundle。原始本地等树提交保留分支windows-feedback-nov5-local-3f15f60。
 
 - **最新恢复（2026-11-05）**：四项 Win 反馈修复，Ubuntu 验证已收齐，待发布/查询 Windows CI。路径 resize proof/随机 banner 探测、SettingsField 间距/诊断下拉、当前启动 `.log` 导出、原生边缘 HWND 转交/本机位置记忆已实现。Bridge77串行、term104、真实SSH8、probe2、组件66及日志/路径最终复测、Analyze/Clippy、GTK18组合/正规debug启动退出过；证据 validation/windows-feedback-2026-11-05。不要恢复旧“不导出日志/不记窗口几何”行为，V1.4末尾用户修订优先。新 Windows run/清理状态读 PROGRESS 顶部；无桌面正式 smoke 用 dbus-run-session，勿把旧门户阻塞当产品失败。Android 暂停。
