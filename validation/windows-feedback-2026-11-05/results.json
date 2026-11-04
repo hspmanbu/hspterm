@@ -46,5 +46,17 @@
     "Bridge tests share process Vault state; default parallel run had one tmux interference failure; complete serial run passed 77 tests.",
     "Export widget test now waits for flushed-write acknowledgement, not first visible file bytes.",
     "Headless startup requires isolated D-Bus session; plain Xvfb was blocked by a stale desktop portal."
-  ]
+  ],
+  "windows_ci": {
+    "source_commit": "cf13882a7237e12632640a2cb7265e82c7364f10",
+    "run": 41933717144,
+    "job": 126936779459,
+    "url": "https://github.com/hspmanbu/hspterm/actions/runs/41933717144",
+    "status": "in_progress"
+  },
+  "cleanup": {
+    "freed_gib": 3.29,
+    "available_gib": 12.81,
+    "generated_builds_removed": true
+  }
 }
