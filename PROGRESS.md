@@ -1,7 +1,8 @@
 # HSPTerm 开发进度
 
-## 2026-11-05 第三轮 Windows 反馈九项修正（源码+本机可执行验证完成，Native/真实平台待统一验证）
+## 2026-11-05 第三轮 Windows 反馈九项修正（已发布：源码e9368f8，Windows CI成功）
 
+- Windows发布：源码e9368f8已推送，run42021544762/job127225263699全部成功（约23分钟）：正规FRB、MSVC Release、Analyze0、CI固定14文件组件测试（含本轮重写的file_properties_dialog/sftp_feedback_ui）、原生启动/正常退出、正常关闭重开窗口几何恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42021544762/artifacts/13412329605 （HSPTerm-windows-x64，40,064,513字节，2026-11-19到期）。锁库启动工作集121.59/117.40/117.38MiB（artifact13413136935，Windows Server2022 runner口径，上轮115.00/111.97/111.94，差值在runner噪声与新增功能范围内，不替代用户Win11实测）。旧run41971663339为a0910ce基线，未重发。
 - 范围：welcome横幅显示、命令历史全主机共用+本会话可见、SFTP地址栏/列表/重命名、属性分页统计+九宫格+下拉、最近使用持久化、选中即复制、IME候选框下一行。修订已写入V1.4末尾"第三轮 Windows 反馈修订"。
 - welcome根因与修复（crates/ssh-core）：集成能力探测原先开无PTY exec通道并丢弃输出，Debian/Ubuntu把PAM/MOTD绑定到首个启动命令的会话通道，横幅因此丢失。现`open_interactive_channel`先建PTY通道，`integration::probe_on_pty`在PTY上exec探测：脚本零输出、独立退出码42判定（无stdout重放窗口），全部服务器输出逐字节进`early_output`如实回放；探测消耗通道后另开新交互通道跑正式会话（agent转发只在首个通道回报endpoint结果），每次连接仍一份横幅。非集成路径顺序不变、零行为差异。
 - 命令历史（storage-sync + frb-bridge）：`HistoryIndex`改`host_id: Option`，新增`index_all()`全主机合并池（同文本取最近使用、上限MAX_ENTRIES）；`candidates`接受`Option<&str>`。`terminal_suggestions`改用全局池（缓存仍按主机绑定以强制复查集成授权）；`record_integration_commands`成功后递增新`HISTORY_RECORD_EPOCH`并入`history_version()`三元组，本会话刚执行命令立即可联想。按主机/全局清除仍走HISTORY_IMPORT_EPOCH全局失效。
@@ -14,7 +15,7 @@
 - IME候选框（terminal/view.dart）：新增`_syncImeGeometry`，在原`setCaretRect`（macOS音调菜单）之外同时`setComposingRect`（Windows引擎`TextInput.setMarkedTextRect`定位候选窗）锚点为光标行下一行同列；attach后postFrame补报首帧几何，随帧/滚动/光标更新。
 - 正规FRB2.13重新生成（新增5个API、RenderFrame.copyOnSelection、RemoteIdName/RemoteAccountOptions/DirectorySizePage DTO）。Rust fmt/严格Clippy(-D warnings)0；term-core42/ssh-core79/storage-sync217单测过（新增recent_hosts3项、全局历史池1项、探测脚本2项改写）；`bridge_contracts.py`249函数/78DTO/302Dart 0发现。
 - Flutter Analyze0；受影响组件测试59项全过（file_properties_dialog 6项重写、cached_path_field 7项含会话历史候选/点空白进编辑/失焦退出、新sftp_inline_rename 2项、新terminal_selection_copy 2项含空白不复制与候选框下一行断言、sftp_feedback/file_columns/terminal_preferences/terminal_paste/workbench/terminal_layout/sftp_view/sftp_list_performance全过）。存量cached_path_field 'path text editing…'在HEAD本机复跑即失败（与本轮无关），已按新交互修复并扩入断言。
-- 未验证边界：本机Native SO已按用户授权清理，`sftp_properties_bridge`/`sftp_mutation_generation_bridge`等Native测试本轮未跑（报"找不到Rust核心库"），须重建后统一执行；真实OpenSSH横幅/集成探测、GTK、Windows TSF候选框实机、云同步回归未跑。Windows run/包状态以a0910ce记录为准，本轮尚未发布新构建。
+- 未验证边界：本机Native SO已按用户授权清理，`sftp_properties_bridge`/`sftp_mutation_generation_bridge`等Native测试本轮未跑（报"找不到Rust核心库"），须重建后统一执行；真实OpenSSH横幅/集成探测、GTK、云同步回归未跑。Windows CI通过不等于用户Windows11实机验收：欢迎横幅（Ubuntu+已启用Bash集成）、TSF中文输入与候选框下一行定位、属性实时大小统计/停止、选中即复制、最近使用持久化、地址栏/重命名新交互均待用户实测。
 
 ## 2026-11-05 第二轮 Windows 反馈正式交付
 
