@@ -1,3 +1,10 @@
+## 2026-11-05 本轮验证收齐与缓存清理
+
+- 应用源码a0910ce已推送；19194de仅同步Linux GTK旧按钮选择器及测试记录，正式产品源代码与a0910ce相同，已用git diff逐项验证。该维护提交避免重复构建同一应用，Windows仍验run41971663339/job127061543477，不要换回旧run或重发dispatch。
+- 真实GTK整例2项、原Mock GTK1项、组件去重65、Native真实SSH/SFTP5、term全105/bridge77/ssh单元79/可选Bash真实9、Python与桥接静态/Clippy/Analyze/格式均过；源码与实际测试边界见validation/windows-feedback-second-2026-11-05。
+- 所有GUI后最终又恢复并成功构建正式workbench_main.dart；此前同产品源码独立启动/缩放/正常关闭退出0，空闲/失焦各5秒CPU0%，预览run0。随后安全清理本轮target/build/.dart_tool/ephemeral/生成插件元数据及测试PNG，释放3,969,970,176字节，可用约12.97GiB。旧bundle现在已不存在，不能直接运行；下次需prepare_native_extensions.py、pub get后重建。用户原始.log、ssh-screen/、tools/AGENTS.md未跟踪且原样保留。
+- Windows云构建结果仍待收取；welcome显示/隐藏仍待用户明确，未过滤或伪造正文。Windows11真实TSF中文输入与最小化/恢复需用户复测；Android暂停。
+
 ## 2026-11-05 第二轮发布与补充回归（最新a0910ce）
 
 - 正式修正55ad8c7及IME门控/回归补充a0910ce均已正常Git推送。最新Windows run41971663339/job127061543477已实际运行：https://github.com/hspmanbu/hspterm/actions/runs/41971663339 。旧run41970895508由新head替代，不重复触发；当前尚不能宣称新Windows包通过，更不等于用户Windows11实机通过。

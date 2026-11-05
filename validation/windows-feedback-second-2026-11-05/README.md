@@ -51,3 +51,7 @@ GTK可运行工作台、最终构建/格式、Windows Actions 状态另行补记
 补充后本轮去重65组件、5个Native真实SSH/SFTP、2个GTK整例通过；不是把每个整例内部断言虚增为多个测试。最新产品源码a0910ce；Windows run41971663339/job127061543477仍在运行。本轮末尾维护只涉及Ubuntu整例脚本旧选择器与验证文字，产品源码与此云构建一致。
 
 原Mock工作台GTK截图/交互整例也实际00:29 +1通过，保留独立原型入口；其中数据明确为Mock，不计真实SSH/SFTP验收。截图只在/tmp/hspterm-feedback-second-prototype供本轮检查，不提交。正式工作台同产品源码的独立启动已过，最后再次恢复lib/workbench_main.dart入口，避免留测试入口的bundle。
+
+## 缓存清理
+
+最终恢复正式入口后，已安全清理本轮target/build/.dart_tool/ephemeral和生成插件元数据及本轮测试PNG；实际释放3,969,970,176字节，恢复约12.97GiB可用空间，详cache-cleanup.json。源码、正式FRB生成物、字体/vendor/锁、文字/JSON测试证据及Git历史均保留。用户原始.log、ssh-screen/、tools/AGENTS.md未清理且不提交。现在没有可运行的Linux bundle；恢复必须先prepare_native_extensions.py和pub get后重建。
