@@ -27,8 +27,8 @@ import 'transfers.dart';
 import 'transfers/explorer.dart';
 import 'transfers/export_cleanup.dart';
 
-// These functions are ignored because they are not marked as `pub`: `agent_connected`, `agent_scope`, `allowed_integration`, `apply_entry_preferences`, `bind_display`, `check_directory_session`, `check_file_generation`, `close_terminal_owned`, `configuration_restored`, `configuration_synchronized`, `connect_terminal_inner`, `connect_terminal_run`, `credential`, `display_sources`, `ensure_command_source`, `entry`, `event`, `history_version`, `integrated_result`, `integration_guard`, `integration_status`, `invalidate_backup_agents`, `invalidate_synchronized_agents`, `key_credential`, `migrate_legacy_profiles`, `modifiers`, `next_id`, `persist_key_file`, `property_children`, `publish_terminal_preferences`, `record_integration_commands`, `record`, `remember_host_key`, `remote_sftp`, `replace_display`, `retire_suggestions_for`, `retire_suggestions`, `sessions`, `suggestion_context`, `terminal_path_context_revision`, `terminal_path_context`, `tmux_event`, `transfer_connection`, `trust_id`, `unlock_vault_inner`, `validate_remote_path`, `vault`, `with_vault`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Entry`, `SavedProfile`, `SuggestionProposal`, `SuggestionsCache`, `TerminalCloseState`
+// These functions are ignored because they are not marked as `pub`: `agent_connected`, `agent_scope`, `allowed_integration`, `apply_entry_preferences`, `bind_display`, `check_directory_session`, `check_file_generation`, `close_terminal_owned`, `configuration_restored`, `configuration_synchronized`, `connect_terminal_inner`, `connect_terminal_run`, `credential`, `display_sources`, `ensure_command_source`, `entry`, `event`, `history_version`, `integrated_result`, `integration_guard`, `integration_status`, `invalidate_backup_agents`, `invalidate_synchronized_agents`, `key_credential`, `migrate_legacy_profiles`, `modifiers`, `next_id`, `parse_account_lines`, `persist_key_file`, `property_children`, `publish_terminal_preferences`, `record_integration_commands`, `record`, `remember_host_key`, `remote_sftp`, `replace_display`, `retire_suggestions_for`, `retire_suggestions`, `sessions`, `suggestion_context`, `terminal_path_context_revision`, `terminal_path_context`, `tmux_event`, `transfer_connection`, `trust_id`, `unlock_vault_inner`, `validate_remote_path`, `vault`, `with_vault`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DirSizeJob`, `Entry`, `SavedProfile`, `SuggestionProposal`, `SuggestionsCache`, `TerminalCloseState`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `from`, `from`, `from`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`, `default`
 
@@ -417,6 +417,16 @@ Future<void> deleteSftpBookmark({required String bookmarkId}) =>
 
 Future<HostCatalogSnapshot> hostCatalogSnapshot() =>
     RustLib.instance.api.crateApiHostCatalogSnapshot();
+
+/// Device-local convenience list of recently opened formal host IDs. Not
+/// synced, not backed up, and never proof that a host still exists.
+Future<List<String>> loadRecentHosts() =>
+    RustLib.instance.api.crateApiLoadRecentHosts();
+
+/// Records one host open. Only formal saved hosts are recorded; the returned
+/// list is the durable device-local ordering.
+Future<List<String>> recordRecentHost({required String hostId}) =>
+    RustLib.instance.api.crateApiRecordRecentHost(hostId: hostId);
 
 Future<List<HostConfig>> listHosts() =>
     RustLib.instance.api.crateApiListHosts();
@@ -1831,6 +1841,48 @@ Future<RemoteProperties> sftpProperties({
   includeDirectorySize: includeDirectorySize,
 );
 
+/// Starts a step-wise directory-size walk bound to one SSH generation. Each
+/// step performs a bounded amount of remote work, so a slow or huge tree no
+/// longer trips one long request timeout; the UI shows the growing totals.
+Future<String> sftpDirectorySizeBegin({
+  required int id,
+  required int generation,
+  required String path,
+}) => RustLib.instance.api.crateApiSftpDirectorySizeBegin(
+  id: id,
+  generation: generation,
+  path: path,
+);
+
+/// Walks up to `budget_directories` (default 16, max 256) directories and
+/// returns cumulative totals. Any error or timeout retires the ticket: a
+/// partially listed directory is never re-read into the same totals. Totals
+/// already displayed stay valid as of the last completed page.
+Future<DirectorySizePage> sftpDirectorySizeStep({
+  required int id,
+  required int generation,
+  required String ticket,
+  int? budgetDirectories,
+}) => RustLib.instance.api.crateApiSftpDirectorySizeStep(
+  id: id,
+  generation: generation,
+  ticket: ticket,
+  budgetDirectories: budgetDirectories,
+);
+
+/// Explicit stop for a progressive walk; idempotent. Callers must invoke it on
+/// dialog disposal so the bounded registry does not wait for idle expiry.
+Future<void> sftpDirectorySizeStop({required int id, required String ticket}) =>
+    RustLib.instance.api.crateApiSftpDirectorySizeStop(id: id, ticket: ticket);
+
+Future<RemoteAccountOptions> sftpAccountOptions({
+  required int id,
+  required int generation,
+}) => RustLib.instance.api.crateApiSftpAccountOptions(
+  id: id,
+  generation: generation,
+);
+
 Future<void> sftpSetProperties({
   required int id,
   required int generation,
@@ -1909,6 +1961,36 @@ class BridgeEvent {
           text == other.text &&
           detail == other.detail &&
           rttMicros == other.rttMicros;
+}
+
+/// One bounded chunk of a progressively reported directory-size walk. Totals
+/// are cumulative from the first page; `complete` retires the ticket.
+class DirectorySizePage {
+  final int size;
+  final int files;
+  final int directories;
+  final bool complete;
+
+  const DirectorySizePage({
+    required this.size,
+    required this.files,
+    required this.directories,
+    required this.complete,
+  });
+
+  @override
+  int get hashCode =>
+      size.hashCode ^ files.hashCode ^ directories.hashCode ^ complete.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DirectorySizePage &&
+          runtimeType == other.runtimeType &&
+          size == other.size &&
+          files == other.files &&
+          directories == other.directories &&
+          complete == other.complete;
 }
 
 /// Single-Vault, single-SQLite-read snapshot. Credential bodies never cross FFI.
@@ -2276,6 +2358,24 @@ class RelativeTerminalPaths {
           paths == other.paths;
 }
 
+class RemoteAccountOptions {
+  final List<RemoteIdName> users;
+  final List<RemoteIdName> groups;
+
+  const RemoteAccountOptions({required this.users, required this.groups});
+
+  @override
+  int get hashCode => users.hashCode ^ groups.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RemoteAccountOptions &&
+          runtimeType == other.runtimeType &&
+          users == other.users &&
+          groups == other.groups;
+}
+
 class RemoteDirectory {
   final String path;
   final List<RemoteFile> files;
@@ -2383,6 +2483,28 @@ class RemoteFileSearchPage {
           done == other.done;
 }
 
+/// Remote account names for the properties-dialog owner dropdowns, read from
+/// the world-readable account databases over the same SFTP session. No exec,
+/// no new privileges; unreadable or missing files yield empty lists and the
+/// dialog falls back to numeric entry.
+class RemoteIdName {
+  final int id;
+  final String name;
+
+  const RemoteIdName({required this.id, required this.name});
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RemoteIdName &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name;
+}
+
 /// Explicit properties query. Directory size is the sum of remote entry sizes,
 /// never the directory inode's size. No file contents are downloaded.
 class RemoteProperties {
@@ -2488,6 +2610,7 @@ class RenderFrame {
   final bool cursorBlink;
   final bool? osc52Enabled;
   final bool? rightClickPaste;
+  final bool? copyOnSelection;
   final int cursorColor;
   final int background;
   final bool alternateScreen;
@@ -2516,6 +2639,7 @@ class RenderFrame {
     required this.cursorBlink,
     this.osc52Enabled,
     this.rightClickPaste,
+    this.copyOnSelection,
     required this.cursorColor,
     required this.background,
     required this.alternateScreen,
@@ -2546,6 +2670,7 @@ class RenderFrame {
       cursorBlink.hashCode ^
       osc52Enabled.hashCode ^
       rightClickPaste.hashCode ^
+      copyOnSelection.hashCode ^
       cursorColor.hashCode ^
       background.hashCode ^
       alternateScreen.hashCode ^
@@ -2578,6 +2703,7 @@ class RenderFrame {
           cursorBlink == other.cursorBlink &&
           osc52Enabled == other.osc52Enabled &&
           rightClickPaste == other.rightClickPaste &&
+          copyOnSelection == other.copyOnSelection &&
           cursorColor == other.cursorColor &&
           background == other.background &&
           alternateScreen == other.alternateScreen &&

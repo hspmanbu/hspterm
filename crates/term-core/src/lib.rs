@@ -117,6 +117,7 @@ pub struct Snapshot {
     pub cursor_blink: bool,
     pub osc52_enabled: bool,
     pub right_click_paste: bool,
+    pub copy_on_selection: bool,
     pub palette: Vec<Option<[u8; 3]>>,
     pub mouse_reporting: bool,
     pub alternate_screen: bool,
@@ -288,6 +289,7 @@ pub struct Terminal {
     size_locked: bool,
     user_colors: Option<preferences::Colors>,
     right_click_paste: bool,
+    copy_on_selection: bool,
 }
 impl Terminal {
     pub fn new(size: Size, history_lines: usize) -> Result<Self, TerminalError> {
@@ -325,6 +327,7 @@ impl Terminal {
             size_locked: false,
             user_colors: None,
             right_click_paste: false,
+            copy_on_selection: false,
         })
     }
 
@@ -702,6 +705,7 @@ impl Terminal {
         };
         self.user_colors = Some(value.colors.clone());
         self.right_click_paste = value.right_click_paste;
+        self.copy_on_selection = value.copy_on_selection;
         self.set_osc52_enabled(value.osc52);
         self.revision = self.revision.wrapping_add(1);
     }
@@ -884,6 +888,7 @@ impl Terminal {
             cursor_blink: self.term.cursor_style().blinking,
             osc52_enabled: self.events.0.lock().osc52_enabled,
             right_click_paste: self.right_click_paste,
+            copy_on_selection: self.copy_on_selection,
             palette: (0..269)
                 .map(|i| {
                     self.term.colors()[i].map(|v| [v.r, v.g, v.b]).or_else(|| {

@@ -87,6 +87,10 @@ pub struct Settings {
     pub cursor_blink: bool,
     pub osc52: bool,
     pub right_click_paste: bool,
+    /// Copy on mouse-selection release; an all-whitespace selection copies
+    /// nothing. Purely local clipboard behavior, never remote content edits.
+    #[serde(default)]
+    pub copy_on_selection: bool,
     pub colors: Colors,
     #[serde(default)]
     pub notifications: crate::notifications::Settings,
@@ -103,6 +107,7 @@ impl Default for Settings {
             cursor_blink: false,
             osc52: true,
             right_click_paste: false,
+            copy_on_selection: false,
             colors: Colors::default(),
             notifications: crate::notifications::Settings::default(),
             typography: None,

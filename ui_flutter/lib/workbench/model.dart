@@ -1689,7 +1689,46 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     _drafts
       ..clear()
       ..addEntries(_draftRecords.values.map((h) => MapEntry(h.id, _host(h))));
+    unawaited(_loadRecents(epoch));
     changed();
+  }
+
+  /// Restores the device-local recent-host list after the encrypted catalog
+  /// loads; unknown IDs (deleted hosts) simply do not surface.
+  Future<void> _loadRecents(int epoch) async {
+    try {
+      final ids = await rust.loadRecentHosts();
+      if (_disposed ||
+          _shutdown != null ||
+          epoch != _catalogEpoch ||
+          ids.isEmpty) {
+        return;
+      }
+      recent
+        ..clear()
+        ..addAll(ids.where(_records.containsKey));
+      changed();
+    } catch (_) {
+      // Convenience ordering only; never blocks the catalog display.
+    }
+  }
+
+  /// Persists one host open into the device-local recent list.
+  void _recordRecent(DemoHost host) {
+    if (_disposed || _shutdown != null || !_records.containsKey(host.id)) {
+      return;
+    }
+    final id = host.id, epoch = _catalogEpoch;
+    _track(
+      rust.recordRecentHost(hostId: id).then<void>((ids) {
+        if (_disposed || _shutdown != null || epoch != _catalogEpoch) return;
+        recent
+          ..clear()
+          ..addAll(ids.where(_records.containsKey));
+        changed();
+      }),
+      reportFailure: () => false,
+    );
   }
 
   @override
@@ -1777,6 +1816,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     }
     if (!_records.containsKey(host.id)) throw StateError('请先正式保存主机配置');
     super.openHost(host);
+    _recordRecent(host);
     final s = focus! as LiveTerminalSession;
     unawaited(typography.ensureHost(host.id));
     if (temporarySource != null && temporaryInput != null) {

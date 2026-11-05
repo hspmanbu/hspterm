@@ -104,6 +104,7 @@ pub struct RenderFrame {
     pub cursor_blink: bool,
     pub osc52_enabled: Option<bool>,
     pub right_click_paste: Option<bool>,
+    pub copy_on_selection: Option<bool>,
     pub cursor_color: u32,
     pub background: u32,
     pub alternate_screen: bool,
@@ -176,6 +177,7 @@ struct Entry {
     history_capture_epoch: AtomicU64,
     integration_scope: Mutex<Option<(u64, String, String)>>,
     suggestions: Mutex<SuggestionsCache>,
+    dir_size_jobs: Mutex<HashMap<String, DirSizeJob>>,
     closed: AtomicBool,
     close_state: tokio::sync::Mutex<TerminalCloseState>,
     clipboard_enabled: AtomicBool,
@@ -477,6 +479,7 @@ pub async fn create_terminal(columns: u16, rows: u16, history_lines: u32) -> Res
             history_capture_epoch: AtomicU64::new(0),
             integration_scope: Mutex::new(None),
             suggestions: Mutex::new(SuggestionsCache::default()),
+            dir_size_jobs: Mutex::new(HashMap::new()),
             closed: AtomicBool::new(false),
             close_state: tokio::sync::Mutex::new(TerminalCloseState::default()),
             clipboard_enabled: AtomicBool::new(true),
@@ -1673,7 +1676,7 @@ fn tmux_event(entry: &Entry) -> Option<BridgeEvent> {
 struct SuggestionsCache {
     scope: String,
     host: String,
-    version: (u64, u64),
+    version: (u64, u64, u64),
     index: Option<hspterm_storage_sync::command_history::HistoryIndex>,
     proposal: Option<SuggestionProposal>,
 }
@@ -1681,14 +1684,22 @@ struct SuggestionsCache {
 struct SuggestionProposal {
     ticket: String,
     proof: hspterm_term_core::integration::Proof,
-    version: (u64, u64),
+    version: (u64, u64, u64),
     choices: Vec<Zeroizing<String>>,
 }
 static HISTORY_IMPORT_EPOCH: AtomicU64 = AtomicU64::new(0);
-fn history_version() -> (u64, u64) {
+/// Bumped when a qualified command is recorded so every session's suggestion
+/// cache rebuilds and the just-executed command of the current session becomes
+/// visible without a restart or reconnect.
+static HISTORY_RECORD_EPOCH: AtomicU64 = AtomicU64::new(0);
+fn history_version() -> (u64, u64, u64) {
     let versions = hspterm_storage_sync::cloud_sync::journal::versions();
     let latest = versions.borrow().values().copied().max().unwrap_or(0);
-    (latest, HISTORY_IMPORT_EPOCH.load(Ordering::Acquire))
+    (
+        latest,
+        HISTORY_IMPORT_EPOCH.load(Ordering::Acquire),
+        HISTORY_RECORD_EPOCH.load(Ordering::Acquire),
+    )
 }
 fn retire_suggestions() {
     retire_suggestions_for(None);
@@ -1787,8 +1798,11 @@ pub async fn terminal_suggestions(id: u32, generation: u64) -> Result<Option<Ter
                     if !allowed_integration(v, &scope, &host, &target)? {
                         return Ok(None);
                     }
+                    // Suggestion pool is shared across all hosts; the cache
+                    // stays host-bound so a host switch forces a re-check of
+                    // the integration authorization.
                     let index = hspterm_storage_sync::command_history::HistoryRepository::new(v)
-                        .index(&host)?;
+                        .index_all()?;
                     cache.scope = scope.clone();
                     cache.host = host.clone();
                     cache.version = version;
@@ -1798,7 +1812,7 @@ pub async fn terminal_suggestions(id: u32, generation: u64) -> Result<Option<Ter
                     .index
                     .as_ref()
                     .context("历史候选索引已失效")?
-                    .candidates(&scope, &host, &prefix, 20)?;
+                    .candidates(&scope, None, &prefix, 20)?;
                 if choices.is_empty() {
                     cache.proposal = None;
                     return Ok(None);
@@ -1838,7 +1852,7 @@ pub async fn terminal_suggestions(id: u32, generation: u64) -> Result<Option<Ter
 fn integration_guard(
     entry: &Arc<Entry>,
     generation: u64,
-    version: (u64, u64),
+    version: (u64, u64, u64),
 ) -> Arc<dyn Fn() -> bool + Send + Sync> {
     let weak = Arc::downgrade(entry);
     Arc::new(move || {
@@ -2084,8 +2098,13 @@ async fn record_integration_commands(
                 .iter()
                 .map(|submission| submission.text.as_str())
                 .collect();
-            hspterm_storage_sync::command_history::HistoryRepository::new(v)
+            let recorded = hspterm_storage_sync::command_history::HistoryRepository::new(v)
                 .record_qualified_batch(&host_id, &texts)?;
+            if recorded > 0 {
+                // Make this session's just-executed commands visible to every
+                // suggestion cache, including the recording session itself.
+                HISTORY_RECORD_EPOCH.fetch_add(1, Ordering::AcqRel);
+            }
             Ok(())
         })
     })
@@ -2954,6 +2973,43 @@ pub async fn host_catalog_snapshot() -> Result<HostCatalogSnapshot> {
                         })
                         .collect(),
                 })
+            })
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+/// Device-local convenience list of recently opened formal host IDs. Not
+/// synced, not backed up, and never proof that a host still exists.
+pub async fn load_recent_hosts() -> Result<Vec<String>> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(|| {
+            with_vault(|v| Ok(hspterm_storage_sync::recent_hosts::load(v)?))
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+/// Records one host open. Only formal saved hosts are recorded; the returned
+/// list is the durable device-local ordering.
+pub async fn record_recent_host(host_id: String) -> Result<Vec<String>> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(move || {
+            with_vault(|v| {
+                // Never invent catalog entries from the convenience list.
+                if hspterm_storage_sync::Repository::new(v)
+                    .host(&host_id)?
+                    .is_none()
+                {
+                    return Ok(hspterm_storage_sync::recent_hosts::load(v)?);
+                }
+                Ok(hspterm_storage_sync::recent_hosts::record(v, &host_id)?)
             })
         })
         .await?
@@ -6679,6 +6735,255 @@ pub async fn sftp_properties(
         tokio::time::timeout(std::time::Duration::from_secs(30), operation)
             .await
             .context("目录属性查询超时，请缩小范围后重试")?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+/// One bounded chunk of a progressively reported directory-size walk. Totals
+/// are cumulative from the first page; `complete` retires the ticket.
+pub struct DirectorySizePage {
+    pub size: u64,
+    pub files: u64,
+    pub directories: u64,
+    pub complete: bool,
+}
+#[flutter_rust_bridge::frb(ignore)]
+struct DirSizeJob {
+    generation: u64,
+    pending: Vec<(String, u32)>,
+    queued_bytes: usize,
+    size: u64,
+    files: u64,
+    directories: u64,
+    last_used: std::time::Instant,
+}
+const DIR_SIZE_IDLE: std::time::Duration = std::time::Duration::from_secs(600);
+const DIR_SIZE_MAX_JOBS: usize = 4;
+/// Starts a step-wise directory-size walk bound to one SSH generation. Each
+/// step performs a bounded amount of remote work, so a slow or huge tree no
+/// longer trips one long request timeout; the UI shows the growing totals.
+pub async fn sftp_directory_size_begin(id: u32, generation: u64, path: String) -> Result<String> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        validate_remote_path(&path)?;
+        let e = entry(id)?;
+        check_file_generation(id, generation)?;
+        let remote = remote_sftp(id, Some(generation)).await?;
+        let root = remote.symlink_metadata(path.clone()).await?;
+        ensure!(
+            root.is_dir() && !root.is_symlink(),
+            "仅目录支持内容大小统计"
+        );
+        let mut jobs = e.dir_size_jobs.lock();
+        jobs.retain(|_, job| job.last_used.elapsed() < DIR_SIZE_IDLE);
+        ensure!(
+            jobs.len() < DIR_SIZE_MAX_JOBS,
+            "目录大小统计任务过多，请先完成或停止现有统计"
+        );
+        let ticket = format!("{:032x}", rand::random::<u128>());
+        jobs.insert(
+            ticket.clone(),
+            DirSizeJob {
+                generation,
+                queued_bytes: path.len(),
+                pending: vec![(path, 0)],
+                size: 0,
+                files: 0,
+                directories: 0,
+                last_used: std::time::Instant::now(),
+            },
+        );
+        Ok(ticket)
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+/// Walks up to `budget_directories` (default 16, max 256) directories and
+/// returns cumulative totals. Any error or timeout retires the ticket: a
+/// partially listed directory is never re-read into the same totals. Totals
+/// already displayed stay valid as of the last completed page.
+pub async fn sftp_directory_size_step(
+    id: u32,
+    generation: u64,
+    ticket: String,
+    budget_directories: Option<u32>,
+) -> Result<DirectorySizePage> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        let e = entry(id)?;
+        check_file_generation(id, generation)?;
+        let mut job = {
+            let mut jobs = e.dir_size_jobs.lock();
+            jobs.retain(|_, job| job.last_used.elapsed() < DIR_SIZE_IDLE);
+            let job = jobs.remove(&ticket).context("目录大小统计已结束或不存在")?;
+            // A ticket is bound to the generation that started the walk; a
+            // reconnected terminal must not resume a stale path stack.
+            ensure!(
+                job.generation == generation,
+                "目录大小统计所属SSH代次已改变，已停止"
+            );
+            job
+        };
+        let remote = remote_sftp(id, Some(generation)).await?;
+        let budget = budget_directories.unwrap_or(16).clamp(1, 256);
+        let operation = async {
+            for _ in 0..budget {
+                let Some((path, depth)) = job.pending.pop() else {
+                    break;
+                };
+                job.queued_bytes -= path.len();
+                check_file_generation(id, generation)?;
+                ensure!(
+                    depth <= 128 && job.files + job.directories < 1_000_000,
+                    "目录大小统计超过安全容量"
+                );
+                let current = remote.symlink_metadata(path.clone()).await?;
+                ensure!(
+                    current.is_dir() && !current.is_symlink(),
+                    "目录在统计期间改变，请刷新后重试"
+                );
+                job.directories += 1;
+                let mut stream = remote.read_dir_stream(path.clone()).await?;
+                let read: Result<()> = async {
+                    while let Some(page) = stream.next_page().await? {
+                        check_file_generation(id, generation)?;
+                        for item in page {
+                            let name = item.filename;
+                            if name == "." || name == ".." {
+                                continue;
+                            }
+                            ensure!(!name.contains(['/', '\0']), "服务器返回无效文件名");
+                            ensure!(
+                                job.files + job.directories + (job.pending.len() as u64)
+                                    < 1_000_000,
+                                "目录大小统计超过安全容量"
+                            );
+                            if item.attrs.is_dir() && !item.attrs.is_symlink() {
+                                let child = format!("{}/{name}", path.trim_end_matches('/'));
+                                job.queued_bytes += child.len();
+                                ensure!(
+                                    job.queued_bytes <= 32 * 1024 * 1024
+                                        && job.pending.len() < 100_000,
+                                    "目录大小统计超过安全容量"
+                                );
+                                job.pending.push((child, depth + 1));
+                            } else {
+                                job.files += 1;
+                                job.size = job
+                                    .size
+                                    .checked_add(item.attrs.size.context("远端未提供文件大小")?)
+                                    .context("目录大小超过安全容量")?;
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+                .await;
+                let closed = stream.close().await;
+                read?;
+                closed?;
+            }
+            Ok(())
+        };
+        let result = tokio::time::timeout(std::time::Duration::from_secs(20), operation).await;
+        let complete = job.pending.is_empty();
+        let page = DirectorySizePage {
+            size: job.size,
+            files: job.files,
+            directories: job.directories,
+            complete,
+        };
+        result.context("目录大小统计超时或中断，已停止；已显示数值截至最近完整分页")??;
+        if !complete {
+            job.last_used = std::time::Instant::now();
+            e.dir_size_jobs.lock().insert(ticket, job);
+        }
+        Ok(page)
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+/// Explicit stop for a progressive walk; idempotent. Callers must invoke it on
+/// dialog disposal so the bounded registry does not wait for idle expiry.
+pub async fn sftp_directory_size_stop(id: u32, ticket: String) -> Result<()> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        let e = entry(id)?;
+        e.dir_size_jobs.lock().remove(&ticket);
+        Ok(())
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+/// Remote account names for the properties-dialog owner dropdowns, read from
+/// the world-readable account databases over the same SFTP session. No exec,
+/// no new privileges; unreadable or missing files yield empty lists and the
+/// dialog falls back to numeric entry.
+pub struct RemoteIdName {
+    pub id: u32,
+    pub name: String,
+}
+pub struct RemoteAccountOptions {
+    pub users: Vec<RemoteIdName>,
+    pub groups: Vec<RemoteIdName>,
+}
+fn parse_account_lines(bytes: &[u8]) -> Vec<RemoteIdName> {
+    let mut out: Vec<RemoteIdName> = Vec::new();
+    for line in String::from_utf8_lossy(bytes).lines() {
+        if out.len() >= 4096 {
+            break;
+        }
+        let fields: Vec<&str> = line.split(':').collect();
+        if fields.len() < 3 {
+            continue;
+        }
+        let Ok(id) = fields[2].parse::<u32>() else {
+            continue;
+        };
+        let name = fields[0];
+        if name.is_empty()
+            || name.len() > 64
+            || !name.bytes().all(|byte| byte.is_ascii_graphic())
+            || out.iter().any(|existing| existing.id == id)
+        {
+            continue;
+        }
+        out.push(RemoteIdName {
+            id,
+            name: name.to_owned(),
+        });
+    }
+    out
+}
+pub async fn sftp_account_options(id: u32, generation: u64) -> Result<RemoteAccountOptions> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        check_file_generation(id, generation)?;
+        let remote = remote_sftp(id, Some(generation)).await?;
+        async fn read_optional(
+            remote: &hspterm_ssh_core::SftpSession,
+            path: &str,
+        ) -> Option<Vec<u8>> {
+            let mut file = remote.open(path).await.ok()?;
+            let mut bytes = Vec::new();
+            // Bound the world-readable account file read; larger tails are
+            // dropped exactly like an oversized file.
+            let mut limited = (&mut file).take(256 * 1024);
+            limited.read_to_end(&mut bytes).await.ok()?;
+            drop(limited);
+            file.shutdown().await.ok()?;
+            Some(bytes)
+        }
+        let users = read_optional(&remote, "/etc/passwd")
+            .await
+            .map(|bytes| parse_account_lines(&bytes))
+            .unwrap_or_default();
+        let groups = read_optional(&remote, "/etc/group")
+            .await
+            .map(|bytes| parse_account_lines(&bytes))
+            .unwrap_or_default();
+        Ok(RemoteAccountOptions { users, groups })
     })
     .await;
     crate::public_errors::finish(outcome)

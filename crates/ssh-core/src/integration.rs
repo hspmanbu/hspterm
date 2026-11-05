@@ -31,28 +31,31 @@ impl Launch {
     }
 }
 
-/// Read-only capability probe on an explicitly opted-in, authenticated Root.
-/// Unsupported command syntax/version or an explicitly denied exec falls back
-/// to its normal request_shell; IO/timeout errors fail startup and retire Root.
-pub(crate) async fn available(
-    handle: &russh::client::Handle<crate::Client>,
+/// Read-only capability probe executed on the already-open interactive PTY
+/// channel. Debian/Ubuntu attach PAM/MOTD login banners to the first session
+/// channel that starts a command, so the probe must run where the banner
+/// belongs: every byte the server prints (banner included) is relayed verbatim
+/// into `early` for the terminal stream, and the probe script itself prints
+/// nothing. The decision uses a distinctive exit status; unlike stdout markers,
+/// a fresh process exit code has no replay window. Unsupported syntax/version
+/// or an explicitly denied exec falls back to the normal request_shell;
+/// IO/timeout errors fail startup and retire Root. The channel is spent either
+/// way and the caller must open a fresh one for the real session.
+pub(crate) async fn probe_on_pty(
+    channel: &mut russh::Channel<crate::client::Msg>,
     budget: &mut crate::budget::Budget,
+    early: &mut std::collections::VecDeque<Vec<u8>>,
 ) -> Result<bool, crate::SshError> {
     use crate::{SshError, Stage};
     use russh::ChannelMsg;
-    let marker = format!("HSPTERM_BASH_V1_{:032x}", rand::random::<u128>());
-    let probe = format!(
-        "if [ -r /dev/fd/0 ] && command -v bash >/dev/null 2>&1; then bash --noprofile --norc -c '(( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) ))' </dev/null && printf '\\n{marker}\\n'; fi"
-    );
+    let probe = PROBE_COMMAND;
     budget
         .run(Stage::Shell, async {
-            let mut channel = handle.channel_open_session_flow_controlled().await?;
             channel.exec(true, probe.as_bytes()).await?;
-            let mut output = Vec::new();
-            let mut count = 0usize;
+            let mut buffered = 0usize;
             let mut accepted = false;
             let mut denied = false;
-            let mut status = None;
+            let mut status: Option<u32> = None;
             loop {
                 match channel.wait().await {
                     Some(ChannelMsg::Success) if !accepted && !denied => accepted = true,
@@ -60,19 +63,16 @@ pub(crate) async fn available(
                         denied = true;
                         channel.close().await?;
                     }
-                    Some(ChannelMsg::Data { data }) => {
-                        count = count.saturating_add(data.len());
-                        if count > 4096 {
+                    Some(ChannelMsg::Data { data })
+                    | Some(ChannelMsg::ExtendedData { data, .. }) => {
+                        // Relay the remote login banner verbatim; the probe
+                        // prints nothing itself, so this is exactly what a
+                        // plain interactive login would have shown.
+                        buffered += data.len();
+                        if buffered > 1_048_576 {
                             return Err(SshError::RequestDenied(Stage::Shell));
                         }
-                        output.extend_from_slice(&data);
-                    }
-                    Some(ChannelMsg::ExtendedData { data, .. }) => {
-                        count = count.saturating_add(data.len());
-                        if count > 4096 {
-                            return Err(SshError::RequestDenied(Stage::Shell));
-                        }
-                        // Never retain/print stderr from the remote login shell.
+                        early.push_back(data.to_vec());
                     }
                     Some(ChannelMsg::ExitStatus { exit_status }) if status.is_none() => {
                         status = Some(exit_status)
@@ -85,10 +85,7 @@ pub(crate) async fn available(
                         if !accepted || status.is_none() {
                             return Err(SshError::RequestDenied(Stage::Shell));
                         }
-                        // User login banners may precede the capability reply.
-                        // Match one fresh, exact framed token, never log banners.
-                        let framed = format!("\n{marker}\n");
-                        return Ok(status == Some(0) && probe_reply(&output, &framed));
+                        return Ok(status == Some(CAPABLE_EXIT));
                     }
                     Some(
                         ChannelMsg::ReceiveWindowError
@@ -105,25 +102,32 @@ pub(crate) async fn available(
         })
         .await
 }
-fn probe_reply(output: &[u8], framed: &str) -> bool {
-    !framed.is_empty() && output.windows(framed.len()).any(|w| w == framed.as_bytes())
-}
+/// Distinctive success exit status; any other outcome means unavailable.
+const CAPABLE_EXIT: u32 = 42;
+const PROBE_COMMAND: &str = concat!(
+    "if [ -r /dev/fd/0 ] && command -v bash >/dev/null 2>&1 ",
+    "&& bash --noprofile --norc -c ",
+    "'(( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1)) ))' ",
+    "</dev/null; then exit 42; fi\nexit 1\n"
+);
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn capability_reply_tolerates_banner_but_requires_exact_fresh_frame() {
-        let framed = "\nHSPTERM_BASH_V1_synthetic_fresh\n";
-        assert!(probe_reply(
-            b"synthetic banner\n\nHSPTERM_BASH_V1_synthetic_fresh\n",
-            framed
-        ));
-        assert!(!probe_reply(b"HSPTERM_BASH_V1_old", framed));
-        assert!(!probe_reply(
-            b"\nHSPTERM_BASH_V1_synthetic_fresh_extra\n",
-            framed
-        ));
+    fn probe_prints_nothing_and_decides_by_distinctive_exit_status_only() {
+        // The script must not print: it runs on the interactive PTY channel and
+        // its bytes are relayed verbatim into the terminal stream.
+        assert!(!PROBE_COMMAND.contains("printf"));
+        assert!(!PROBE_COMMAND.contains("echo"));
+        assert!(PROBE_COMMAND.contains("exit 42"));
+        assert!(PROBE_COMMAND.trim_end().ends_with("exit 1"));
+        assert!(PROBE_COMMAND.contains("[ -r /dev/fd/0 ]"));
+        assert!(PROBE_COMMAND.contains("BASH_VERSINFO[1] >= 1"));
+        // Only the distinctive status means capable; 0/1/127 are unavailable.
+        assert_ne!(0, CAPABLE_EXIT);
+        assert_ne!(1, CAPABLE_EXIT);
+        assert_ne!(127, CAPABLE_EXIT);
     }
     #[test]
     fn fresh_launches_have_distinct_fixed_size_tokens_and_no_custom_command_api() {

@@ -226,25 +226,39 @@ class TerminalViewState extends State<TerminalView>
       _blinkTimer = null;
       _blink.value = true;
     }
-    if (_connection?.attached ?? false) {
-      final box = context.findRenderObject();
-      if (box is RenderBox && box.hasSize) {
-        _connection!.setEditableSizeAndTransform(
-          box.size,
-          box.getTransformTo(null),
-        );
-        if (f != null) {
-          _connection!.setCaretRect(
-            Rect.fromLTWH(
-              f.cursorColumn * _cell.width,
-              f.cursorRow.clamp(0, f.rows - 1) * _cell.height,
-              _cell.width,
-              _cell.height,
-            ),
-          );
-        }
-      }
-    }
+    _syncImeGeometry(f);
+  }
+
+  /// Reports the terminal caret to the platform IME. The composing rect is the
+  /// one Windows uses to place the candidate window: anchor it on the line
+  /// below the cursor so candidates appear under the composed text. The caret
+  /// rect stays for the macOS accent menu.
+  void _syncImeGeometry(rust.RenderFrame? f) {
+    if (!(_connection?.attached ?? false)) return;
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    _connection!.setEditableSizeAndTransform(
+      box.size,
+      box.getTransformTo(null),
+    );
+    if (f == null) return;
+    final row = f.cursorRow.clamp(0, f.rows - 1);
+    _connection!.setCaretRect(
+      Rect.fromLTWH(
+        f.cursorColumn * _cell.width,
+        row * _cell.height,
+        _cell.width,
+        _cell.height,
+      ),
+    );
+    _connection!.setComposingRect(
+      Rect.fromLTWH(
+        f.cursorColumn * _cell.width,
+        (row + 1) * _cell.height,
+        _cell.width,
+        _cell.height,
+      ),
+    );
   }
 
   void _focusChanged() {
@@ -268,6 +282,11 @@ class TerminalViewState extends State<TerminalView>
       _connection!
         ..setEditingState(_editing)
         ..show();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && (_connection?.attached ?? false)) {
+          _syncImeGeometry(c.metadata);
+        }
+      });
     } else {
       _connection?.close();
       _connection = null;
@@ -488,6 +507,13 @@ class TerminalViewState extends State<TerminalView>
   Future<void> copy() async {
     final text = c.selectedText();
     if (text.isNotEmpty) await Clipboard.setData(ClipboardData(text: text));
+  }
+
+  void _copySelectionIfWanted() {
+    if (!c.copyOnSelection) return;
+    final text = c.selectedText();
+    if (text.isEmpty || text.trim().isEmpty) return;
+    _run(Clipboard.setData(ClipboardData(text: text)));
   }
 
   Future<void> paste() async {
@@ -783,8 +809,12 @@ class TerminalViewState extends State<TerminalView>
                   onPointerUp: (e) {
                     if (_remoteDrag) _mouse(e.localPosition, 1, _button);
                     _remoteDrag = false;
+                    // A finished primary-button drag selects; honor the
+                    // select-to-copy preference unless it is all whitespace.
+                    final selected = _anchor != null && _button == 0;
                     _anchor = null;
                     _button = 3;
+                    if (selected) _copySelectionIfWanted();
                   },
                   onPointerCancel: (e) {
                     if (_remoteDrag) _mouse(e.localPosition, 1, _button);

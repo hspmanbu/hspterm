@@ -20,6 +20,7 @@ pub mod network_defaults;
 pub mod openssh_import;
 pub mod preview_cache;
 pub mod raw_edits;
+pub mod recent_hosts;
 mod repository;
 mod revision;
 pub mod secure_unlock;

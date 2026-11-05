@@ -70,6 +70,7 @@ class CachedPathField extends StatefulWidget {
     required this.cache,
     required this.onSubmitted,
     this.contextMenuExtras,
+    this.onFocusLost,
   });
   final List<ContextMenuButtonItem> Function(EditableTextState)?
   contextMenuExtras;
@@ -77,6 +78,9 @@ class CachedPathField extends StatefulWidget {
   final String currentDirectory;
   final Map<String, List<DemoFile>> cache;
   final ValueChanged<String> onSubmitted;
+
+  /// Leaving the field without submitting exits path editing.
+  final VoidCallback? onFocusLost;
   @override
   State<CachedPathField> createState() => _CachedPathFieldState();
 }
@@ -121,10 +125,16 @@ class _CachedPathFieldState extends State<CachedPathField> {
         final gate = _composition = Completer<void>();
         await gate.future;
       }
-      if (!mounted ||
-          request != _request ||
-          value.text == widget.currentDirectory) {
+      if (!mounted || request != _request) {
         return const <String>[];
+      }
+      if (value.text == widget.currentDirectory) {
+        // Entering edit mode with the current path intact offers this
+        // session's visited directories (LRU order), not a prefix search.
+        return [
+          for (final path in widget.cache.keys)
+            if (path != widget.currentDirectory && path.startsWith('/')) path,
+        ].take(12).toList();
       }
       return cachedDirectorySuggestions(
         value.text,
@@ -139,7 +149,10 @@ class _CachedPathFieldState extends State<CachedPathField> {
     super.initState();
     widget.controller.addListener(_controllerChanged);
     _focus.addListener(() {
-      if (!_focus.hasFocus) _invalidate();
+      if (!_focus.hasFocus) {
+        _invalidate();
+        widget.onFocusLost?.call();
+      }
     });
   }
 
@@ -180,11 +193,12 @@ class _CachedPathFieldState extends State<CachedPathField> {
         key: const ValueKey('remote-path'),
         controller: controller,
         focusNode: focus,
+        // Entering edit moves the keyboard focus straight into the field.
+        autofocus: true,
         style: const TextStyle(fontSize: 11, fontFamily: 'JetBrainsMono'),
-        decoration: const InputDecoration(
-          hintText: '绝对路径（仅缓存补全）',
-          contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-        ),
+        // Keep the themed filled/bordered box and its symmetric padding so the
+        // editor fills the address-bar height instead of a raised small input.
+        decoration: const InputDecoration(hintText: '绝对路径（仅缓存补全）'),
         onSubmitted: (_) {
           accept();
           widget.onSubmitted(controller.text);
@@ -232,9 +246,13 @@ class _CachedPathFieldState extends State<CachedPathField> {
                   final path = options[index];
                   final query = widget.controller.text;
                   final parent = query.substring(0, query.lastIndexOf('/') + 1);
-                  final label = path.startsWith(parent)
-                      ? path.substring(parent.length)
-                      : path;
+                  // History entries (unedited current path) always show the
+                  // full destination; prefix matches keep the short label.
+                  final label =
+                      query == widget.currentDirectory ||
+                          !path.startsWith(parent)
+                      ? path
+                      : path.substring(parent.length);
                   return Tooltip(
                     message: path,
                     child: InkWell(

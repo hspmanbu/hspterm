@@ -161,6 +161,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DiagnosticSnapshot dco_decode_diagnostic_snapshot(dynamic raw);
 
   @protected
+  DirectorySizePage dco_decode_directory_size_page(dynamic raw);
+
+  @protected
   DisplayConfig dco_decode_display_config(dynamic raw);
 
   @protected
@@ -311,6 +314,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RemoteFile> dco_decode_list_remote_file(dynamic raw);
 
   @protected
+  List<RemoteIdName> dco_decode_list_remote_id_name(dynamic raw);
+
+  @protected
   List<RenderCell> dco_decode_list_render_cell(dynamic raw);
 
   @protected
@@ -430,6 +436,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RelativeTerminalPaths dco_decode_relative_terminal_paths(dynamic raw);
 
   @protected
+  RemoteAccountOptions dco_decode_remote_account_options(dynamic raw);
+
+  @protected
   RemoteDirectory dco_decode_remote_directory(dynamic raw);
 
   @protected
@@ -440,6 +449,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RemoteFileSearchPage dco_decode_remote_file_search_page(dynamic raw);
+
+  @protected
+  RemoteIdName dco_decode_remote_id_name(dynamic raw);
 
   @protected
   RemoteMoveEndReview dco_decode_remote_move_end_review(dynamic raw);
@@ -692,6 +704,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  DirectorySizePage sse_decode_directory_size_page(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   DisplayConfig sse_decode_display_config(SseDeserializer deserializer);
 
   @protected
@@ -878,6 +895,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RemoteFile> sse_decode_list_remote_file(SseDeserializer deserializer);
 
   @protected
+  List<RemoteIdName> sse_decode_list_remote_id_name(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<RenderCell> sse_decode_list_render_cell(SseDeserializer deserializer);
 
   @protected
@@ -1039,6 +1061,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RemoteAccountOptions sse_decode_remote_account_options(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RemoteDirectory sse_decode_remote_directory(SseDeserializer deserializer);
 
   @protected
@@ -1053,6 +1080,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RemoteFileSearchPage sse_decode_remote_file_search_page(
     SseDeserializer deserializer,
   );
+
+  @protected
+  RemoteIdName sse_decode_remote_id_name(SseDeserializer deserializer);
 
   @protected
   RemoteMoveEndReview sse_decode_remote_move_end_review(
@@ -1360,6 +1390,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_directory_size_page(
+    DirectorySizePage self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_display_config(DisplayConfig self, SseSerializer serializer);
 
   @protected
@@ -1606,6 +1642,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_remote_id_name(
+    List<RemoteIdName> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_render_cell(
     List<RenderCell> self,
     SseSerializer serializer,
@@ -1807,6 +1849,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_remote_account_options(
+    RemoteAccountOptions self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_remote_directory(
     RemoteDirectory self,
     SseSerializer serializer,
@@ -1826,6 +1874,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     RemoteFileSearchPage self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_remote_id_name(RemoteIdName self, SseSerializer serializer);
 
   @protected
   void sse_encode_remote_move_end_review(

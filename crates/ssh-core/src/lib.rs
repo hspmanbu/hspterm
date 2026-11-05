@@ -547,55 +547,20 @@ impl SshConnection {
                 deferred_create: None,
             }
         };
-        if startup.command.is_none()
-            && config.integration.is_some()
-            && !integration::available(&handle, &mut budget).await?
-        {
-            config.integration = None;
-        }
-        let mut pty = budget
-            .run(Stage::Pty, async {
-                Ok(handle.channel_open_session_flow_controlled().await?)
-            })
-            .await?;
+        // The interactive PTY channel is opened before the optional Bash
+        // capability probe: Debian/Ubuntu attach PAM/MOTD login banners to the
+        // first session channel that starts a command, so the probe must run
+        // where the banner belongs instead of on a discarded side channel.
         let mut early_output = VecDeque::new();
-        budget
-            .run(Stage::Pty, async {
-                pty.request_pty(
-                    true,
-                    "xterm-256color",
-                    config.columns.into(),
-                    config.rows.into(),
-                    0,
-                    0,
-                    &[],
-                )
-                .await?;
-                expect_success(&mut pty, &mut early_output, Stage::Pty).await
-            })
-            .await?;
-        let mut creation_agent = None;
-        if config.agent_forwarding {
-            budget
-                .run(Stage::Agent, async {
-                    let standard = handle.supports_agent_forwarding_v0().await?;
-                    if standard {
-                        pty.agent_forward_standard(true).await?;
-                    } else {
-                        pty.agent_forward(true).await?;
-                    }
-                    match expect_success(&mut pty, &mut early_output, Stage::Agent).await {
-                        Ok(()) => {
-                            agent.endpoint_result(true);
-                            creation_agent = Some(standard);
-                        }
-                        Err(SshError::RequestDenied(Stage::Agent)) => agent.endpoint_result(false),
-                        Err(error) => return Err(error),
-                    }
-                    Ok(())
-                })
-                .await?;
-        }
+        let (mut pty, mut creation_agent) = open_interactive_channel(
+            &handle,
+            &mut budget,
+            config.columns,
+            config.rows,
+            &mut early_output,
+            config.agent_forwarding.then(|| (agent.as_ref(), true)),
+        )
+        .await?;
         tmux::complete_creation(
             &mut startup,
             &handle,
@@ -609,11 +574,32 @@ impl SshConnection {
             size_locked: startup.lock_size,
         });
         let tmux_session = startup.session.clone();
-        let integration = config
+        let mut integration = config
             .integration
-            .as_ref()
+            .take()
             .filter(|_| startup.command.is_none());
-        let integration_command = integration.map(integration::Launch::command);
+        if integration.is_some() {
+            // The probe execs on this PTY channel and relays everything the
+            // server prints (the login banner included) into the terminal
+            // stream; the exec consumes the channel whichever way it decides.
+            if !integration::probe_on_pty(&mut pty, &mut budget, &mut early_output).await? {
+                integration = None;
+            }
+            // One banner per connection: the fresh interactive channel runs
+            // only the real session, so PAM/MOTD is not printed a second time.
+            let (next, forwarded) = open_interactive_channel(
+                &handle,
+                &mut budget,
+                config.columns,
+                config.rows,
+                &mut early_output,
+                config.agent_forwarding.then(|| (agent.as_ref(), false)),
+            )
+            .await?;
+            creation_agent = forwarded;
+            pty = next;
+        }
+        let integration_command = integration.as_ref().map(integration::Launch::command);
         let integration_nonce = integration.map(|launch| Zeroizing::new(launch.nonce().to_owned()));
         let stage = if startup.command.is_some() {
             Stage::Tmux
@@ -1048,6 +1034,70 @@ async fn handshake<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
             client::connect_stream(config, CancelStream::new(stream, cancel), handler).await
         })
         .await
+}
+
+/// One interactive PTY channel with the fixed terminal mode and an optional
+/// agent-forwarding request. Output printed while requests are pending is
+/// preserved in `early`; only the first channel of a connection reports the
+/// agent endpoint result to the router.
+async fn open_interactive_channel(
+    handle: &client::Handle<Client>,
+    budget: &mut crate::budget::Budget,
+    columns: u16,
+    rows: u16,
+    early: &mut VecDeque<Vec<u8>>,
+    agent: Option<(&agent_forward::AgentRouter, bool)>,
+) -> Result<(Channel<client::Msg>, Option<bool>), SshError> {
+    let mut channel = budget
+        .run(Stage::Pty, async {
+            Ok(handle.channel_open_session_flow_controlled().await?)
+        })
+        .await?;
+    budget
+        .run(Stage::Pty, async {
+            channel
+                .request_pty(
+                    true,
+                    "xterm-256color",
+                    columns.into(),
+                    rows.into(),
+                    0,
+                    0,
+                    &[],
+                )
+                .await?;
+            expect_success(&mut channel, early, Stage::Pty).await
+        })
+        .await?;
+    let mut creation_agent = None;
+    if let Some((router, report)) = agent {
+        budget
+            .run(Stage::Agent, async {
+                let standard = handle.supports_agent_forwarding_v0().await?;
+                if standard {
+                    channel.agent_forward_standard(true).await?;
+                } else {
+                    channel.agent_forward(true).await?;
+                }
+                match expect_success(&mut channel, early, Stage::Agent).await {
+                    Ok(()) => {
+                        if report {
+                            router.endpoint_result(true);
+                        }
+                        creation_agent = Some(standard);
+                    }
+                    Err(SshError::RequestDenied(Stage::Agent)) => {
+                        if report {
+                            router.endpoint_result(false);
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
+                Ok(())
+            })
+            .await?;
+    }
+    Ok((channel, creation_agent))
 }
 
 async fn expect_success(

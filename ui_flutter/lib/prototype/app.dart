@@ -907,10 +907,17 @@ class _StartPageState extends State<StartPage> {
                               .take(3)
                               .toList(),
                         ),
+                        // Order follows the most-recent-first list, not the
+                        // catalog ordering; unknown IDs stay hidden.
                         recent = group(
                           widget.model.isMock ? '最近使用 · 模拟' : '最近使用',
-                          widget.model.hosts
-                              .where((h) => widget.model.recent.contains(h.id))
+                          widget.model.recent
+                              .map(
+                                (id) => widget.model.hosts
+                                    .where((h) => h.id == id)
+                                    .firstOrNull,
+                              )
+                              .whereType<DemoHost>()
                               .take(3)
                               .toList(),
                         );

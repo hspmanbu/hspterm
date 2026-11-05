@@ -18,6 +18,7 @@ class TerminalPreferencesValue {
     required this.blink,
     required this.osc52,
     required this.rightPaste,
+    this.copySelection = false,
     required this.foreground,
     required this.background,
     required this.cursor,
@@ -28,7 +29,7 @@ class TerminalPreferencesValue {
        typography = typography == null ? null : Map.unmodifiable(typography);
   final int historyLines, foreground, background, cursor;
   final String shape;
-  final bool blink, osc52, rightPaste;
+  final bool blink, osc52, rightPaste, copySelection;
   final List<int> ansi;
   final TerminalNotificationSettings notifications;
 
@@ -77,6 +78,7 @@ class TerminalPreferencesValue {
     'cursor_blink': blink,
     'osc52': osc52,
     'right_click_paste': rightPaste,
+    'copy_on_selection': copySelection,
     'colors': {
       'foreground': foreground,
       'background': background,
@@ -96,6 +98,7 @@ class TerminalPreferencesValue {
           'cursor_blink',
           'osc52',
           'right_click_paste',
+          if (value.containsKey('copy_on_selection')) 'copy_on_selection',
           'colors',
           if (value.containsKey('notifications')) 'notifications',
           if (value.containsKey('typography')) 'typography',
@@ -130,6 +133,7 @@ class TerminalPreferencesValue {
       blink: value['cursor_blink'] as bool,
       osc52: value['osc52'] as bool,
       rightPaste: value['right_click_paste'] as bool,
+      copySelection: value['copy_on_selection'] as bool? ?? false,
       foreground: colors['foreground'] as int,
       background: colors['background'] as int,
       cursor: colors['cursor'] as int,
@@ -233,6 +237,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
   String? _error, _status;
   bool _busy = false, _io = false, _blink = false, _osc = true, _right = false;
   String _shape = 'block';
+  bool _copySelection = false;
   final _history = TextEditingController();
   final _colors = List.generate(19, (_) => TextEditingController());
   final _notificationEditor = GlobalKey<TerminalNotificationEditorState>();
@@ -261,6 +266,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
     _blink = v.blink;
     _osc = v.osc52;
     _right = v.rightPaste;
+    _copySelection = v.copySelection;
     final colors = [v.foreground, v.background, v.cursor, ...v.ansi];
     for (var i = 0; i < colors.length; i++) {
       _colors[i].text = colors[i]
@@ -311,6 +317,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
       blink: _blink,
       osc52: _osc,
       rightPaste: _right,
+      copySelection: _copySelection,
       foreground: colors[0],
       background: colors[1],
       cursor: colors[2],
@@ -388,7 +395,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
                 scrollable: true,
                 title: const Text('保存终端设置？'),
                 content: Text(
-                  '历史上限 ${value.historyLines} 行仅作用于新建终端，不裁剪现有历史。光标和配色作为默认值更新，远端控制序列仍可临时覆盖。OSC52 ${value.osc52 ? '允许读写' : '关闭读写'}。右键${value.rightPaste ? '粘贴（Shift+右键菜单）' : '菜单'}；远端鼠标捕获优先。多行粘贴安全预览始终保留。\n终端通知${value.notifications.enabled ? '开启' : '关闭'}；Windows桌面通知${value.notifications.desktop ? '开启' : '关闭'}；远端正文预览${value.notifications.preview ? '开启，可能含敏感内容' : '关闭'}。SFTP任务不发送桌面通知。',
+                  '历史上限 ${value.historyLines} 行仅作用于新建终端，不裁剪现有历史。光标和配色作为默认值更新，远端控制序列仍可临时覆盖。OSC52 ${value.osc52 ? '允许读写' : '关闭读写'}。右键${value.rightPaste ? '粘贴（Shift+右键菜单）' : '菜单'}；远端鼠标捕获优先。选中即复制${value.copySelection ? '开启（全空白不复制）' : '关闭'}。多行粘贴安全预览始终保留。\n终端通知${value.notifications.enabled ? '开启' : '关闭'}；Windows桌面通知${value.notifications.desktop ? '开启' : '关闭'}；远端正文预览${value.notifications.preview ? '开启，可能含敏感内容' : '关闭'}。SFTP任务不发送桌面通知。',
                 ),
                 actions: [
                   TextButton(
@@ -527,6 +534,16 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
                   subtitle: const Text('Shift+右键强制本地菜单；远端鼠标报告仍优先，多行粘贴仍确认。'),
                   value: _right,
                   onChanged: (v) => setState(() => _right = v),
+                ),
+              ),
+              CompactSettingsToggle(
+                child: SwitchListTile(
+                  key: const ValueKey('terminal-copy-selection'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('选中即复制'),
+                  subtitle: const Text('鼠标拖选松开即复制到本机剪贴板；选区全为空白时不复制。'),
+                  value: _copySelection,
+                  onChanged: (v) => setState(() => _copySelection = v),
                 ),
               ),
               const Text('多行粘贴预览始终保留；不提供关闭安全确认或清空终端历史的按钮。'),

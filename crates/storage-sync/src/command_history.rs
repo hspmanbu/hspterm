@@ -446,9 +446,39 @@ impl<'a> HistoryRepository<'a> {
         let mut document = self.read()?.1;
         Ok(HistoryIndex {
             vault_scope: self.vault.instance_id().to_owned(),
-            host_id: host.to_owned(),
+            host_id: Some(host.to_owned()),
             enabled: document.enabled,
             entries: document.hosts.remove(host).unwrap_or_default().entries,
+        })
+    }
+    /// Shared pool for terminal suggestions: entries from every host, with
+    /// identical texts collapsed to their most recent use. Recording keeps the
+    /// per-host attribution; only the suggestion pool is global.
+    pub fn index_all(&mut self) -> Result<HistoryIndex> {
+        let document = self.read()?.1;
+        let mut merged: Vec<Entry> = Vec::new();
+        for host in document.hosts.values() {
+            for entry in &host.entries {
+                match merged
+                    .iter_mut()
+                    .find(|existing| existing.text == entry.text)
+                {
+                    Some(existing) => {
+                        if existing.used < entry.used {
+                            existing.used = entry.used.clone();
+                        }
+                    }
+                    None => merged.push(entry.clone()),
+                }
+            }
+        }
+        merged.sort_by(|a, b| b.used.cmp(&a.used));
+        merged.truncate(MAX_ENTRIES);
+        Ok(HistoryIndex {
+            vault_scope: self.vault.instance_id().to_owned(),
+            host_id: None,
+            enabled: document.enabled,
+            entries: merged,
         })
     }
     /// Convenience for one-off queries; the terminal must cache index() rather
@@ -460,7 +490,7 @@ impl<'a> HistoryRepository<'a> {
         limit: usize,
     ) -> Result<Vec<Zeroizing<String>>> {
         let index = self.index(host)?;
-        index.candidates(self.vault.instance_id(), host, input, limit)
+        index.candidates(self.vault.instance_id(), Some(host), input, limit)
     }
     /// Secret-bearing plaintext payload for a future *encrypted* sync/backup
     /// envelope only. Never log or expose it as a diagnostic/UI text export.
@@ -508,12 +538,12 @@ pub(crate) fn merge_sync_payload(a: &[u8], b: &[u8]) -> Result<Zeroizing<Vec<u8>
     Document::merged(&Document::decode(a)?, &Document::decode(b)?)?.encode()
 }
 
-/// An immutable, original-Vault/host-bound snapshot. Its owner must discard it
-/// when recording preferences, history or Vault scope changes. No UI collector
-/// currently consumes this foundation; it cannot enable suggestions by itself.
+/// An immutable, original-Vault snapshot. `host_id: Some(_)` binds the pool to
+/// one host; `None` is the shared all-hosts suggestion pool. Its owner must
+/// discard it when recording preferences, history or Vault scope changes.
 pub struct HistoryIndex {
     vault_scope: String,
-    host_id: String,
+    host_id: Option<String>,
     enabled: bool,
     entries: Vec<Entry>,
 }
@@ -521,11 +551,11 @@ impl HistoryIndex {
     pub fn candidates(
         &self,
         vault_scope: &str,
-        host_id: &str,
+        host_id: Option<&str>,
         input: &str,
         limit: usize,
     ) -> Result<Vec<Zeroizing<String>>> {
-        if vault_scope != self.vault_scope || host_id != self.host_id {
+        if vault_scope != self.vault_scope || host_id != self.host_id.as_deref() {
             return Err(HistoryError::Changed);
         }
         if !self.enabled || input.is_empty() || !eligible_text(input) {
@@ -827,6 +857,59 @@ mod tests {
         assert!(repo.candidates(&a.id, "git", 20).unwrap().is_empty());
     }
     #[test]
+    fn global_pool_merges_all_hosts_dedupes_by_latest_use_and_keeps_host_binding() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("global-history.vault");
+        let mut v = Vault::create(&path, b"synthetic-global-master").unwrap();
+        let a = host(&mut v);
+        let b = host(&mut v);
+        let scope = v.instance_id().to_owned();
+        let mut repo = HistoryRepository::new(&mut v);
+        repo.record_qualified(&a.id, "git status").unwrap();
+        repo.record_qualified(&b.id, "docker ps").unwrap();
+        // The same text on two hosts stays one pool entry with the later use.
+        repo.record_qualified(&b.id, "git status").unwrap();
+        let global = repo.index_all().unwrap();
+        let hits = global.candidates(&scope, None, "git", 20).unwrap();
+        assert_eq!(
+            hits.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            ["git status",]
+        );
+        let hits = global.candidates(&scope, None, "d", 20).unwrap();
+        assert_eq!(
+            hits.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            ["docker ps"]
+        );
+        // A host-bound index is not interchangeable with the shared pool.
+        let bound = repo.index(&a.id).unwrap();
+        assert!(bound.candidates(&scope, Some(&b.id), "git", 20).is_err());
+        assert!(global.candidates(&scope, Some(&a.id), "git", 20).is_err());
+        // Per-host clear only removes that host's copies; the other host's
+        // identical text keeps the shared entry alive.
+        repo.clear(Some(&a.id)).unwrap();
+        let global = repo.index_all().unwrap();
+        assert!(
+            !global
+                .candidates(&scope, None, "git status", 20)
+                .unwrap()
+                .is_empty()
+        );
+        repo.clear(Some(&b.id)).unwrap();
+        let global = repo.index_all().unwrap();
+        assert!(
+            global
+                .candidates(&scope, None, "git status", 20)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            global
+                .candidates(&scope, None, "docker", 20)
+                .unwrap()
+                .is_empty()
+        );
+    }
+    #[test]
     fn failed_publication_future_format_and_bad_merge_preserve_payload_and_writer() {
         let dir = tempfile::tempdir().unwrap();
         let mut v = Vault::create(
@@ -889,18 +972,23 @@ mod tests {
         );
         assert!(
             index
-                .candidates(other.instance_id(), &h.id, "git", 20)
+                .candidates(other.instance_id(), Some(&h.id), "git", 20)
                 .is_err()
         );
-        assert!(index.candidates(&scope, OTHER, "git", 20).is_err());
+        assert!(index.candidates(&scope, Some(OTHER), "git", 20).is_err());
         drop(v);
         drop(other);
         dir.close().unwrap();
         // Query after the vault/files are gone: no SQLite/crypto/network work.
         assert_eq!(
-            index.candidates(&scope, &h.id, "git", 20).unwrap()[0].as_str(),
+            index.candidates(&scope, Some(&h.id), "git", 20).unwrap()[0].as_str(),
             "git status"
         );
-        assert!(index.candidates(&scope, &h.id, "", 20).unwrap().is_empty());
+        assert!(
+            index
+                .candidates(&scope, Some(&h.id), "", 20)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

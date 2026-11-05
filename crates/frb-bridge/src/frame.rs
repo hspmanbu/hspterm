@@ -79,6 +79,7 @@ pub(crate) fn delta(previous: Option<&Snapshot>, snapshot: &Snapshot) -> RenderF
         cursor_blink: snapshot.cursor_blink,
         osc52_enabled: Some(snapshot.osc52_enabled),
         right_click_paste: Some(snapshot.right_click_paste),
+        copy_on_selection: Some(snapshot.copy_on_selection),
         cursor_color: palette(snapshot, 258),
         background: palette(snapshot, 257),
         alternate_screen: snapshot.alternate_screen,

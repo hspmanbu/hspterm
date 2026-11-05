@@ -1,3 +1,21 @@
+# HSPTerm 开发进度
+
+## 2026-11-05 第三轮 Windows 反馈九项修正（源码+本机可执行验证完成，Native/真实平台待统一验证）
+
+- 范围：welcome横幅显示、命令历史全主机共用+本会话可见、SFTP地址栏/列表/重命名、属性分页统计+九宫格+下拉、最近使用持久化、选中即复制、IME候选框下一行。修订已写入V1.4末尾"第三轮 Windows 反馈修订"。
+- welcome根因与修复（crates/ssh-core）：集成能力探测原先开无PTY exec通道并丢弃输出，Debian/Ubuntu把PAM/MOTD绑定到首个启动命令的会话通道，横幅因此丢失。现`open_interactive_channel`先建PTY通道，`integration::probe_on_pty`在PTY上exec探测：脚本零输出、独立退出码42判定（无stdout重放窗口），全部服务器输出逐字节进`early_output`如实回放；探测消耗通道后另开新交互通道跑正式会话（agent转发只在首个通道回报endpoint结果），每次连接仍一份横幅。非集成路径顺序不变、零行为差异。
+- 命令历史（storage-sync + frb-bridge）：`HistoryIndex`改`host_id: Option`，新增`index_all()`全主机合并池（同文本取最近使用、上限MAX_ENTRIES）；`candidates`接受`Option<&str>`。`terminal_suggestions`改用全局池（缓存仍按主机绑定以强制复查集成授权）；`record_integration_commands`成功后递增新`HISTORY_RECORD_EPOCH`并入`history_version()`三元组，本会话刚执行命令立即可联想。按主机/全局清除仍走HISTORY_IMPORT_EPOCH全局失效。
+- 最近使用（storage-sync新模块recent_hosts + FRB）：设备本机记录`device-recent-hosts-v1`（上限10、去重、置顶、防御解析、损坏报错不覆盖），不入备份/云同步。`load_recent_hosts/record_recent_host`（仅正式已保存主机可记录）；LiveWorkbenchModel目录载入后恢复、`_openHost`记录并刷新；首页"最近使用"按最近顺序排列（不再按目录序）。
+- SFTP地址栏（prototype/files.dart + cached_path_field.dart）：面包屑左对齐（去reverse）、移除编辑图标、点面包屑空白进入编辑（key `sftp-path-bar`）、输入框用主题填充边框占满36px行高、autofocus；进入编辑未改文本时候选=本会话访问目录（LRU缓存键、排除当前目录、全路径显示）；失焦退出编辑不导航。
+- SFTP列表（files.dart）：`ListView`外包竖向`Scrollbar(thumbVisibility)`（复用`_vertical`控制器）。
+- 重命名（files.dart）：整行编辑器（padding左34右10、全宽TextField）；点击外部（焦点离开`_renameFocus`且非busy）取消编辑；仅回车应用（onSubmitted→commitRename），Esc仍取消；未应用不改远端名。
+- 属性对话框（frb-bridge + workbench/file_properties.dart 重写）：Rust新增`sftp_directory_size_begin/step/stop`（Entry级`dir_size_jobs`注册表：票绑定原SSH代次、每Entry≤4个、600s闲置回收、每步默认16目录上限256、20s步超时，出错/超时退役票且半读目录绝不重读进同一累计）与`DirectorySizePage`累计DTO；`sftp_account_options`经原SFTP会话有界(256KiB)读取解析/etc/passwd、/etc/group（去重、上限4096、不可用返回空）。Dart：大小逐页增长显示+"停止统计"按钮+已停止标注、文件/目录计数随页更新；权限3×3九宫格（行移位6/3/0）显示等效八进制；所有者/组下拉（含未知当前值合成项），账户列表不可用回退数字输入；保存仍只提交与基线差异字段，递归确认保留。
+- 选中即复制（term-core/storage-sync/帧/面板/视图）：`Settings.copy_on_selection`（serde默认false，旧记录兼容）、Terminal/Snapshot/RenderFrame全链下发；终端设置面板新开关（key `terminal-copy-selection`）+确认摘要；`TerminalView`指针松开时若偏好开启且选区非全空白才`Clipboard.setData`。默认关闭。
+- IME候选框（terminal/view.dart）：新增`_syncImeGeometry`，在原`setCaretRect`（macOS音调菜单）之外同时`setComposingRect`（Windows引擎`TextInput.setMarkedTextRect`定位候选窗）锚点为光标行下一行同列；attach后postFrame补报首帧几何，随帧/滚动/光标更新。
+- 正规FRB2.13重新生成（新增5个API、RenderFrame.copyOnSelection、RemoteIdName/RemoteAccountOptions/DirectorySizePage DTO）。Rust fmt/严格Clippy(-D warnings)0；term-core42/ssh-core79/storage-sync217单测过（新增recent_hosts3项、全局历史池1项、探测脚本2项改写）；`bridge_contracts.py`249函数/78DTO/302Dart 0发现。
+- Flutter Analyze0；受影响组件测试59项全过（file_properties_dialog 6项重写、cached_path_field 7项含会话历史候选/点空白进编辑/失焦退出、新sftp_inline_rename 2项、新terminal_selection_copy 2项含空白不复制与候选框下一行断言、sftp_feedback/file_columns/terminal_preferences/terminal_paste/workbench/terminal_layout/sftp_view/sftp_list_performance全过）。存量cached_path_field 'path text editing…'在HEAD本机复跑即失败（与本轮无关），已按新交互修复并扩入断言。
+- 未验证边界：本机Native SO已按用户授权清理，`sftp_properties_bridge`/`sftp_mutation_generation_bridge`等Native测试本轮未跑（报"找不到Rust核心库"），须重建后统一执行；真实OpenSSH横幅/集成探测、GTK、Windows TSF候选框实机、云同步回归未跑。Windows run/包状态以a0910ce记录为准，本轮尚未发布新构建。
+
 ## 2026-11-05 第二轮 Windows 反馈正式交付
 
 - 产品源码a0910ce（主修55ad8c7）已实际Windows MSVC Release构建成功；run41971663339/job127061543477已completed/success。Flutter Analyze0、66组件、原生启动退出、正常关闭后位置/大小恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/41971663339/artifacts/13390548974 （HSPTerm-windows-x64，40,000,381字节，2026-11-19到期）。后续19194de和文档提交只改Ubuntu脚本/证据，产品源码与云构建逐项diff相同。不要重跑旧CI。

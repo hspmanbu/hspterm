@@ -101,6 +101,7 @@ class TerminalController extends ChangeNotifier {
   int searchOrdinal = -1;
   bool osc52Enabled = true;
   bool rightClickPaste = false;
+  bool copyOnSelection = false;
   int newOutputLines = 0;
   (int, int, int, int)? _desiredSize;
   Future<bool> Function(rust.BridgeEvent)? confirmHostKey;
@@ -467,6 +468,7 @@ class TerminalController extends ChangeNotifier {
     if (_disposed) return;
     if (frame.osc52Enabled != null) osc52Enabled = frame.osc52Enabled!;
     if (frame.rightClickPaste != null) rightClickPaste = frame.rightClickPaste!;
+    if (frame.copyOnSelection != null) copyOnSelection = frame.copyOnSelection!;
     if (!_selectionUnchanged(frame)) selectionStart = selectionEnd = null;
     if (frame.full ||
         rows.length != frame.rows ||

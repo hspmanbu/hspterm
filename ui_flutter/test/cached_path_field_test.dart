@@ -77,14 +77,14 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('keep.txt'));
       await tester.pumpAndSettle();
+      // Tapping the breadcrumb strip (its empty area) enters path editing.
+      await tester.tap(find.byKey(const ValueKey('sftp-path-bar')));
+      await tester.pumpAndSettle();
       final field = find.byKey(const ValueKey('remote-path'));
       await tester.enterText(field, '/typed');
       await tester.sendKeyEvent(LogicalKeyboardKey.delete);
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
-      await tester.sendKeyEvent(LogicalKeyboardKey.f2);
-      await tester.pumpAndSettle();
-      expect(find.byType(TextField), findsOneWidget);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
@@ -94,12 +94,58 @@ void main() {
         tester.widget<TextField>(field).controller!.selection,
         const TextSelection(baseOffset: 0, extentOffset: 6),
       );
+      // Clicking a file row moves focus out of the path field and exits
+      // editing without applying any navigation.
+      await tester.tap(find.text('other.txt'));
+      await tester.pumpAndSettle();
+      expect(field, findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.f2);
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsOneWidget);
       expect(source.files, hasLength(2));
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       model.dispose();
     },
   );
+  testWidgets('entering edit offers this session visited directories', (
+    tester,
+  ) async {
+    // The live cache is LRU-ordered; the panel enters editing with the
+    // current path intact, so the dropdown lists recently visited paths.
+    final controller = TextEditingController(text: '/var/www');
+    final cache = <String, List<DemoFile>>{
+      '/home': [],
+      '/var/log': [],
+      '/var/www': [],
+    };
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 320,
+            height: 200,
+            child: CachedPathField(
+              controller: controller,
+              currentDirectory: '/var/www',
+              cache: cache,
+              onSubmitted: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // Focus triggers RawAutocomplete to build options for the unedited text.
+    await tester.tap(find.byKey(const ValueKey('remote-path')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('cached-path-/home')), findsOneWidget);
+    expect(find.byKey(const ValueKey('cached-path-/var/log')), findsOneWidget);
+    // The current directory itself is not offered as a history entry.
+    expect(find.byKey(const ValueKey('cached-path-/var/www')), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
   test('suggestions use cached directory keys and folder metadata, preserving names', () async {
     final cache = <String, List<DemoFile>>{
       '/': [DemoFile('/home', 'home', folder: true)],
