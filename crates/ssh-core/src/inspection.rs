@@ -116,9 +116,19 @@ impl Processes {
 enum Action {
     Sample,
     Processes,
+    ServerCopy(String),
     Terminate { pid: u32, start: u64, boot: String },
 }
 fn command(action: &Action) -> Result<String, InspectionError> {
+    if let Action::ServerCopy(request) = action {
+        if request.len() > 200_000 || !request.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(InspectionError::Identity);
+        }
+        return Ok(format!(
+            "python3 -I -S -c '{}' {request}",
+            include_str!("inspection/server_copy.py").replace('\'', "'\\''")
+        ));
+    }
     let args = match action {
         Action::Sample => "sample".into(),
         Action::Processes => "processes".into(),
@@ -160,6 +170,11 @@ impl Inspector {
         action: Action,
         cancel: CancellationToken,
     ) -> Result<Vec<u8>, SshError> {
+        let deadline = if matches!(action, Action::ServerCopy(_)) {
+            Duration::from_secs(120)
+        } else {
+            DEADLINE
+        };
         let command = command(&action)?;
         if self.transport.is_cancelled() || self.handle.is_closed() {
             return Err(SshError::Disconnected);
@@ -193,7 +208,7 @@ impl Inspector {
                     biased;
                     _ = root.cancelled() => Err(SshError::Disconnected),
                     _ = worker_cancel.cancelled() => Err(InspectionError::Unconfirmed.into()),
-                    result = tokio::time::timeout(DEADLINE, collect(&mut channel, &command, &mut peer_closed)) => result.unwrap_or_else(|_| Err(InspectionError::Unconfirmed.into())),
+                    result = tokio::time::timeout(deadline, collect(&mut channel, &command, &mut peer_closed)) => result.unwrap_or_else(|_| Err(InspectionError::Unconfirmed.into())),
                 };
                 if !root.is_cancelled() {
                     // Sending CLOSE only queues it. Require peer retirement as
@@ -221,8 +236,37 @@ impl Inspector {
             biased;
             _ = self.transport.cancelled() => Err(SshError::Disconnected),
             _ = local.cancelled() => Err(InspectionError::Unconfirmed.into()),
-            result = tokio::time::timeout(DEADLINE + Duration::from_secs(2), receive) => result.map_err(|_| InspectionError::Unconfirmed)?.map_err(|_| InspectionError::Unconfirmed)?,
+            result = tokio::time::timeout(deadline + Duration::from_secs(2), receive) => result.map_err(|_| InspectionError::Unconfirmed)?.map_err(|_| InspectionError::Unconfirmed)?,
         }
+    }
+    /// Only a fixed server-side file copier, never arbitrary shell commands.
+    /// The bridge owns the SFTP namespace marker and validates these fields.
+    pub async fn copy_file(
+        &self,
+        request: serde_json::Value,
+        cancel: CancellationToken,
+    ) -> Result<(), SshError> {
+        let nonce = request
+            .get("nonce")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| {
+                value.len() == 64
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+            })
+            .ok_or(InspectionError::Identity)?;
+        let acknowledgement = format!("\nHSPTERM_SERVER_COPY_V1_{nonce}\n");
+        let payload = serde_json::to_vec(&request).map_err(|_| InspectionError::Identity)?;
+        let hex: String = payload.iter().map(|b| format!("{b:02x}")).collect();
+        let result = self.execute(Action::ServerCopy(hex), cancel).await?;
+        if !result
+            .windows(acknowledgement.len())
+            .any(|part| part == acknowledgement.as_bytes())
+        {
+            return Err(InspectionError::Unconfirmed.into());
+        }
+        Ok(())
     }
     pub async fn sample(&self, cancel: CancellationToken) -> Result<Sample, SshError> {
         Ok(Sample::parse(&self.execute(Action::Sample, cancel).await?)?)

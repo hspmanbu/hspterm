@@ -1,0 +1,43 @@
+{
+  "platform": "Ubuntu Linux x86_64; Windows 11 actual TSF/IME and minimize pending",
+  "flutter_analyze": "0 issues",
+  "frb": "canonical codegen 2.13.0",
+  "rust": {
+    "bridge_unit": 77,
+    "ssh_unit": 79,
+    "term_all": 105,
+    "real_openssh_bash": 9
+  },
+  "flutter": {
+    "distinct_component_cases": 61,
+    "native_ssh_sftp": 4,
+    "real_gtk": 1
+  },
+  "python": {
+    "server_only_copy": 3,
+    "bash_decoder_test": 1,
+    "bash_decoder_subcases": 34,
+    "bridge_source_test": 10
+  },
+  "strict_clippy": "passed affected libraries -D warnings",
+  "format": "Dart 22 files unchanged; Rust fmt; git diff --check",
+  "limitations": [
+    "Windows 11 native IME and minimize/restore need user retest",
+    "welcome feedback ambiguous and unchanged",
+    "server-only copy requires Python3 and same SFTP/SSH namespace; bounded operation, partial failure may retain target",
+    "Android paused by user"
+  ],
+  "logs": [
+    "hspterm-second-ui-final.log",
+    "hspterm-second-sftp-last.log",
+    "hspterm-second-native-all-final.log",
+    "hspterm-second-copy-ack-final.log",
+    "hspterm-second-openssh-final.log",
+    "hspterm-second-term-final.log",
+    "hspterm-second-bridge-final.log",
+    "hspterm-second-ssh-unit-final.log",
+    "hspterm-second-gtk-final.log",
+    "hspterm-second-clippy-ack-final.log",
+    "hspterm-second-analysis-final0.log"
+  ]
+}

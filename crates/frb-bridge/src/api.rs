@@ -1943,6 +1943,7 @@ pub async fn insert_terminal_paths(
     generation: u64,
     paths: Vec<String>,
     enter_directory: bool,
+    names_only: Option<bool>,
 ) -> Result<String> {
     /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
     let outcome: Result<_> = crate::public_errors::guard(async move {
@@ -1979,9 +1980,20 @@ pub async fn insert_terminal_paths(
             crate::run_log::decision("path.insert", "PermissionRevoked", id, generation);
             return Ok("Unavailable".into());
         }
+        ensure!(
+            !(enter_directory && names_only.unwrap_or(false)),
+            "文件名插入不能作为进入目录操作"
+        );
         let quoted = paths
             .iter()
-            .map(|path| format!("'{}'", path.replace('\'', "'\\''")))
+            .map(|path| {
+                let path = if names_only.unwrap_or(false) {
+                    path.rsplit('/').next().unwrap_or("")
+                } else {
+                    path.as_str()
+                };
+                format!("'{}'", path.replace('\'', "'\\''"))
+            })
             .collect::<Vec<_>>()
             .join(" ");
         let text = Zeroizing::new(if enter_directory {
@@ -6543,4 +6555,313 @@ mod trust_tests {
             b"SHA256:fixture-first"
         );
     }
+}
+
+/// Explicit properties query. Directory size is the sum of remote entry sizes,
+/// never the directory inode's size. No file contents are downloaded.
+pub struct RemoteProperties {
+    pub path: String,
+    pub size: u64,
+    pub files: u64,
+    pub directories: u64,
+    pub permissions: Option<u32>,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub link_target: Option<String>,
+    pub size_complete: bool,
+}
+fn check_file_generation(id: u32, generation: u64) -> Result<()> {
+    let e = entry(id)?;
+    let state = e.session.status();
+    ensure!(
+        !e.transfer_closing.load(Ordering::Acquire)
+            && state.phase == SessionPhase::Connected
+            && state.generation == generation,
+        "原SFTP操作绑定的SSH代次已改变，未执行"
+    );
+    Ok(())
+}
+pub async fn sftp_properties(
+    id: u32,
+    generation: u64,
+    path: String,
+    include_directory_size: Option<bool>,
+) -> Result<RemoteProperties> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        validate_remote_path(&path)?;
+        let remote = remote_sftp(id, Some(generation)).await?;
+        let operation = async {
+            let root = remote.symlink_metadata(path.clone()).await?;
+            let mut result = RemoteProperties {
+                path: path.clone(),
+                size: 0,
+                files: 0,
+                directories: 0,
+                size_complete: false,
+                permissions: root.permissions,
+                uid: root.uid,
+                gid: root.gid,
+                link_target: if root.is_symlink() {
+                    Some(remote.read_link(path.clone()).await?)
+                } else {
+                    None
+                },
+            };
+            if !root.is_dir() || root.is_symlink() {
+                result.files = 1;
+                result.size_complete = true;
+                result.size = root.size.context("远端未提供文件大小")?;
+                return Ok(result);
+            }
+            if !include_directory_size.unwrap_or(true) {
+                result.directories = 1;
+                return Ok(result);
+            }
+            let mut queued_bytes = path.len();
+            let mut pending = vec![(path, 0u32)];
+            while let Some((path, depth)) = pending.pop() {
+                queued_bytes -= path.len();
+                check_file_generation(id, generation)?;
+                ensure!(
+                    depth <= 128 && result.files + result.directories < 1_000_000,
+                    "目录属性查询超过安全容量"
+                );
+                let current = remote.symlink_metadata(path.clone()).await?;
+                ensure!(
+                    current.is_dir() && !current.is_symlink(),
+                    "目录在属性查询期间改变，请刷新后重试"
+                );
+                result.directories += 1;
+                let mut stream = remote.read_dir_stream(path.clone()).await?;
+                let read: Result<()> = async {
+                    while let Some(page) = stream.next_page().await? {
+                        check_file_generation(id, generation)?;
+                        for entry in page {
+                            let name = entry.filename;
+                            if name == "." || name == ".." {
+                                continue;
+                            }
+                            ensure!(!name.contains(['/', '\0']), "服务器返回无效文件名");
+                            ensure!(
+                                result.files + result.directories + (pending.len() as u64)
+                                    < 1_000_000,
+                                "目录属性查询超过安全容量"
+                            );
+                            if entry.attrs.is_dir() && !entry.attrs.is_symlink() {
+                                let child = format!("{}/{name}", path.trim_end_matches('/'));
+                                queued_bytes += child.len();
+                                ensure!(
+                                    queued_bytes <= 32 * 1024 * 1024 && pending.len() < 100_000,
+                                    "目录属性查询超过安全容量"
+                                );
+                                pending.push((child, depth + 1));
+                            } else {
+                                result.files += 1;
+                                result.size = result
+                                    .size
+                                    .checked_add(entry.attrs.size.context("远端未提供文件大小")?)
+                                    .context("目录大小超过安全容量")?;
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+                .await;
+                let closed = stream.close().await;
+                read?;
+                closed?;
+            }
+            check_file_generation(id, generation)?;
+            result.size_complete = true;
+            Ok(result)
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(30), operation)
+            .await
+            .context("目录属性查询超时，请缩小范围后重试")?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+async fn property_children(
+    remote: &hspterm_ssh_core::SftpSession,
+    path: &str,
+) -> Result<Vec<russh_sftp::protocol::File>> {
+    let mut stream = remote.read_dir_stream(path).await?;
+    let read: Result<_> = async {
+        let mut entries = Vec::new();
+        let mut bytes = 0usize;
+        while let Some(page) = stream.next_page().await? {
+            for entry in page {
+                if entry.filename == "." || entry.filename == ".." {
+                    continue;
+                }
+                ensure!(
+                    !entry.filename.contains(['/', '\0']),
+                    "服务器返回无效文件名"
+                );
+                bytes += entry.filename.len() + 128;
+                ensure!(
+                    entries.len() < 100_000 && bytes <= 32 * 1024 * 1024,
+                    "递归属性修改超过安全容量"
+                );
+                entries.push(entry);
+            }
+        }
+        Ok(entries)
+    }
+    .await;
+    let closed = stream.close().await;
+    let entries = read?;
+    closed?;
+    Ok(entries)
+}
+pub async fn sftp_set_properties(
+    id: u32,
+    generation: u64,
+    path: String,
+    permissions: Option<u32>,
+    uid: Option<u32>,
+    gid: Option<u32>,
+    recursive: bool,
+) -> Result<()> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        validate_remote_path(&path)?;
+        ensure!(
+            permissions.is_none_or(|p| p <= 0o7777),
+            "权限必须为有效八进制权限"
+        );
+        let remote = remote_sftp(id, Some(generation)).await?;
+        let canonical = remote.canonicalize(path.clone()).await?;
+        let operation = async {
+            let mut pending = vec![(path, false, 0u32)];
+            let mut count = 0u32;
+            while let Some((path, expanded, depth)) = pending.pop() {
+                check_file_generation(id, generation)?;
+                count += 1;
+                ensure!(
+                    count <= 2_000_000 && depth <= 128,
+                    "递归属性修改超过安全容量；部分项目可能已修改"
+                );
+                let old = remote.symlink_metadata(path.clone()).await?;
+                // Never chmod/chown a link target as a side effect of recursion.
+                if old.is_symlink() {
+                    ensure!(
+                        recursive && depth > 0,
+                        "符号链接权限不能安全修改；未跟随链接"
+                    );
+                    continue;
+                }
+                let resolved = remote.canonicalize(path.clone()).await?;
+                ensure!(
+                    resolved == canonical
+                        || resolved.starts_with(&format!("{}/", canonical.trim_end_matches('/'))),
+                    "远端目录已改变，未继续修改其他路径"
+                );
+                if recursive && old.is_dir() && !expanded {
+                    pending.push((path.clone(), true, depth));
+                    for entry in property_children(&remote, &path).await? {
+                        let name = entry.filename;
+                        if name == "." || name == ".." {
+                            continue;
+                        }
+                        ensure!(
+                            !name.contains(['/', '\0']) && pending.len() < 100_000,
+                            "递归属性修改超过安全容量"
+                        );
+                        pending.push((
+                            format!("{}/{name}", path.trim_end_matches('/')),
+                            false,
+                            depth + 1,
+                        ));
+                    }
+                    continue;
+                }
+                let mut attrs = russh_sftp::protocol::FileAttributes {
+                    permissions,
+                    ..Default::default()
+                };
+                if uid.is_some() || gid.is_some() {
+                    attrs.uid = Some(uid.or(old.uid).context("远端未提供原所有者UID")?);
+                    attrs.gid = Some(gid.or(old.gid).context("远端未提供原所有组GID")?);
+                }
+                remote
+                    .set_metadata(path, attrs)
+                    .await
+                    .context("属性修改未全部完成，请刷新核对已修改的项目")?;
+            }
+            Ok(())
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(120), operation)
+            .await
+            .context("递归属性修改超时；部分项目可能已修改，请刷新核对")?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+pub async fn sftp_create_file(id: u32, generation: u64, path: String) -> Result<()> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        validate_remote_path(&path)?;
+        let remote = remote_sftp(id, Some(generation)).await?;
+        let flags = russh_sftp::protocol::OpenFlags::WRITE
+            | russh_sftp::protocol::OpenFlags::CREATE
+            | russh_sftp::protocol::OpenFlags::EXCLUDE;
+        let file = remote.open_with_flags(path, flags).await?;
+        file.close().await?;
+        Ok(())
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+/// Clipboard copy on one SSH session: no local download/relay, no overwrite.
+pub async fn sftp_copy_on_server(
+    id: u32,
+    generation: u64,
+    source: String,
+    destination: String,
+) -> Result<()> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        use tokio::io::AsyncWriteExt;
+        validate_remote_path(&source)?; validate_remote_path(&destination)?;
+        ensure!(source.starts_with('/') && destination.starts_with('/') && source.len() <= 16384 && destination.len() <= 16384, "远端复制需要有效绝对路径");
+        let remote = remote_sftp(id, Some(generation)).await?;
+        let (parent, name) = source.rsplit_once('/').context("无效来源路径")?;
+        ensure!(!name.is_empty(), "不能复制远端根目录");
+        let parent = remote.canonicalize(if parent.is_empty() {"/"} else {parent}).await?;
+        let source = format!("{}/{name}", parent.trim_end_matches('/'));
+        let (parent, name) = destination.rsplit_once('/').context("无效目标路径")?;
+        ensure!(!name.is_empty(), "无效目标文件名称");
+        let parent = remote.canonicalize(if parent.is_empty() {"/"} else {parent}).await?;
+        let destination = format!("{}/{name}", parent.trim_end_matches('/'));
+        ensure!(source != destination && !destination.starts_with(&format!("{}/", source.trim_end_matches('/'))), "不能复制到来源自身或子目录");
+        ensure!(!remote.try_exists(destination.clone()).await?, "目标路径已存在，请先处理同名冲突");
+        let metadata = remote.symlink_metadata(source.clone()).await?;
+        let token: [u8; 32] = rand::random();
+        let nonce: String = token.iter().map(|b| format!("{b:02x}")).collect();
+        let marker = format!("{}/.hspterm-copy-{}", parent.trim_end_matches('/'), &nonce[..32]);
+        let flags = russh_sftp::protocol::OpenFlags::WRITE | russh_sftp::protocol::OpenFlags::CREATE | russh_sftp::protocol::OpenFlags::EXCLUDE;
+        let mut receipt = remote.open_with_flags(marker.clone(), flags).await?;
+        let result: Result<()> = async {
+            let written: Result<()> = async {
+                receipt.set_metadata(russh_sftp::protocol::FileAttributes {permissions: Some(0o600), ..Default::default()}).await?;
+                receipt.write_all(&token).await?; Ok(())
+            }.await;
+            let closed = receipt.close().await;
+            written?; closed?;
+            check_file_generation(id, generation)?;
+            entry(id)?.session.inspector_for(generation).await?.copy_file(serde_json::json!({
+                "source":source, "destination":destination, "marker":marker, "nonce":nonce,
+                "metadata":{"size":metadata.size,"mtime":metadata.mtime,"permissions":metadata.permissions,"uid":metadata.uid,"gid":metadata.gid}
+            }), tokio_util::sync::CancellationToken::new()).await.context("服务器内复制未确认；可能已创建部分目标，请检查后再操作；未自动下载或重试")?;
+            Ok(())
+        }.await;
+        let cleanup = remote.remove_file(marker).await.context("远端复制校验文件清理失败，请刷新并检查目标目录");
+        result?; cleanup?;
+        Ok(())
+    }).await;
+    crate::public_errors::finish(outcome)
 }

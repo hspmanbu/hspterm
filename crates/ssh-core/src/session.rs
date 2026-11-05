@@ -634,7 +634,15 @@ impl ManagedSession {
     }
 
     pub async fn inspector(&self) -> Result<crate::inspection::Inspector, SshError> {
-        let generation = self.active_generation()?;
+        self.inspector_for(self.active_generation()?).await
+    }
+    pub async fn inspector_for(
+        &self,
+        generation: u64,
+    ) -> Result<crate::inspection::Inspector, SshError> {
+        if self.active_generation()? != generation {
+            return Err(SshError::Disconnected);
+        }
         let (reply, response) = oneshot::channel();
         self.commands
             .send(Command::Inspector { generation, reply })

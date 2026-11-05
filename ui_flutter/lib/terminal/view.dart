@@ -1,4 +1,6 @@
 import 'application_keys.dart';
+import 'ime_buffer.dart';
+import '../app_notice.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -58,11 +60,24 @@ class TerminalViewState extends State<TerminalView>
     text: '\u200b',
     selection: TextSelection.collapsed(offset: 1),
   );
-  TextEditingValue _editing = _empty;
+  final _ime = TerminalImeBuffer();
+  TextEditingValue get _editing => _ime.value;
+
+  double get _zoom => c.fontZoom;
+  set _zoom(double value) {
+    c.fontZoom = value;
+  }
+
+  String? _shownOperationError;
   rust.KeyboardInput? _pendingTextKey;
   TerminalController get c => widget.controller;
   TerminalTypography get _typography =>
-      widget.typography ?? TerminalTypography(size: widget.fontSize);
+      (widget.typography ?? TerminalTypography(size: widget.fontSize)).copyWith(
+        size: ((widget.typography?.size ?? widget.fontSize) + _zoom).clamp(
+          9,
+          36,
+        ),
+      );
   void focusTerminal() => _focus.requestFocus();
 
   Map<String, int> get debugCacheStats => {
@@ -113,7 +128,7 @@ class TerminalViewState extends State<TerminalView>
       c.addListener(_changed);
       _cache.clear();
       _pendingTextKey = null;
-      _editing = _empty;
+      _ime.reset();
       _preedit.value = '';
       _connection?.setEditingState(_empty);
       _visibility();
@@ -162,6 +177,10 @@ class TerminalViewState extends State<TerminalView>
     if (!mounted || result == 'Applied') return;
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
       SnackBar(
+        duration: const Duration(seconds: 6),
+        showCloseIcon: true,
+        persist: false,
+        behavior: SnackBarBehavior.floating,
         content: Text(
           result == 'Unavailable'
               ? '普通Shell输入状态已改变，未发送候选。请继续正常输入。'
@@ -172,6 +191,17 @@ class TerminalViewState extends State<TerminalView>
   }
 
   void _changed() {
+    if (c.error == null) _shownOperationError = null;
+    if (c.connected && c.error != null && c.error != _shownOperationError) {
+      final message = c.error!;
+      _shownOperationError = message;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !c.connected || c.error != message) return;
+        showAppNotice(context, message);
+        c.dismissError(message);
+        _shownOperationError = null;
+      });
+    }
     _syncSuggestions();
     _hoverLink.value = null;
     final f = c.metadata;
@@ -217,7 +247,7 @@ class TerminalViewState extends State<TerminalView>
 
   void _focusChanged() {
     if (_focus.hasFocus) {
-      _editing = _empty;
+      _ime.reset();
       _preedit.value = '';
       _connection = TextInput.attach(
         this,
@@ -229,6 +259,7 @@ class TerminalViewState extends State<TerminalView>
           inputAction: TextInputAction.done,
           autocorrect: false,
           enableSuggestions: false,
+          enableIMEPersonalizedLearning: false,
         ),
       );
       _connection!
@@ -391,6 +422,13 @@ class TerminalViewState extends State<TerminalView>
       }
       return KeyEventResult.handled;
     }
+    if (down &&
+        !composing &&
+        (key == LogicalKeyboardKey.enter ||
+            key == LogicalKeyboardKey.numpadEnter)) {
+      _ime.reset();
+      _connection?.setEditingState(_empty);
+    }
     final special = _keys[key];
     final label = key.keyLabel.toLowerCase();
     if (special == null && label.runes.length != 1) {
@@ -552,6 +590,7 @@ class TerminalViewState extends State<TerminalView>
         items: [
           const PopupMenuItem(value: 'copy', child: Text('复制')),
           const PopupMenuItem(value: 'paste', child: Text('粘贴')),
+          const PopupMenuItem(value: 'search', child: Text('搜索终端历史')),
           if (c.commandOperationsAvailable && commandFrame != null) ...[
             const PopupMenuItem(
               value: 'commandCopy',
@@ -610,6 +649,7 @@ class TerminalViewState extends State<TerminalView>
             openLink != null) {
           _run(openLink(selectedReference));
         }
+        if (v == 'search') showSearch();
         if (v == 'copy') _run(copy());
         if (v == 'paste') _run(paste());
         if (commandFrame != null && commandRow != null) {
@@ -772,7 +812,15 @@ class TerminalViewState extends State<TerminalView>
                       GestureBinding.instance.pointerSignalResolver.register(
                         e,
                         (event) {
-                          if (_capture) {
+                          if (HardwareKeyboard.instance.isControlPressed) {
+                            setState(
+                              () => _zoom =
+                                  (_typography.size +
+                                          (e.scrollDelta.dy < 0 ? 1 : -1))
+                                      .clamp(9, 36) -
+                                  (widget.typography?.size ?? widget.fontSize),
+                            );
+                          } else if (_capture) {
                             _mouse(
                               e.localPosition,
                               e.scrollDelta.dy < 0 ? 3 : 4,
@@ -939,38 +987,34 @@ class TerminalViewState extends State<TerminalView>
   AutofillScope? get currentAutofillScope => null;
   @override
   void updateEditingValue(TextEditingValue value) {
-    _editing = value;
+    final change = _ime.update(value);
     _suggestions.inputChanged();
-    if (value.composing.isValid && !value.composing.isCollapsed) {
-      _pendingTextKey = null;
-      _syncSuggestions();
-      _preedit.value = value.text.substring(
-        value.composing.start,
-        value.composing.end,
-      );
-      return;
-    }
-    _preedit.value = '';
-    final text = value.text.replaceAll('\u200b', '');
+    _preedit.value = change.preedit;
     final pending = _pendingTextKey;
     _pendingTextKey = null;
-    if (text.isNotEmpty) {
-      if (pending != null && pending.text == text && text.runes.length == 1) {
-        _run(c.key(pending));
-      } else {
-        _run(c.text(text));
-      }
-    } else if (value.text.isEmpty) {
+    for (var i = 0; i < change.erase; i++) {
       _run(c.key(rust.KeyboardInput(key: 'Backspace', modifiers: 0, kind: 0)));
     }
-    _editing = _empty;
-    _connection?.setEditingState(_empty);
+    if (change.text.isNotEmpty) {
+      if (change.erase == 0 &&
+          pending != null &&
+          pending.text == change.text &&
+          change.text.runes.length == 1) {
+        _run(c.key(pending));
+      } else {
+        _run(c.text(change.text));
+      }
+    }
     _syncSuggestions();
   }
 
   @override
-  void performAction(TextInputAction action) =>
-      _run(c.key(rust.KeyboardInput(key: 'Enter', modifiers: 0, kind: 0)));
+  void performAction(TextInputAction action) {
+    _run(c.key(rust.KeyboardInput(key: 'Enter', modifiers: 0, kind: 0)));
+    _ime.reset();
+    _connection?.setEditingState(_empty);
+  }
+
   @override
   void performPrivateCommand(String action, Map<String, dynamic> data) {}
   @override

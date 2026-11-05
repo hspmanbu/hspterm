@@ -1,3 +1,13 @@
+## 2026-11-05 第二轮 Windows 实机反馈（Ubuntu验证完成，待发布Windows构建）
+
+用户日志/截图/复制的 tools/AGENTS.md 为用户未跟踪文件，保留且不提交。当前范围：IME 重复、最小化历史、Shell/OSC7/133/历史联想、6秒可关闭统一提示、字体滚轮/搜索菜单，以及本轮明确修订的 SFTP 导航/书签/新建/属性/同机与跨机操作。Bash 已确认5.2.21。welcome 项含义已异步询问，其他工作继续；本轮已进入集中验证，具体实际结果见 validation/windows-feedback-second-2026-11-05/README.md；不沿用上一轮通过冒称本轮验收。
+
+- 已编制：TerminalImeBuffer（平台模型保留、增量提交、不重发 composing）、无效/隐藏 viewport 不发送 PTY resize、普通已证明 Readline 的 legacy keypad 支持、OSC133 锚点失效不撤销独立私有输入证明（RIS/Alt/私有损坏包仍撤销）、Bash OSC7/133、Ctrl+滚轮/右键搜索、统一6秒提示并显式 persist=false。
+- SFTP 源码：面包屑/路径编辑、首行父目录、主机/全局书签弹出菜单、新文件EXCL与新建后选中可视、底部路径联动/跟随/跳转、紧凑带框菜单、空白右键、跨主机二级菜单、按标签隔离文件剪贴板、UID/GID/权限递归/链接目标/真实内容大小属性。服务器内复制固定 Python 程序经原 SSH 代次的 Inspector，SFTP 私有命名空间回执、O_EXCL/O_NOFOLLOW，正文不经过本机；不可用不回退下载。大小分页元数据聚合，基本权限读取与大小计算分离，失败仍可编辑权限。
+- 正规 FRB2.13 生成已完成；Dart Analyze 第一轮0。新IME/通知/尺寸等组件28项通过，服务器复制Python3项通过。Rust三库串行单测正在 /tmp/hspterm-second-rust3.log，之前编译错误已修，真实SSH/SFTP、菜单交互/属性布局、GTK/Windows CI仍待执行。勿把上述源码算实机通过；现已进入集中验证，不再停在规划。
+- 最新测试：Flutter60项及后补置尾滚动回归（去重61项）、真实Native4项、实际可选Bash9项、服务器复制Python3项及Bash控制字符校验1项通过；严格Clippy已修最后一处字段初始化提示并通过。修复了Bash字符类将正常连字符误判为控制字符的根因。GTK真实工作台1项、term105/bridge77/ssh79、严格Clippy、Analyze0/格式/桥接契约及Python测试通过。Native4项含逐标签同机复制/剪切、完整LiveWorkbench回归；最终受控路径截图已实际检查。正式Debug工作台已重建并独立启动/缩放/正常退出0，空闲/失焦各5秒CPU均0%，预览run残留0（debug-startup.json）；Linux Debug软件图形RSS约483MiB，不当Windows Release实测。下一步提交/发布并查询新Windows CI，不能重复触发旧run。
+- 用户仅回复继续，welcome含义问题仍未明确；尚未为此隐藏或伪造服务器输出。用户原始日志、ssh-screen截图、tools/AGENTS.md均未跟踪且必须保留，不提交、不清理。
+
 ## 2026-11-05 四项反馈修复：Ubuntu 与 Windows CI 验证通过
 
 - Shell 路径：resize 保留未改变的真实 Readline proof；能力探测兼容 banner；失败显示具体固定原因并记录阶段。仍要求同会话、主动启用与远端原子比较/回执，不能盲目注入 TUI。

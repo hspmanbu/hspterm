@@ -477,12 +477,23 @@ Future<void> exerciseWorkbench({
       throwsStateError,
     );
     expect(await Directory(clipboardTarget.path).list().isEmpty, true);
-    final copiedIds = await m.pasteRemoteFileClipboard(
+    await expectLater(
+      m.pasteRemoteFileClipboard(
+        copySession,
+        clipboardTarget.path,
+        copySession.controller.generation,
+        allowMemoryRelay: true,
+        expectedClipboardRevision: revision,
+      ),
+      throwsStateError,
+      reason: 'clipboard belongs to its original terminal tab',
+    );
+    final copiedIds = await m.enqueueRemoteFileSelection(
+      m.prepareRemoteFileSelection(sourceSession, [sourceSession.files.single]),
       copySession,
       clipboardTarget.path,
       copySession.controller.generation,
       allowMemoryRelay: true,
-      expectedClipboardRevision: revision,
     );
     await waitFor(
       () => m.transferTasks.any((t) => copiedIds.contains(t.id) && !t.busy),
@@ -506,12 +517,14 @@ Future<void> exerciseWorkbench({
       sourceSession.files.singleWhere((f) => f.name == 'move 中文.txt'),
     ], cut: true);
     final cutRevision = m.remoteFileClipboardRevision;
-    final movedIds = await m.pasteRemoteFileClipboard(
+    final movedIds = await m.enqueueRemoteFileSelection(
+      m.prepareRemoteFileSelection(sourceSession, [
+        sourceSession.files.singleWhere((f) => f.name == 'move 中文.txt'),
+      ], cut: true),
       copySession,
       clipboardTarget.path,
       copySession.controller.generation,
       allowMemoryRelay: false,
-      expectedClipboardRevision: cutRevision,
     );
     expect(
       m.remoteFileClipboardDescription,

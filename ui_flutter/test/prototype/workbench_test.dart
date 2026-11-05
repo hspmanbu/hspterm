@@ -207,9 +207,9 @@ void main() {
         buttons: kSecondaryMouseButton,
       );
       await tester.pumpAndSettle();
-      expect(find.text('复制绝对路径'), findsOneWidget);
-      expect(find.text('发送路径到关联终端 · 仅模拟'), findsOneWidget);
-      await tester.tap(find.text('复制文件名'));
+      expect(find.text('复制路径'), findsOneWidget);
+      expect(find.text('发送路径至终端'), findsOneWidget);
+      await tester.tap(find.text('复制文件/文件夹名'));
       await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox());
       m.dispose();

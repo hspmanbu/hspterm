@@ -21,6 +21,7 @@ Future<void> sendSessionPaths(
   LiveTerminalSession source,
   List<String> paths, {
   bool enterDirectory = false,
+  bool namesOnly = false,
   int? expectedGeneration,
   TerminalPathRequest? request,
 }) async {
@@ -50,6 +51,7 @@ Future<void> sendSessionPaths(
                 generation: current,
                 paths: paths,
                 enterDirectory: cd,
+                namesOnly: namesOnly,
               )))(id, current, frozen, enterDirectory);
       if (outcome == 'Unavailable' && request == null) {
         try {
@@ -80,7 +82,9 @@ Future<void> sendSessionPaths(
     count: frozen.length,
   );
   if (result == 'Unavailable') {
-    final literal = frozen.map(quoteRemotePath).join(' ');
+    final literal = frozen
+        .map((path) => quoteRemotePath(namesOnly ? path.split('/').last : path))
+        .join(' ');
     await Clipboard.setData(
       ClipboardData(text: enterDirectory ? 'cd $literal' : literal),
     );
@@ -105,8 +109,13 @@ Future<void> sendSessionPaths(
     'TemporaryConnection' => '临时连接未启用集成。',
     _ => '',
   };
+  ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
   ScaffoldMessenger.maybeOf(context)?.showSnackBar(
     SnackBar(
+      duration: const Duration(seconds: 6),
+      showCloseIcon: true,
+      persist: false,
+      behavior: SnackBarBehavior.floating,
       content: Text(detail.isEmpty ? message : '$detail $message'),
       action: result == 'Unavailable'
           ? SnackBarAction(

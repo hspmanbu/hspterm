@@ -320,3 +320,64 @@ class _BookmarkEditorState extends State<_BookmarkEditor> {
     ],
   );
 }
+
+Future<void> showDirectoryBookmarkPopup(
+  BuildContext context,
+  WorkbenchModel model,
+  TerminalSession source, {
+  required bool global,
+}) async {
+  final directory = source.path, generation = source.connectionGeneration;
+  final box = context.findRenderObject() as RenderBox?;
+  final anchor = box?.localToGlobal(Offset(0, box.size.height)) ?? Offset.zero;
+  final items = (await model.listPathBookmarks(source))
+      .where(
+        (item) => global ? item.hostId == null : item.hostId == source.host.id,
+      )
+      .toList();
+  if (!context.mounted ||
+      source.connectionGeneration != generation ||
+      source.path != directory) {
+    return;
+  }
+  final result = await showMenu<String>(
+    context: context,
+    position: RelativeRect.fromLTRB(anchor.dx, anchor.dy, anchor.dx, anchor.dy),
+    items: [
+      const DeskMenuItem(value: 'add', child: Text('收藏当前目录')),
+      const PopupMenuDivider(height: 9),
+      for (final item in items)
+        DeskMenuItem(
+          value: item.id,
+          child: Tooltip(
+            message: item.path,
+            child: Text(item.name, overflow: TextOverflow.ellipsis),
+          ),
+        ),
+      if (items.isEmpty)
+        const DeskMenuItem(enabled: false, child: Text('暂无书签')),
+      const PopupMenuDivider(height: 9),
+      const DeskMenuItem(value: 'manage', child: Text('管理书签…')),
+    ],
+  );
+  if (result == null ||
+      !context.mounted ||
+      model.isClosing ||
+      source.connectionGeneration != generation) {
+    return;
+  }
+  if (result == 'add') {
+    await model.savePathBookmark(
+      source,
+      name: directory == '/' ? '/' : directory.split('/').last,
+      path: directory,
+      global: global,
+    );
+    if (context.mounted) notice(context, global ? '已收藏到全局书签' : '已收藏到主机书签');
+  } else if (result == 'manage') {
+    await showDirectoryBookmarks(context, model, source);
+  } else {
+    final selected = items.where((item) => item.id == result).firstOrNull;
+    if (selected != null) await model.loadDirectory(source, selected.path);
+  }
+}

@@ -78,7 +78,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      for (final action in ['复制到…', '移动到…']) {
+      final target = m.sessions.firstWhere((s) => s != source)
+        ..disconnected = false;
+      final count = target.files.length;
+      for (final action in ['复制到', '移动到']) {
         final pointer = await tester.startGesture(
           tester.getCenter(find.text(file.name)),
           kind: PointerDeviceKind.mouse,
@@ -88,10 +91,16 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text(action));
         await tester.pumpAndSettle();
+        await tester.tap(find.text('${target.host.name} · ${target.path}'));
+        await tester.pumpAndSettle();
       }
-      expect(routed.map((r) => r.$1), everyElement(same(source)));
-      expect(routed.map((r) => r.$2), everyElement([file]));
-      expect(routed.map((r) => r.$3), [false, true]);
+      expect(
+        routed,
+        isEmpty,
+        reason: 'submenu uses the selected connected host directly',
+      );
+      expect(target.files.length, count + 2);
+      expect(source.files.contains(file), false);
       expect(m.copied, isEmpty);
       expect(m.pasted, isEmpty);
       await tester.pumpWidget(const SizedBox());
@@ -132,12 +141,12 @@ void main() {
       expect(m.pasted, isEmpty);
       await command('粘贴');
       expect(find.text('移动到当前远端目录？'), findsOneWidget);
-      expect(find.text('允许中转并复制'), findsNothing);
+      expect(find.text('确认复制'), findsNothing);
       await tester.tap(find.text('取消').last);
       await tester.pumpAndSettle();
       expect(m.pasted, isEmpty);
       await command('粘贴');
-      await tester.tap(find.text('确认移动并允许跨服中转'));
+      await tester.tap(find.text('确认移动'));
       await tester.pumpAndSettle();
       expect(m.pasted.single, (
         pane,
@@ -229,11 +238,11 @@ void main() {
       expect(m.pasted, isEmpty);
       await command('粘贴');
       m.revision++;
-      await tester.tap(find.text('允许中转并复制'));
+      await tester.tap(find.text('确认复制'));
       await tester.pumpAndSettle();
       expect(m.pasted, isEmpty);
       await command('粘贴');
-      await tester.tap(find.text('允许中转并复制'));
+      await tester.tap(find.text('确认复制'));
       await tester.pumpAndSettle();
       expect(m.pasted.single, (
         pane,

@@ -847,6 +847,30 @@ class WorkbenchModel extends ChangeNotifier {
     changed();
   }
 
+  final _followingDirectories = <String>{};
+  bool followsTerminalDirectory(TerminalSession session) =>
+      _followingDirectories.contains(session.id);
+  Future<void> setTerminalDirectoryFollow(
+    TerminalSession session,
+    bool value,
+  ) async {
+    if (value) {
+      _followingDirectories.add(session.id);
+    } else {
+      _followingDirectories.remove(session.id);
+    }
+    changed();
+  }
+
+  Future<void> jumpToTerminalDirectory(TerminalSession session) async =>
+      throw UnsupportedError('模拟会话没有真实终端目录');
+  Future<void> createRemoteFile(TerminalSession session, String name) async {
+    session.files.add(
+      DemoFile(nextId(), name, kind: '文件', size: '0 B', byteSize: 0),
+    );
+    changed();
+  }
+
   Future<void> createRemoteDirectory(
     TerminalSession session,
     String name,

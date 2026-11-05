@@ -1,3 +1,4 @@
+import '../app_notice.dart';
 import 'staging_cleanup_port.dart';
 import '../terminal/application_keys.dart';
 import '../src/rust/shortcut_settings.dart' as shortcut;
@@ -234,6 +235,57 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   Timer? _followTimer;
   (LiveTerminalSession, int)? _followLoading;
 
+  final _followOverrides = Expando<bool>();
+  @override
+  bool followsTerminalDirectory(TerminalSession session) =>
+      _followOverrides[session] ??
+      (_records[session.host.id]?.followOsc7 ?? false);
+  @override
+  Future<void> setTerminalDirectoryFollow(
+    TerminalSession session,
+    bool value,
+  ) async {
+    final s = _connected(session);
+    _followOverrides[s] = value;
+    s.followedDirectoryVersion = -1;
+    _syncDirectoryFollow();
+    changed();
+  }
+
+  @override
+  Future<void> jumpToTerminalDirectory(TerminalSession session) {
+    final s = _connected(session),
+        native = s.controller.id!,
+        generation = s.controller.generation;
+    final work = () async {
+      final path = await rust.terminalWorkingDirectory(
+        id: native,
+        generation: generation,
+      );
+      _checkSftpMutation(s, native, generation);
+      if (path == null) {
+        throw StateError('终端尚未报告工作目录；请在启用 Shell 集成后手动重连并返回普通提示符');
+      }
+      await loadDirectory(s, path);
+    }();
+    _track(work);
+    return work;
+  }
+
+  @override
+  Future<void> createRemoteFile(TerminalSession session, String name) {
+    final s = _connected(session), directory = session.path;
+    return _mutateAndRefresh(
+      s,
+      (id, generation) => rust.sftpCreateFile(
+        id: id,
+        generation: generation,
+        path: remotePath(directory, name),
+      ),
+      affectedDirectories: {directory},
+    );
+  }
+
   bool _canFollow(LiveTerminalSession s) =>
       !_disposed &&
       _shutdown == null &&
@@ -244,7 +296,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       !startPage &&
       s.sftpEnabled &&
       s.controller.connected &&
-      (_records[s.host.id]?.followOsc7 ?? false);
+      followsTerminalDirectory(s);
 
   void _cancelDirectoryFollow() {
     _followTimer?.cancel();
@@ -302,8 +354,8 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       await loadDirectory(s, path, remember: false, fromOsc7: true);
     } catch (error) {
       if (current()) {
-        s.sftpError = '终端目录跟随失败：$error';
-        changed();
+        s.sftpError = '终端目录跟随失败：${appMessage(error)}';
+        reportOperation(error);
       }
     } finally {
       if (token == _followToken) _followLoading = null;
@@ -317,7 +369,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     final s = focus is LiveTerminalSession
         ? focus as LiveTerminalSession
         : null;
-    final policy = s != null && (_records[s.host.id]?.followOsc7 ?? false);
+    final policy = s != null && followsTerminalDirectory(s);
     if (!identical(s, _followSubject) || policy != _followPolicy) {
       final enabling = policy && !_followPolicy && identical(s, _followSubject);
       _cancelDirectoryFollow();
@@ -620,6 +672,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   bool get hasRetiringSessions => _retiringSessions.isNotEmpty;
 
   Future<void> _retireDetachedSession(LiveTerminalSession source) {
+    if (_remoteFileClipboards.remove(source.id) != null) _clipboardRevision++;
     final existing = _retirementWork[source];
     if (existing != null) return existing;
     _retiringSessions.add(source);
@@ -666,7 +719,17 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   Future<void>? _shutdown;
   bool _disposed = false;
   List<jobs.TransferTaskView> transferTasks = [];
-  RemoteFileSelection? _remoteFileClipboard;
+  final _remoteFileClipboards = <String, RemoteFileSelection>{};
+  RemoteFileSelection? get _remoteFileClipboard =>
+      focus == null ? null : _remoteFileClipboards[focus!.id];
+  set _remoteFileClipboard(RemoteFileSelection? value) {
+    if (value != null) {
+      _remoteFileClipboards[value.source.id] = value;
+    } else if (focus != null) {
+      _remoteFileClipboards.remove(focus!.id);
+    }
+  }
+
   int _clipboardRevision = 0;
   final _cutPastes = <RemoteFileSelection>{};
   int _enqueueBatches = 0;
@@ -765,8 +828,10 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     bool allowDirect = false,
     required int expectedClipboardRevision,
   }) async {
-    final clip = _remoteFileClipboard;
-    if (clip == null || _clipboardRevision != expectedClipboardRevision) {
+    final clip = _remoteFileClipboards[target.id];
+    if (clip == null ||
+        !identical(clip.source, target) ||
+        _clipboardRevision != expectedClipboardRevision) {
       throw StateError('文件剪贴板为空或确认期间已经改变，请重新粘贴');
     }
     return enqueueRemoteFileSelection(
@@ -798,6 +863,75 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       throw StateError('粘贴目标需要远端绝对目录');
     }
     final targetId = destination.controller.id!;
+    if (identical(source, destination)) {
+      if (clip.cut && !_cutPastes.add(clip)) {
+        throw StateError('该剪切选择正在执行，请等待完成');
+      }
+      return runLocalSettings(() async {
+        var completed = 0;
+        try {
+          for (final path in clip.paths) {
+            if (shouldStop?.call() ?? false) throw StateError('已停止后续文件操作');
+            _checkSftpMutation(source, clip.nativeId, clip.generation);
+            final targetPath = remotePath(directory, path.split('/').last);
+            if (clip.cut) {
+              await rust.sftpRename(
+                id: clip.nativeId,
+                source: path,
+                destination: targetPath,
+                expectedGeneration: clip.generation,
+              );
+            } else {
+              await rust.sftpCopyOnServer(
+                id: clip.nativeId,
+                generation: clip.generation,
+                source: path,
+                destination: targetPath,
+              );
+            }
+            completed++;
+          }
+          return <String>[];
+        } catch (error) {
+          throw StateError(
+            '已完成 $completed 项远端${clip.cut ? '移动' : '复制'}；后续操作未确认，请刷新核对：${appMessage(error)}',
+          );
+        } finally {
+          if (clip.cut) {
+            _cutPastes.remove(clip);
+            if (completed > 0 &&
+                identical(_remoteFileClipboards[source.id], clip)) {
+              final remaining = clip.paths.skip(completed).toList();
+              if (remaining.isEmpty) {
+                _remoteFileClipboards.remove(source.id);
+              } else {
+                _remoteFileClipboards[source.id] = RemoteFileSelection._(
+                  source,
+                  clip.nativeId,
+                  clip.generation,
+                  remaining,
+                  cut: true,
+                );
+              }
+              _clipboardRevision++;
+            }
+          }
+          source.directoryCache.remove(directory);
+          for (final path in clip.paths) {
+            source.directoryCache.remove(
+              path.substring(0, path.lastIndexOf('/')).isEmpty
+                  ? '/'
+                  : path.substring(0, path.lastIndexOf('/')),
+            );
+          }
+          if (!isClosing &&
+              source.controller.generation == clip.generation &&
+              source.controller.connected) {
+            await loadDirectory(source, source.path, remember: false);
+          }
+        }
+      });
+    }
     final tasks = <String>[];
     if (clip.cut && !_cutPastes.add(clip)) {
       throw StateError('该剪切选择正在入队，请等待完成');
@@ -850,11 +984,12 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       _enqueueBatches--;
       if (clip.cut) {
         _cutPastes.remove(clip);
-        if (tasks.isNotEmpty && identical(_remoteFileClipboard, clip)) {
+        if (tasks.isNotEmpty &&
+            identical(_remoteFileClipboards[clip.source.id], clip)) {
           final remaining = clip.paths
               .skip(tasks.length)
               .toList(growable: false);
-          _remoteFileClipboard = remaining.isEmpty
+          final nextClipboard = remaining.isEmpty
               ? null
               : RemoteFileSelection._(
                   clip.source,
@@ -863,6 +998,11 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
                   remaining,
                   cut: true,
                 );
+          if (nextClipboard == null) {
+            _remoteFileClipboards.remove(clip.source.id);
+          } else {
+            _remoteFileClipboards[clip.source.id] = nextClipboard;
+          }
           _clipboardRevision++;
           changed();
         }
@@ -2382,7 +2522,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         // A final list read may still own a Native request after its sidebar
         // unmounts. Closing suppresses publication/rearming; await its real end.
         await _transferRefresh;
-        _remoteFileClipboard = null;
+        _remoteFileClipboards.clear();
         _clipboardRevision++;
         _rateClock.stop();
         await Future.wait(

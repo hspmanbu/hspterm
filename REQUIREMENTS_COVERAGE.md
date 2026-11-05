@@ -209,3 +209,19 @@
 | 去除悬停说明 | workbench/explorer_export.dart | 只去Tooltip，原拖放租约/队列测试保留 |
 
 具体103项组件、7个GTK及平台边界见validation/windows-feedback-2026-11-04/README.md和checks.json。
+
+## 2026-11-05 第二轮 Windows 使用反馈修订覆盖
+
+不新增基线完成数量，修正既有终端、联动、历史与SFTP条目的实际行为。
+
+| 反馈范围 | 代码入口 | 验证和边界 |
+| --- | --- | --- |
+| IME重复、最小化丢历史 | terminal/{ime_buffer,controller,view}.dart | IME快照增量/零viewport自动化；Windows TSF与真实最小化待用户复测 |
+| Shell路径、OSC7/133、历史联想 | ssh-core/integration/bash.bash；term-core/lib.rs | 实际Bash9项及Native历史/候选/路径，保留TUI与原会话证明 |
+| 统一提示、字号、搜索菜单 | app_notice.dart；workbench/surface.dart；terminal/view.dart | 6秒包括有action、关闭、Ctrl+wheel/视图重建/右键搜索组件 |
+| SFTP导航、书签、新建及菜单 | prototype/{files,bookmarks,design}.dart | 真实GTK新建/路径，父目录/二级菜单/复选框/新建置尾滚动等组件 |
+| 权限/所有权/链接/真实目录大小 | frb-bridge/api.rs；workbench/file_properties.dart | 真实SFTP元数据聚合、递归跳过链接、窄窗/计算失败可编辑权限 |
+| 同标签服务器内复制/移动 | ssh-core/inspection/server_copy.py；workbench/model.dart | 真实双SSH模型逐标签剪贴板隔离、固定远端复制/SFTP重命名，不创建本地下载任务；远端Python/命名空间/时间限制见验证记录 |
+| 跨标签复制/移动菜单 | prototype/files.dart；原remote_transfers | 保留原真实LiveWorkbench复制/移动回归，需明确选择其他已连接标签 |
+
+完整本轮结果：validation/windows-feedback-second-2026-11-05；Windows 11 IME/实际最小化不能由Linux结果替代。欢迎信息含义仍待明确，未过滤或伪造远端正文。

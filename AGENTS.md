@@ -1,3 +1,5 @@
+- **最新续修（2026-11-05第二轮反馈）**：IME增量保留平台模型、无效/隐藏viewport不resize、Bash字符类修复（连字符误判）与OSC7/133、Readline keypad/独立proof、统一6秒可关闭提示、Ctrl滚轮/右键搜索、SFTP面包屑/父目录/双书签/新文件置尾可视/属性/同机复制移动/跨机子菜单已接。恢复读PROGRESS与validation/windows-feedback-second-2026-11-05；GTK及最终发布状态以最新记录为准，勿重跑旧CI。用户原始.log、ssh-screen/、tools/AGENTS.md保留未跟踪且不提交/不清理。欢迎信息隐藏还是恢复尚待明确，不过滤或伪造远端正文。Android继续暂停。
+
 - **最新交付（2026-11-05）**：四项反馈源码cf13882，Windows run41933717144/job126936779459已全部成功，MSVC Release/Analyze0/52组件/原生启动退出/关闭重开位置大小恢复通过，完整包artifact13374471855。当前仅Win11用户自定义边框拖动、Snap/DPI等实机复测待确认；不要重复触发旧CI。Ubuntu证据与Windows结果在validation/windows-feedback-2026-11-05；本机构建缓存已清理释放3.29GiB，源码/正式FRB/文字JSON保留。下次先prepare_native_extensions.py、pub get再构建，不能执行旧bundle。Android暂停。
 
 - **发布/清理更新（2026-11-05）**：源码cf13882，Windows run41933717144/job126936779459正在运行，先查询不要重发。Ubuntu验证收齐后已再次移除target/build/.dart_tool/ephemeral/生成插件和临时截图，释放3.29GiB，可用12.81GiB；源码/锁/正式FRB/文字JSON保留。恢复编译仍先prepare_native_extensions.py及pub get；不能运行已删除bundle。原始本地等树提交保留分支windows-feedback-nov5-local-3f15f60。

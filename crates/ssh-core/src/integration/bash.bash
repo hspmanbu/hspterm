@@ -13,6 +13,7 @@ __hspterm_nonce='@HSPTERM_NONCE@'
 __hspterm_prompt_id=0
 __hspterm_active=0
 __hspterm_pending=''
+__hspterm_command_open=0
 __hspterm_previous_prompt=("${PROMPT_COMMAND[@]}")
 __hspterm_supported() {
     [[ $- != *x* && $- != *v* && $- != *a* && ! -o functrace ]] &&
@@ -36,7 +37,7 @@ __hspterm_decode() {
         builtin printf -v byte '%b' "\x$pair"
         __hspterm_decoded+=$byte
     done
-    [[ $__hspterm_decoded != *[$'\x01-\x1f\x7f']* ]]
+    [[ $__hspterm_decoded != *[$'\x01'-$'\x1f\x7f']* ]]
 }
 __hspterm_emit() {
     # All arguments are fixed kinds or bounded numbers/hex, never terminal text.
@@ -48,9 +49,26 @@ __hspterm_ready() {
         __hspterm_emit R 0 0 ''
     fi
 }
+# Same authenticated stream, empty URI authority: no DNS/hostname guessing.
+__hspterm_cwd() {
+    local LC_ALL=C value=$PWD encoded='' byte char i
+    [[ ${#value} -le 16384 && $value == /* ]] || return
+    for ((i=0; i<${#value}; i++)); do
+        char=${value:i:1}
+        case "$char" in
+            [a-zA-Z0-9/._~-]) encoded+=$char ;;
+            *) builtin printf -v byte '%%%02X' "'$char"; encoded+=$byte ;;
+        esac
+    done
+    builtin printf '\033]7;file://%s\033\\' "$encoded"
+}
 __hspterm_status() { return "$1"; }
 __hspterm_prompt() {
     local previous_status=$? command
+    if [[ $__hspterm_command_open == 1 ]]; then
+        builtin printf '\033]133;D;%s\033\\' "$previous_status"
+        __hspterm_command_open=0
+    fi
     __hspterm_active=0
     __hspterm_pending=''
     for command in "${__hspterm_previous_prompt[@]}"; do
@@ -64,7 +82,8 @@ __hspterm_prompt() {
         ((__hspterm_prompt_id+=1))
         __hspterm_active=1
         # Last expansion: any user PS1 command substitutions run before ready.
-        [[ $PS1 == *'\[$(__hspterm_ready)\]' ]] || PS1+='\[$(__hspterm_ready)\]'
+        __hspterm_cwd
+        [[ $PS1 == *'\[$(__hspterm_ready)\]'* ]] || PS1='\[\e]133;A\a\]'"$PS1"'\[$(__hspterm_ready)\]\[\e]133;B\a\]'
     fi
     return "$previous_status"
 }
@@ -77,7 +96,7 @@ __hspterm_submit() {
     __hspterm_pending=''
     if [[ $__hspterm_active == 1 && ${#READLINE_LINE} -le 4096 &&
           $point == "$length" &&
-          $READLINE_LINE != *[$'\x01-\x1f\x7f']* ]] && __hspterm_supported; then
+          $READLINE_LINE != *[$'\x01'-$'\x1f\x7f']* ]] && __hspterm_supported; then
         __hspterm_hex "$READLINE_LINE"
         __hspterm_pending=$__hspterm_encoded
         __hspterm_encoded=''
@@ -91,7 +110,13 @@ __hspterm_before_exec() {
     hex=$__hspterm_pending
     __hspterm_pending=''
     if __hspterm_supported && [[ $__hspterm_prompt_id -gt 0 ]]; then
-        [[ -z $hex ]] || __hspterm_emit S 0 "$((${#hex}/2))" "$hex"
+        if [[ -n $hex ]]; then
+            __hspterm_emit S 0 "$((${#hex}/2))" "$hex"
+            if [[ $__hspterm_command_open == 0 ]]; then
+                builtin printf '\033]133;C\033\\'
+                __hspterm_command_open=1
+            fi
+        fi
         __hspterm_emit B 0 0 ''
     fi
 }

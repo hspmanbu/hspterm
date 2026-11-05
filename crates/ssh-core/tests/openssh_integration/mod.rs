@@ -408,3 +408,61 @@ async fn resized_idle_prompt_accepts_quoted_path_without_execution() {
     session.wait_closed().await;
     drain.await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn opted_in_bash_reports_real_cwd_command_ranges_and_history_with_keypad_enabled() {
+    let server = Server::start().await;
+    let folder = server.dir.path().join("cwd space 中文");
+    fs::create_dir(&folder).unwrap();
+    let (session, drain, recorded) = open(&server).await;
+    until("ready before keypad mode", || {
+        session.integration_proof().is_some()
+    })
+    .await;
+    let initial_prompt = session.integration_proof().unwrap().prompt;
+    line(&session, "bind 'set enable-keypad on'").await;
+    until("ordinary Readline keypad prompt", || {
+        session
+            .integration_proof()
+            .is_some_and(|proof| proof.prompt > initial_prompt)
+    })
+    .await;
+    line(
+        &session,
+        &format!(
+            "cd -- '{}'",
+            folder.to_str().unwrap().replace('\'', "'\\''")
+        ),
+    )
+    .await;
+    until("same-stream percent-decoded cwd", || {
+        session
+            .directory_context()
+            .1
+            .is_some_and(|cwd| cwd.path == folder.to_str().unwrap())
+    })
+    .await;
+    until("ready after cwd change", || {
+        session
+            .integration_proof()
+            .is_some_and(|proof| proof.prompt > initial_prompt + 1)
+    })
+    .await;
+    line(&session, "printf 'HSP_PUBLIC_MARKERS\\n'").await;
+    until("actual command output and persisted submissions", || {
+        output_line(&session, "HSP_PUBLIC_MARKERS")
+    })
+    .await;
+    until("all three actual single-line submissions", || {
+        recorded.lock().unwrap().len() == 3
+    })
+    .await;
+    until("complete passive command boundaries", || {
+        !session.command_ranges().1.is_empty()
+    })
+    .await;
+    assert!(session.integration_proof().is_some());
+    session.shutdown();
+    session.wait_closed().await;
+    drain.await.unwrap();
+}

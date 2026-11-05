@@ -160,8 +160,8 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.keyA, character: 'A');
     tester.testTextInput.updateEditingValue(
       const TextEditingValue(
-        text: '\u200bA',
-        selection: TextSelection.collapsed(offset: 2),
+        text: '\u200b中文A',
+        selection: TextSelection.collapsed(offset: 4),
       ),
     );
     await tester.pump();

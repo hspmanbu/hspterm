@@ -1,3 +1,4 @@
+import '../workbench/file_properties.dart';
 import '../workbench/explorer_export.dart';
 import '../workbench/model.dart' show LiveTerminalSession, LiveWorkbenchModel;
 import '../workbench/terminal_paths.dart';
@@ -110,17 +111,23 @@ class SftpSidebar extends StatelessWidget {
                         onEditorDrafts: onEditorDrafts,
                       ),
               ),
+            if (!model.queueMaximized && model.focus != null)
+              SftpTerminalActions(model: model, source: model.focus!),
             if (!model.queueMaximized)
-              ResizeGrip(
-                key: const ValueKey('queue-grip'),
-                horizontal: false,
-                onDelta: (d) {
-                  model.queueHeight = (height - d).clamp(
-                    130,
-                    bounds.maxHeight * .75,
-                  );
-                  model.changed();
-                },
+              ColoredBox(
+                color: Theme.of(context).colorScheme.primary
+                    .withValues(alpha: .15),
+                child: ResizeGrip(
+                  key: const ValueKey('queue-grip'),
+                  horizontal: false,
+                  onDelta: (d) {
+                    model.queueHeight = (height - d).clamp(
+                      130,
+                      bounds.maxHeight * .75,
+                    );
+                    model.changed();
+                  },
+                ),
               ),
             SizedBox(
               height: model.queueMaximized
@@ -172,8 +179,8 @@ class _FilesPanelState extends State<FilesPanel> {
   late final TextEditingController _path;
   final _horizontal = ScrollController();
   final _vertical = ScrollController();
-  String? editing, renameError, anchor, hoverTarget;
-  bool _renameBusy = false;
+  String? editing, renameError, anchor, hoverTarget, _newEntryTail;
+  bool _renameBusy = false, _pathEditing = false;
   late String _shownPath;
   late int _shownGeneration;
   bool hidden = false, compact = false, filtering = false, foldersFirst = true;
@@ -275,6 +282,7 @@ class _FilesPanelState extends State<FilesPanel> {
       _explorerOver = false;
       _folderBounds.clear();
       _folderObjects.clear();
+      _newEntryTail = null;
       _shownPath = p.path;
       _shownGeneration = p.connectionGeneration;
       _path.text = p.path;
@@ -327,25 +335,40 @@ class _FilesPanelState extends State<FilesPanel> {
     }
   }
 
-  void _scrollToFile(String file, TerminalSession source, int generation) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          !identical(source, p) ||
-          source.connectionGeneration != generation ||
-          !selected.contains(file) ||
-          !_vertical.hasClients) {
-        return;
-      }
-      final index = visible.indexWhere((f) => f.id == file);
-      if (index < 0) return;
-      _vertical.jumpTo(
-        (index * (compact ? 28.0 : 33.0)).clamp(
-          0,
-          _vertical.position.maxScrollExtent,
-        ),
-      );
-      if (_horizontal.hasClients) _horizontal.jumpTo(0);
-    });
+  void _scrollToFile(
+    String file,
+    TerminalSession source,
+    int generation, {
+    bool bottom = false,
+  }) {
+    void reveal(int retries) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            !identical(source, p) ||
+            source.connectionGeneration != generation ||
+            !selected.contains(file) ||
+            !_vertical.hasClients) {
+          return;
+        }
+        final index = visible.indexWhere((f) => f.id == file);
+        if (index < 0) return;
+        final rowHeight = compact ? 28.0 : 33.0;
+        final target =
+            (index + 1) * rowHeight -
+            (bottom ? _vertical.position.viewportDimension - rowHeight : 0);
+        final maximum = _vertical.position.maxScrollExtent;
+        _vertical.jumpTo(target.clamp(0, maximum));
+        if (_horizontal.hasClients) _horizontal.jumpTo(0);
+        // A lazy list can still estimate its old extent immediately after an
+        // insertion. The jump lays out its tail; use the corrected next frame.
+        if (target > maximum && retries > 0) {
+          reveal(retries - 1);
+          WidgetsBinding.instance.scheduleFrame();
+        }
+      });
+    }
+
+    reveal(2);
   }
 
   void run(Future<void> work) => unawaited(
@@ -395,6 +418,11 @@ class _FilesPanelState extends State<FilesPanel> {
       };
       return ascending ? x : -x;
     });
+    final tail = list.where((file) => file.id == _newEntryTail).firstOrNull;
+    if (tail != null) {
+      list.remove(tail);
+      list.add(tail);
+    }
     return _visible = list;
   }
 
@@ -578,7 +606,7 @@ class _FilesPanelState extends State<FilesPanel> {
         final index = visible.indexWhere((f) => f.id == result.id);
         if (index < 0) return;
         _vertical.jumpTo(
-          (index * (compact ? 28.0 : 33.0)).clamp(
+          ((index + 1) * (compact ? 28.0 : 33.0)).clamp(
             0,
             _vertical.position.maxScrollExtent,
           ),
@@ -785,17 +813,20 @@ class _FilesPanelState extends State<FilesPanel> {
         p.connectionGeneration == generation &&
         p.path == directory &&
         selected.length == frozenSelection.length &&
-        selected.every(frozenSelection.contains);
-    RemoteRelativePaths? relative;
-    String? relativeProblem;
-    if (!m.isMock) {
-      try {
-        relative = await m.relativeRemotePaths(origin, paths);
-      } catch (error) {
-        relativeProblem = '$error';
-      }
-    }
+        selected.every(frozenSelection.contains) &&
+        files.asMap().entries.every(
+          (entry) => pathOf(directory, entry.value.name) == paths[entry.key],
+        );
     if (!mounted || !current()) return;
+    final targets = m.sessions
+        .where(
+          (item) =>
+              !identical(item, origin) &&
+              !item.disconnected &&
+              (item is! LiveTerminalSession || item.controller.connected),
+        )
+        .map((item) => (item, item.connectionGeneration, item.path))
+        .toList();
     final action = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
@@ -831,35 +862,99 @@ class _FilesPanelState extends State<FilesPanel> {
           const DeskMenuItem(value: 'edit-encoding', child: Text('按指定编码编辑…')),
         if (widget.onEditRawFile != null && !file.folder)
           const DeskMenuItem(value: 'edit-raw', child: Text('外部编辑大文件…')),
-        if (widget.onTransferTo != null) ...[
-          const DeskMenuItem(value: 'copy-to', child: Text('复制到…')),
-          const DeskMenuItem(value: 'move-to', child: Text('移动到…')),
-        ],
-        const DeskMenuItem(value: 'name', child: Text('复制文件名')),
-        const DeskMenuItem(value: 'path', child: Text('复制绝对路径')),
-        DeskMenuItem(
-          value: 'relative',
-          enabled: relative != null,
-          child: Tooltip(
-            message:
-                relativeProblem ??
-                (m.isMock ? '纯原型不验证真实工作目录' : '仅相对于已核对的关联终端工作目录；不生成有歧义的父目录跳转'),
-            child: const Text('复制相对路径'),
+        for (final move in [false, true])
+          DeskMenuItem<String>(
+            enabled: false,
+            child: SubmenuButton(
+              menuChildren: [
+                for (var i = 0; i < targets.length; i++)
+                  MenuItemButton(
+                    onPressed: () => Navigator.pop(
+                      context,
+                      '${move ? 'move' : 'copy'}-target:$i',
+                    ),
+                    child: Text(
+                      '${targets[i].$1.host.name} · ${targets[i].$3}',
+                    ),
+                  ),
+                if (targets.isEmpty)
+                  const MenuItemButton(
+                    onPressed: null,
+                    child: Text('没有其他已连接主机'),
+                  ),
+              ],
+              child: Text(move ? '移动到' : '复制到'),
+            ),
           ),
-        ),
-        const DeskMenuItem(value: 'quote', child: Text('复制 Shell 安全引用路径')),
-        DeskMenuItem(
-          value: 'send',
-          child: Text(m.isMock ? '发送路径到关联终端 · 仅模拟' : '发送路径到关联终端'),
-        ),
-        if (files.length == 1 && files.first.folder)
-          const DeskMenuItem(value: 'terminal-cd', child: Text('在关联终端中进入此目录')),
+        const DeskMenuItem(value: 'name', child: Text('复制文件/文件夹名')),
+        const DeskMenuItem(value: 'path', child: Text('复制路径')),
+        const DeskMenuItem(value: 'send-name', child: Text('发送文件/文件夹名至终端')),
+        const DeskMenuItem(value: 'send', child: Text('发送路径至终端')),
         const DeskMenuItem(value: 'properties', child: Text('属性')),
       ],
     );
     if (!mounted || action == null) return;
     if (!current()) {
       notice(context, '目录或会话已切换，请重新打开菜单；未执行文件操作');
+      return;
+    }
+    if ((action.startsWith('copy-target:') ||
+        action.startsWith('move-target:'))) {
+      final target = targets[int.parse(action.split(':').last)];
+      if (target.$1.connectionGeneration != target.$2 ||
+          target.$1.path != target.$3 ||
+          target.$1.disconnected) {
+        notice(context, '目标会话或目录已改变，请重新选择');
+        return;
+      }
+      final moving = action.startsWith('move-');
+      if (m is LiveWorkbenchModel &&
+          origin is LiveTerminalSession &&
+          target.$1 is LiveTerminalSession) {
+        if (moving &&
+            !await confirm(
+              context,
+              '移动到 ${target.$1.host.name}？',
+              '目标：${target.$3}\n复制确认后才删除来源；失败可能保留部分副本。',
+              accept: '确认移动',
+              danger: true,
+            )) {
+          return;
+        }
+        if (!current()) return;
+        final live = m as LiveWorkbenchModel;
+        final selection = live.prepareRemoteFileSelection(
+          origin,
+          files,
+          cut: moving,
+        );
+        final ids = await live.enqueueRemoteFileSelection(
+          selection,
+          target.$1,
+          target.$3,
+          target.$2,
+          allowMemoryRelay: true,
+          allowDirect: true,
+        );
+        if (mounted) {
+          notice(context, '已加入 ${ids.length} 个${moving ? '移动' : '复制'}任务');
+        }
+      } else {
+        for (final f in files) {
+          target.$1.files.add(
+            DemoFile(
+              m.nextId(),
+              f.name,
+              folder: f.folder,
+              kind: f.kind,
+              size: f.size,
+            ),
+          );
+        }
+        if (moving) origin.files.removeWhere(files.contains);
+        m.changed();
+        notice(context, '模拟操作；没有执行真实文件传输');
+      }
       return;
     }
     switch (action) {
@@ -902,65 +997,7 @@ class _FilesPanelState extends State<FilesPanel> {
         cut = action == 'cut';
         notice(context, '模拟文件剪贴板：${files.length} 项；未使用系统文件剪贴板');
       case 'paste':
-        if (!m.isMock) {
-          final description = m.remoteFileClipboardDescription;
-          if (description == null) {
-            notice(context, '文件剪贴板为空');
-            break;
-          }
-          final clipboardRevision = m.remoteFileClipboardRevision;
-          final cutting = m.remoteFileClipboardIsCut;
-          final target = p,
-              targetDirectory = p.path,
-              targetGeneration = p.connectionGeneration;
-          if (await confirm(
-                context,
-                cutting ? '移动到当前远端目录？' : '复制到当前远端目录？',
-                '$description\n目标：${target.host.name}\n$targetDirectory\n\n'
-                '${cutting ? '同一实际账户使用无覆盖SFTP更名。确认 SSH 与 SFTP 路径一致时，跨账户优先已授权应用Agent和原目标指纹保护的直传，不可用时允许本机中转；整树复制确认后逐项删除来源；暂停不恢复已删除项，取消保留副本。来源可被其他程序替换，类型/大小检查不能证明身份，同大小的新文件也无法识别；请确保来源不被其他程序修改。未知删除不重发，须在队列明确处理。' : '确认 SSH 与 SFTP 路径一致时优先使用已授权应用Agent和原目标指纹保护的服务器直传（自定义虚拟根请改用“复制到”选择仅中转）；不可用时允许通过本机内存中转，使用上下行带宽；正文不落本机临时文件。每个所选目录作为一个任务，同名按入队时的传输设置处理，取消保留已写数据。'}',
-                accept: cutting ? '确认移动并允许跨服中转' : '允许中转并复制',
-              ) &&
-              mounted) {
-            try {
-              final ids = await m.pasteRemoteFileClipboard(
-                target,
-                targetDirectory,
-                targetGeneration,
-                allowMemoryRelay: true,
-                allowDirect: true,
-                expectedClipboardRevision: clipboardRevision,
-              );
-              if (mounted) {
-                notice(
-                  context,
-                  '已加入 ${ids.length} 个真实${cutting ? '移动' : '复制'}任务',
-                );
-              }
-            } catch (error) {
-              if (mounted) notice(context, '粘贴未全部入队：$error');
-            }
-          }
-          break;
-        }
-        if (clipboard.isEmpty) {
-          notice(context, '模拟文件剪贴板为空');
-        } else {
-          setState(() {
-            for (final f in clipboard) {
-              p.files.add(
-                DemoFile(
-                  m.nextId(),
-                  '${f.name} 副本',
-                  folder: f.folder,
-                  size: f.size,
-                  kind: f.kind,
-                ),
-              );
-            }
-            if (cut) clipboard.clear();
-          });
-          notice(context, '仅演示粘贴列表；真实复制/移动尚未接入');
-        }
+        await pasteClipboard();
       case 'download':
         if (!m.isMock) {
           await download(files);
@@ -976,46 +1013,170 @@ class _FilesPanelState extends State<FilesPanel> {
         );
       case 'path':
         await Clipboard.setData(ClipboardData(text: paths.join('\n')));
-      case 'relative':
-        final prepared = relative;
-        if (prepared == null) return;
-        try {
-          final checked = await m.relativeRemotePaths(
-            origin,
-            paths,
-            expectedRevision: prepared.directoryRevision,
-          );
-          if (!current()) return;
-          await Clipboard.setData(
-            ClipboardData(text: checked.paths.join('\n')),
-          );
-        } catch (error) {
-          if (mounted) notice(context, '未复制相对路径：$error；可以使用绝对路径');
-        }
-      case 'quote':
-        await Clipboard.setData(
-          ClipboardData(text: paths.map(quotePath).join(' ')),
-        );
+      case 'send-name':
+        sendPaths(paths, namesOnly: true);
       case 'send':
         sendPaths(paths);
       case 'terminal-cd':
         sendPaths([paths.first], enterDirectory: true);
       case 'properties':
-        showDialog<void>(
-          context: context,
-          builder: (c) => AlertDialog(
-            title: Text(m.isMock ? '模拟文件属性' : '远端文件属性'),
-            content: Text(
-              '${file.name}\n${p.path}\n${file.kind} · ${file.size}\n修改于 ${file.modified}',
+        if (m is LiveWorkbenchModel && origin is LiveTerminalSession) {
+          await showFileProperties(
+            context,
+            m as LiveWorkbenchModel,
+            origin,
+            file,
+          );
+        } else {
+          await showDialog<void>(
+            context: context,
+            builder: (c) => AlertDialog(
+              title: const Text('模拟文件属性'),
+              content: Text(
+                '${file.name}\n${p.path}\n${file.kind} · ${file.folder ? '未计算' : file.size}',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(c),
+                  child: const Text('关闭'),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(c),
-                child: const Text('关闭'),
+          );
+        }
+    }
+  }
+
+  Future<void> pasteClipboard() async {
+    if (!m.isMock) {
+      final description = m.remoteFileClipboardDescription;
+      if (description == null) {
+        notice(context, '文件剪贴板为空');
+        return;
+      }
+      final clipboardRevision = m.remoteFileClipboardRevision;
+      final cutting = m.remoteFileClipboardIsCut;
+      final target = p,
+          targetDirectory = p.path,
+          targetGeneration = p.connectionGeneration;
+      if (await confirm(
+            context,
+            cutting ? '移动到当前远端目录？' : '复制到当前远端目录？',
+            '$description\n目标：${target.host.name}\n$targetDirectory\n\n'
+            '${cutting ? '在当前服务器执行移动，同名目标不覆盖。请避免其他程序同时修改来源。' : '在当前服务器执行复制，正文不经过本机；需 SSH 与 SFTP 使用同一路径。已有同名目标不覆盖。'}',
+            accept: cutting ? '确认移动' : '确认复制',
+          ) &&
+          mounted) {
+        try {
+          final ids = await m.pasteRemoteFileClipboard(
+            target,
+            targetDirectory,
+            targetGeneration,
+            allowMemoryRelay: true,
+            allowDirect: true,
+            expectedClipboardRevision: clipboardRevision,
+          );
+          if (mounted) {
+            notice(
+              context,
+              ids.isEmpty
+                  ? '远端${cutting ? '移动' : '复制'}已完成'
+                  : '已加入 ${ids.length} 个${cutting ? '移动' : '复制'}任务',
+            );
+          }
+        } catch (error) {
+          if (mounted) notice(context, '粘贴未全部入队：$error');
+        }
+      }
+      return;
+    }
+    if (clipboard.isEmpty) {
+      notice(context, '模拟文件剪贴板为空');
+    } else {
+      setState(() {
+        for (final f in clipboard) {
+          p.files.add(
+            DemoFile(
+              m.nextId(),
+              '${f.name} 副本',
+              folder: f.folder,
+              size: f.size,
+              kind: f.kind,
+            ),
+          );
+        }
+        if (cut) clipboard.clear();
+      });
+      notice(context, '仅演示粘贴列表；真实复制/移动尚未接入');
+    }
+  }
+
+  Future<void> blankMenu(Offset position) async {
+    final source = p, generation = p.connectionGeneration, directory = p.path;
+    final chosen = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      items: [
+        DeskMenuItem(
+          enabled: false,
+          height: 36,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Tool(
+                Icons.copy,
+                '复制',
+                selected.isEmpty ? null : () => Navigator.pop(context, 'copy'),
+              ),
+              Tool(
+                Icons.content_cut,
+                '剪切',
+                selected.isEmpty ? null : () => Navigator.pop(context, 'cut'),
+              ),
+              Tool(
+                Icons.content_paste,
+                '粘贴',
+                () => Navigator.pop(context, 'paste'),
               ),
             ],
           ),
-        );
+        ),
+        const DeskMenuDivider(),
+        const DeskMenuItem(value: 'file', child: Text('新建文件')),
+        const DeskMenuItem(value: 'folder', child: Text('新建文件夹')),
+        const DeskMenuItem(value: 'refresh', child: Text('刷新目录')),
+      ],
+    );
+    if (!mounted ||
+        !identical(source, p) ||
+        generation != p.connectionGeneration ||
+        directory != p.path ||
+        m.isClosing) {
+      return;
+    }
+    switch (chosen) {
+      case 'paste':
+        await pasteClipboard();
+      case 'file':
+        await newFile();
+      case 'folder':
+        await newFolder();
+      case 'refresh':
+        await m.loadDirectory(p, p.path, remember: false);
+      case 'copy':
+      case 'cut':
+        final files = p.files.where((f) => selected.contains(f.id)).toList();
+        if (!m.isMock) {
+          m.copyRemoteFileClipboard(p, files, cut: chosen == 'cut');
+        } else {
+          clipboard = files;
+          cut = chosen == 'cut';
+        }
     }
   }
 
@@ -1050,7 +1211,11 @@ class _FilesPanelState extends State<FilesPanel> {
     ];
   }
 
-  void sendPaths(List<String> paths, {bool enterDirectory = false}) {
+  void sendPaths(
+    List<String> paths, {
+    bool enterDirectory = false,
+    bool namesOnly = false,
+  }) {
     final model = m, source = p;
     if (model is LiveWorkbenchModel && source is LiveTerminalSession) {
       final generation = source.controller.generation;
@@ -1061,6 +1226,7 @@ class _FilesPanelState extends State<FilesPanel> {
           source,
           paths,
           enterDirectory: enterDirectory,
+          namesOnly: namesOnly,
           expectedGeneration: generation,
         ),
       );
@@ -1079,7 +1245,9 @@ class _FilesPanelState extends State<FilesPanel> {
     );
   }
 
-  Future<void> newFolder() async {
+  Future<void> newFolder() => _newEntry(true);
+  Future<void> newFile() => _newEntry(false);
+  Future<void> _newEntry(bool folder) async {
     final model = m, source = p;
     final generation = source.connectionGeneration;
     final native = source is LiveTerminalSession ? source.controller.id : null;
@@ -1088,11 +1256,11 @@ class _FilesPanelState extends State<FilesPanel> {
     final name = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text(m.isMock ? '新建模拟文件夹' : '新建远端文件夹'),
+        title: Text('${m.isMock ? '模拟：' : ''}新建${folder ? '文件夹' : '文件'}'),
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(labelText: '文件夹名称'),
+          decoration: InputDecoration(labelText: folder ? '文件夹名称' : '文件名称'),
         ),
         actions: [
           TextButton(
@@ -1125,9 +1293,33 @@ class _FilesPanelState extends State<FilesPanel> {
             source.path != directory) {
           throw StateError('原创建目录会话或目录已改变，请重新确认');
         }
-        await model.createRemoteDirectory(source, name);
+        if (folder) {
+          await model.createRemoteDirectory(source, name);
+        } else {
+          await model.createRemoteFile(source, name);
+        }
+        if (!_sameSource(model, source, generation, native) ||
+            source.path != directory) {
+          return;
+        }
+        final item = source.files
+            .where((file) => file.name == name)
+            .firstOrNull;
+        if (item != null) {
+          setState(() {
+            selected
+              ..clear()
+              ..add(item.id);
+            anchor = item.id;
+            _newEntryTail = item.id;
+            hidden = hidden || name.startsWith('.');
+            _filter.clear();
+            _visible = null;
+          });
+          _scrollToFile(item.id, source, generation, bottom: true);
+        }
       } catch (error) {
-        if (mounted) notice(context, '创建目录失败：$error');
+        if (mounted) notice(context, '创建${folder ? '目录' : '文件'}失败：$error');
       }
     }
   }
@@ -1433,80 +1625,109 @@ class _FilesPanelState extends State<FilesPanel> {
             ),
           ),
           if (p.loadingDirectory) const LinearProgressIndicator(minHeight: 2),
-          if (p.sftpError != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              child: Text(
-                '${p.sftpError} · 保留上次列表',
-                style: const TextStyle(fontSize: 10, color: Desk.warning),
-              ),
-            ),
+
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 5),
             child: Row(
               children: [
-                Tool(
-                  Icons.arrow_back,
-                  '后退',
-                  p.back.isEmpty
-                      ? null
-                      : () {
-                          run(
-                            _navigateDirectory(
-                              p.back.last,
-                              back: true,
-                            ).then<void>((_) {}),
-                          );
-                        },
-                ),
-                Tool(
-                  Icons.arrow_forward,
-                  '前进',
-                  p.forward.isEmpty
-                      ? null
-                      : () {
-                          run(
-                            _navigateDirectory(
-                              p.forward.last,
-                              ahead: true,
-                            ).then<void>((_) {}),
-                          );
-                        },
-                ),
-                Tool(Icons.arrow_upward, '上级目录', () {
-                  final parent = p.path.substring(0, p.path.lastIndexOf('/'));
-                  navigate(parent.isEmpty ? '/' : parent);
-                }),
                 Expanded(
                   child: SizedBox(
-                    height: 30,
-                    child: CachedPathField(
-                      key: ValueKey(
-                        'cached-path-${p.id}-${p.connectionGeneration}',
-                      ),
-                      controller: _path,
-                      currentDirectory: p.path,
-                      cache: p.directories,
-                      contextMenuExtras: pathMenu,
-                      onSubmitted: (s) {
-                        if (s.startsWith('/') && !s.contains('\u0000')) {
-                          navigate(s);
-                        } else {
-                          notice(context, '请输入绝对远端路径');
-                        }
-                      },
-                    ),
+                    height: 36,
+                    child: _pathEditing
+                        ? CachedPathField(
+                            key: ValueKey(
+                              'cached-path-${p.id}-${p.connectionGeneration}',
+                            ),
+                            controller: _path,
+                            currentDirectory: p.path,
+                            cache: p.directories,
+                            contextMenuExtras: pathMenu,
+                            onSubmitted: (value) {
+                              if (value.startsWith('/') &&
+                                  !value.contains('\u0000')) {
+                                setState(() => _pathEditing = false);
+                                navigate(value);
+                              } else {
+                                notice(context, '请输入绝对远端路径');
+                              }
+                            },
+                          )
+                        : SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            reverse: true,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                InkWell(
+                                  onTap: () => navigate('/'),
+                                  child: const Padding(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 7,
+                                      vertical: 8,
+                                    ),
+                                    child: Text('/'),
+                                  ),
+                                ),
+                                for (
+                                  var i = 0;
+                                  i <
+                                      p.path
+                                          .split('/')
+                                          .where((s) => s.isNotEmpty)
+                                          .length;
+                                  i++
+                                ) ...[
+                                  const Icon(Icons.chevron_right, size: 13),
+                                  Builder(
+                                    builder: (context) {
+                                      final parts = p.path
+                                          .split('/')
+                                          .where((s) => s.isNotEmpty)
+                                          .toList();
+                                      return InkWell(
+                                        onTap: () => navigate(
+                                          '/${parts.take(i + 1).join('/')}',
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 5,
+                                            vertical: 8,
+                                          ),
+                                          child: Text(parts[i]),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
                   ),
                 ),
                 Tool(
-                  Icons.refresh,
-                  m.isMock ? '刷新模拟目录' : '刷新目录',
-                  () => run(m.loadDirectory(p, p.path, remember: false)),
+                  _pathEditing ? Icons.close : Icons.edit_outlined,
+                  '编辑目录路径',
+                  () => setState(() => _pathEditing = !_pathEditing),
                 ),
-                Tool(
-                  Icons.bookmarks_outlined,
-                  '目录书签',
-                  () => unawaited(showDirectoryBookmarks(context, m, p)),
+                Tool(Icons.refresh, m.isMock ? '刷新模拟目录' : '刷新目录', () {
+                  setState(() => _newEntryTail = null);
+                  run(m.loadDirectory(p, p.path, remember: false));
+                }),
+                Builder(
+                  builder: (c) => Tool(
+                    Icons.bookmark_border,
+                    '书签',
+                    () =>
+                        run(showDirectoryBookmarkPopup(c, m, p, global: false)),
+                  ),
+                ),
+                Builder(
+                  builder: (c) => Tool(
+                    Icons.public,
+                    '全局书签',
+                    () =>
+                        run(showDirectoryBookmarkPopup(c, m, p, global: true)),
+                  ),
                 ),
               ],
             ),
@@ -1515,6 +1736,7 @@ class _FilesPanelState extends State<FilesPanel> {
             padding: const EdgeInsets.symmetric(horizontal: 5),
             child: Row(
               children: [
+                Tool(Icons.note_add_outlined, '新建文件', newFile),
                 Tool(Icons.create_new_folder_outlined, '新建文件夹', newFolder),
                 Tool(Icons.file_upload_outlined, m.isMock ? '模拟上传' : '上传', () {
                   if (m.isMock) {
@@ -1554,11 +1776,6 @@ class _FilesPanelState extends State<FilesPanel> {
                   Icons.search,
                   '筛选文件',
                   () => setState(() => filtering = !filtering),
-                ),
-                Tool(
-                  Icons.drive_file_move_outlined,
-                  '发送当前目录路径到关联终端',
-                  () => sendPaths([p.path]),
                 ),
                 const Spacer(),
                 PopupMenuButton<String>(
@@ -1635,258 +1852,303 @@ class _FilesPanelState extends State<FilesPanel> {
               ),
             ),
           Expanded(
-            child: dropTarget(
-              child: Scrollbar(
-                controller: _horizontal,
-                thumbVisibility: true,
-                child: SingleChildScrollView(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onSecondaryTapUp: (event) => run(blankMenu(event.globalPosition)),
+              child: dropTarget(
+                child: Scrollbar(
                   controller: _horizontal,
-                  scrollDirection: Axis.horizontal,
-                  child: SizedBox(
-                    width: _columns.fold<double>(
-                      0,
-                      (sum, i) => sum + widths[i],
-                    ),
-                    child: Column(
-                      children: [
-                        SizedBox(
-                          height: 27,
-                          child: Row(
-                            children: [
-                              for (final i in _columns)
-                                SizedBox(
-                                  width: widths[i],
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: InkWell(
-                                          onTap: () => setState(() {
-                                            ascending = sortColumn == i
-                                                ? !ascending
-                                                : true;
-                                            sortColumn = i;
-                                          }),
-                                          child: Padding(
-                                            padding: const EdgeInsets.only(
-                                              left: 10,
-                                            ),
-                                            child: Text(
-                                              '${_columnNames[i]}${sortColumn == i ? (ascending ? '  ↑' : '  ↓') : ''}',
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: Theme.of(context)
-                                                    .hintColor,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      ResizeGrip(
-                                        key: ValueKey('file-column-$i'),
-                                        horizontal: true,
-                                        onDelta: (d) => setState(
-                                          () => widths[i] = (widths[i] + d)
-                                              .clamp(70, 500),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        Divider(
-                          height: 1,
-                          color: Theme.of(context).dividerColor,
-                        ),
-                        Expanded(
-                          child: ListView.builder(
-                            controller: _vertical,
-                            itemCount: visible.length,
-                            itemBuilder: (c, index) {
-                              final f = visible[index];
-                              if (f.folder) _folderObjects[f.id] = f;
-                              Widget row = SelectionTarget(
-                                behavior: HitTestBehavior.opaque,
-                                onTapDown: (_) => select(f),
-                                onDoubleTap: () => open(f),
-                                // Complete the pointer sequence before pushing
-                                // a modal menu/editor that can steal input.
-                                onSecondaryTapUp: (d) =>
-                                    menu(d.globalPosition, f),
-                                child: Container(
-                                  key: ValueKey('file-${f.name}'),
-                                  height: editing == f.id && renameError != null
-                                      ? 54
-                                      : compact
-                                      ? 28
-                                      : 33,
-                                  color: selected.contains(f.id)
-                                      ? Theme.of(c).colorScheme.primary
-                                            .withValues(alpha: .12)
-                                      : null,
-                                  child: Row(
-                                    children: [
-                                      for (final column in _columns)
-                                        if (column == 0)
-                                          SizedBox(
-                                            width: widths[0],
-                                            child: Row(
-                                              children: [
-                                                const SizedBox(width: 10),
-                                                Icon(
-                                                  f.folder
-                                                      ? Icons.folder_outlined
-                                                      : f.kind == 'YAML' ||
-                                                            f.kind == 'JSON'
-                                                      ? Icons.data_object
-                                                      : Icons
-                                                            .description_outlined,
-                                                  size: 16,
-                                                  color: f.folder
-                                                      ? Desk.warning
-                                                      : Theme.of(c).hintColor,
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: editing == f.id
-                                                      ? Focus(
-                                                          onKeyEvent: (_, e) {
-                                                            if (e
-                                                                    is KeyDownEvent &&
-                                                                e.logicalKey ==
-                                                                    LogicalKeyboardKey
-                                                                        .escape) {
-                                                              setState(() {
-                                                                editing = null;
-                                                                renameError =
-                                                                    null;
-                                                              });
-                                                              _focus
-                                                                  .requestFocus();
-                                                              return KeyEventResult
-                                                                  .handled;
-                                                            }
-                                                            return KeyEventResult
-                                                                .ignored;
-                                                          },
-                                                          child: TextField(
-                                                            key: const ValueKey(
-                                                              'inline-rename',
-                                                            ),
-                                                            controller: _rename,
-                                                            focusNode:
-                                                                _renameFocus,
-                                                            autofocus: true,
-                                                            style:
-                                                                const TextStyle(
-                                                                  fontSize: 11,
-                                                                ),
-                                                            decoration: InputDecoration(
-                                                              errorText:
-                                                                  renameError,
-                                                              contentPadding:
-                                                                  const EdgeInsets.symmetric(
-                                                                    horizontal:
-                                                                        4,
-                                                                    vertical: 2,
-                                                                  ),
-                                                            ),
-                                                            onSubmitted: (_) =>
-                                                                commitRename(),
-                                                          ),
-                                                        )
-                                                      : Text(
-                                                          f.name,
-                                                          style:
-                                                              const TextStyle(
-                                                                fontSize: 11,
-                                                              ),
-                                                          overflow: TextOverflow
-                                                              .ellipsis,
-                                                        ),
-                                                ),
-                                                const SizedBox(width: 7),
-                                              ],
-                                            ),
-                                          )
-                                        else
-                                          SizedBox(
-                                            width: widths[column],
+                  thumbVisibility: true,
+                  child: SingleChildScrollView(
+                    controller: _horizontal,
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: _columns.fold<double>(
+                        0,
+                        (sum, i) => sum + widths[i],
+                      ),
+                      child: Column(
+                        children: [
+                          SizedBox(
+                            height: 27,
+                            child: Row(
+                              children: [
+                                for (final i in _columns)
+                                  SizedBox(
+                                    width: widths[i],
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: InkWell(
+                                            onTap: () => setState(() {
+                                              ascending = sortColumn == i
+                                                  ? !ascending
+                                                  : true;
+                                              sortColumn = i;
+                                              _newEntryTail = null;
+                                            }),
                                             child: Padding(
                                               padding: const EdgeInsets.only(
                                                 left: 10,
                                               ),
                                               child: Text(
-                                                [
-                                                  '',
-                                                  f.modified,
-                                                  f.size,
-                                                  f.kind,
-                                                ][column],
+                                                '${_columnNames[i]}${sortColumn == i ? (ascending ? '  ↑' : '  ↓') : ''}',
                                                 style: TextStyle(
                                                   fontSize: 10,
-                                                  color: Theme.of(c).hintColor,
+                                                  color: Theme.of(context)
+                                                      .hintColor,
                                                 ),
-                                                overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
                                           ),
-                                    ],
+                                        ),
+                                        ResizeGrip(
+                                          key: ValueKey('file-column-$i'),
+                                          horizontal: true,
+                                          onDelta: (d) => setState(
+                                            () => widths[i] = (widths[i] + d)
+                                                .clamp(70, 500),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              );
-                              row = Draggable<RemoteDrag>(
-                                // Secondary clicks belong to the file menu;
-                                // never enter a drag arena for that button.
-                                allowedButtonsFilter: (buttons) =>
-                                    buttons == kPrimaryMouseButton &&
-                                    !explorerExportGesture,
-                                data: RemoteDrag(
-                                  p.id,
-                                  p.path,
-                                  selected.contains(f.id)
-                                      ? visible
-                                            .where(
-                                              (f) => selected.contains(f.id),
+                              ],
+                            ),
+                          ),
+                          Divider(
+                            height: 1,
+                            color: Theme.of(context).dividerColor,
+                          ),
+                          Expanded(
+                            child: ListView.builder(
+                              controller: _vertical,
+                              itemCount: visible.length + 1,
+                              itemBuilder: (c, index) {
+                                if (index == 0) {
+                                  return InkWell(
+                                    key: const ValueKey(
+                                      'sftp-parent-directory',
+                                    ),
+                                    onDoubleTap: () {
+                                      final slash = p.path.lastIndexOf('/');
+                                      navigate(
+                                        slash <= 0
+                                            ? '/'
+                                            : p.path.substring(0, slash),
+                                      );
+                                    },
+                                    child: SizedBox(
+                                      height: compact ? 28 : 33,
+                                      child: const Row(
+                                        children: [
+                                          SizedBox(width: 10),
+                                          Icon(
+                                            Icons.drive_folder_upload_outlined,
+                                            size: 16,
+                                          ),
+                                          SizedBox(width: 8),
+                                          Text('..'),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }
+                                final f = visible[index - 1];
+                                if (f.folder) _folderObjects[f.id] = f;
+                                Widget row = SelectionTarget(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTapDown: (_) => select(f),
+                                  onDoubleTap: () => open(f),
+                                  // Complete the pointer sequence before pushing
+                                  // a modal menu/editor that can steal input.
+                                  onSecondaryTapUp: (d) =>
+                                      run(menu(d.globalPosition, f)),
+                                  child: Container(
+                                    key: ValueKey('file-${f.name}'),
+                                    height:
+                                        editing == f.id && renameError != null
+                                        ? 54
+                                        : compact
+                                        ? 28
+                                        : 33,
+                                    color: selected.contains(f.id)
+                                        ? Theme.of(c).colorScheme.primary
+                                              .withValues(alpha: .12)
+                                        : null,
+                                    child: Row(
+                                      children: [
+                                        for (final column in _columns)
+                                          if (column == 0)
+                                            SizedBox(
+                                              width: widths[0],
+                                              child: Row(
+                                                children: [
+                                                  const SizedBox(width: 10),
+                                                  Icon(
+                                                    f.folder
+                                                        ? Icons.folder_outlined
+                                                        : f.kind == 'YAML' ||
+                                                              f.kind == 'JSON'
+                                                        ? Icons.data_object
+                                                        : Icons
+                                                              .description_outlined,
+                                                    size: 16,
+                                                    color: f.folder
+                                                        ? Desk.warning
+                                                        : Theme.of(c).hintColor,
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: editing == f.id
+                                                        ? Focus(
+                                                            onKeyEvent: (_, e) {
+                                                              if (e
+                                                                      is KeyDownEvent &&
+                                                                  e.logicalKey ==
+                                                                      LogicalKeyboardKey
+                                                                          .escape) {
+                                                                setState(() {
+                                                                  editing =
+                                                                      null;
+                                                                  renameError =
+                                                                      null;
+                                                                });
+                                                                _focus
+                                                                    .requestFocus();
+                                                                return KeyEventResult
+                                                                    .handled;
+                                                              }
+                                                              return KeyEventResult
+                                                                  .ignored;
+                                                            },
+                                                            child: TextField(
+                                                              key: const ValueKey(
+                                                                'inline-rename',
+                                                              ),
+                                                              controller:
+                                                                  _rename,
+                                                              focusNode:
+                                                                  _renameFocus,
+                                                              autofocus: true,
+                                                              style:
+                                                                  const TextStyle(
+                                                                    fontSize:
+                                                                        11,
+                                                                  ),
+                                                              decoration: InputDecoration(
+                                                                errorText:
+                                                                    renameError,
+                                                                contentPadding:
+                                                                    const EdgeInsets.symmetric(
+                                                                      horizontal:
+                                                                          4,
+                                                                      vertical:
+                                                                          2,
+                                                                    ),
+                                                              ),
+                                                              onSubmitted: (_) =>
+                                                                  commitRename(),
+                                                            ),
+                                                          )
+                                                        : Text(
+                                                            f.name,
+                                                            style:
+                                                                const TextStyle(
+                                                                  fontSize: 11,
+                                                                ),
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                          ),
+                                                  ),
+                                                  const SizedBox(width: 7),
+                                                ],
+                                              ),
                                             )
-                                            .toList()
-                                      : [f],
-                                  generation: p.connectionGeneration,
-                                ),
-                                feedback: const SizedBox.shrink(),
-                                child: row,
-                              );
-                              final live = m;
-                              if (live is LiveWorkbenchModel &&
-                                  p is LiveTerminalSession) {
-                                row = ExplorerExportDrag(
-                                  model: live,
-                                  source: p as LiveTerminalSession,
-                                  selection: () => selected.contains(f.id)
-                                      ? visible
-                                            .where(
-                                              (entry) =>
-                                                  selected.contains(entry.id),
-                                            )
-                                            .toList()
-                                      : [f],
+                                          else
+                                            SizedBox(
+                                              width: widths[column],
+                                              child: Padding(
+                                                padding: const EdgeInsets.only(
+                                                  left: 10,
+                                                ),
+                                                child: Text(
+                                                  [
+                                                    '',
+                                                    f.modified,
+                                                    f.folder ? '—' : f.size,
+                                                    f.kind,
+                                                  ][column],
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    color: Theme.of(c)
+                                                        .hintColor,
+                                                  ),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                                row = Draggable<RemoteDrag>(
+                                  // Secondary clicks belong to the file menu;
+                                  // never enter a drag arena for that button.
+                                  allowedButtonsFilter: (buttons) =>
+                                      buttons == kPrimaryMouseButton &&
+                                      !explorerExportGesture,
+                                  data: RemoteDrag(
+                                    p.id,
+                                    p.path,
+                                    selected.contains(f.id)
+                                        ? visible
+                                              .where(
+                                                (f) => selected.contains(f.id),
+                                              )
+                                              .toList()
+                                        : [f],
+                                    generation: p.connectionGeneration,
+                                  ),
+                                  feedback: const SizedBox.shrink(),
                                   child: row,
                                 );
-                              }
-                              return f.folder
-                                  ? KeyedSubtree(
-                                      key: _folderBounds.putIfAbsent(
-                                        f.id,
-                                        GlobalKey.new,
-                                      ),
-                                      child: dropTarget(folder: f, child: row),
-                                    )
-                                  : row;
-                            },
+                                final live = m;
+                                if (live is LiveWorkbenchModel &&
+                                    p is LiveTerminalSession) {
+                                  row = ExplorerExportDrag(
+                                    model: live,
+                                    source: p as LiveTerminalSession,
+                                    selection: () => selected.contains(f.id)
+                                        ? visible
+                                              .where(
+                                                (entry) =>
+                                                    selected.contains(entry.id),
+                                              )
+                                              .toList()
+                                        : [f],
+                                    child: row,
+                                  );
+                                }
+                                return f.folder
+                                    ? KeyedSubtree(
+                                        key: _folderBounds.putIfAbsent(
+                                          f.id,
+                                          GlobalKey.new,
+                                        ),
+                                        child: dropTarget(
+                                          folder: f,
+                                          child: row,
+                                        ),
+                                      )
+                                    : row;
+                              },
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -1906,7 +2168,7 @@ class _FilesPanelState extends State<FilesPanel> {
                   ),
                 ),
                 const Spacer(),
-                DeskBadge(m.isMock ? '模拟远端' : '远端'),
+                if (m.isMock) const DeskBadge('模拟数据'),
                 const SizedBox(width: 8),
               ],
             ),
@@ -1915,4 +2177,62 @@ class _FilesPanelState extends State<FilesPanel> {
       ),
     );
   }
+}
+
+class SftpTerminalActions extends StatelessWidget {
+  const SftpTerminalActions({
+    super.key,
+    required this.model,
+    required this.source,
+  });
+  final WorkbenchModel model;
+  final TerminalSession source;
+  void _run(Future<void> action) =>
+      unawaited(action.catchError(model.reportOperation));
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 32,
+    child: Row(
+      children: [
+        const Spacer(),
+        Tool(Icons.drive_file_move_outlined, '发送当前目录路径到关联终端', () {
+          if (model is LiveWorkbenchModel && source is LiveTerminalSession) {
+            final live = source as LiveTerminalSession;
+            _run(
+              sendSessionPaths(context, model as LiveWorkbenchModel, live, [
+                source.path,
+              ], expectedGeneration: live.controller.generation),
+            );
+          } else {
+            source.draft += quotePath(source.path);
+            model.changed();
+            notice(context, '仅模拟插入路径；未执行');
+          }
+        }),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            color: model.followsTerminalDirectory(source)
+                ? Theme.of(context).colorScheme.primary.withValues(alpha: .15)
+                : null,
+          ),
+          child: Tool(
+            Icons.sync_alt,
+            '自动跟随终端路径',
+            () => _run(
+              model.setTerminalDirectoryFollow(
+                source,
+                !model.followsTerminalDirectory(source),
+              ),
+            ),
+          ),
+        ),
+        Tool(
+          Icons.my_location_outlined,
+          '跳转至终端路径',
+          () => _run(model.jumpToTerminalDirectory(source)),
+        ),
+      ],
+    ),
+  );
 }

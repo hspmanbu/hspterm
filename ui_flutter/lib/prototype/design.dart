@@ -1,3 +1,5 @@
+import '../app_notice.dart';
+
 import 'package:flutter/material.dart';
 
 abstract final class Desk {
@@ -192,17 +194,8 @@ class ResizeGrip extends StatelessWidget {
   );
 }
 
-void notice(BuildContext context, String message) {
-  ScaffoldMessenger.of(context).hideCurrentSnackBar();
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(message),
-      duration: const Duration(seconds: 3),
-      behavior: SnackBarBehavior.floating,
-      width: 460,
-    ),
-  );
-}
+void notice(BuildContext context, String message) =>
+    showAppNotice(context, message);
 
 Future<bool> confirm(
   BuildContext context,
@@ -310,15 +303,34 @@ class DeskMenuItem<T> extends PopupMenuItem<T> {
   });
 }
 
-class DeskCheckedMenuItem<T> extends CheckedPopupMenuItem<T> {
-  const DeskCheckedMenuItem({
+class DeskCheckedMenuItem<T> extends PopupMenuItem<T> {
+  DeskCheckedMenuItem({
     super.key,
-    required super.child,
+    required Widget child,
     super.value,
-    super.checked,
+    bool checked = false,
     super.enabled,
     super.height = 30,
-  });
+  }) : super(
+         padding: const EdgeInsets.symmetric(horizontal: 8),
+         child: Row(
+           mainAxisSize: MainAxisSize.min,
+           children: [
+             SizedBox(
+               width: 24,
+               height: 24,
+               child: Checkbox(
+                 value: checked,
+                 onChanged: null,
+                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                 visualDensity: VisualDensity.compact,
+               ),
+             ),
+             const SizedBox(width: 8),
+             child,
+           ],
+         ),
+       );
 }
 
 class DeskMenuDivider extends PopupMenuDivider {

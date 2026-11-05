@@ -64,3 +64,22 @@ fn protocol_events_redact_command_and_nonce_from_debug() {
         alacritty_terminal::event::Event::ShellIntegration(Some("synthetic-private-packet".into()));
     assert_eq!(format!("{event:?}"), "ShellIntegration(<redacted>)");
 }
+
+#[test]
+fn readline_keypad_and_public_command_anchor_reflow_do_not_revoke_private_input() {
+    let mut t = terminal(true);
+    t.feed(b"\x1b[?1h\x1b=").unwrap();
+    t.feed(packet(1, "R", "").as_bytes()).unwrap();
+    let proof = t
+        .integration_proof()
+        .expect("Readline application keypad is not a TUI proof");
+    t.feed(b"\x1b]133;A\x07prompt\x1b]133;B\x07\x1b]133;C\x07output\r\n")
+        .unwrap();
+    t.resize(Size::new(60, 8).unwrap()).unwrap();
+    assert_eq!(t.integration_proof(), Some(proof));
+    t.feed(b"\x1b[?1049h\x1b[?1049l").unwrap();
+    assert!(
+        t.integration_proof().is_none(),
+        "actual alternate-screen entry still revokes private readiness"
+    );
+}

@@ -230,10 +230,11 @@ impl EventListener for Collector {
             }
             Event::CommandBoundaryInvalid => {
                 let mut state = self.0.lock();
+                // Grid/output anchors can be invalidated by a redraw/reflow.
+                // They are independent of the nonce-bound Readline buffer.
+                // RIS/alternate-screen and malformed private packets already
+                // emit ShellIntegration(None) and still revoke that proof.
                 state.commands.abort();
-                if let Some(integration) = &mut state.integration {
-                    integration.invalidate();
-                }
                 return;
             }
             Event::WorkingDirectory(uri) => {
@@ -612,11 +613,7 @@ impl Terminal {
     }
     fn integration_mode_safe(&self) -> bool {
         !self.term.mode().intersects(
-            TermMode::ALT_SCREEN
-                | TermMode::APP_CURSOR
-                | TermMode::APP_KEYPAD
-                | TermMode::MOUSE_MODE
-                | TermMode::KITTY_KEYBOARD_PROTOCOL,
+            TermMode::ALT_SCREEN | TermMode::MOUSE_MODE | TermMode::KITTY_KEYBOARD_PROTOCOL,
         ) && self.term.modify_other_keys() == 0
     }
 

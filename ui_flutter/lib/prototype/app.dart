@@ -1,3 +1,4 @@
+import 'operation_notice.dart';
 import '../run_log.dart';
 import '../terminal/application_keys.dart';
 import 'command_palette.dart';
@@ -478,28 +479,7 @@ class PrototypeAppState extends State<PrototypeApp> {
                 const Divider(height: 1),
                 if (widget.noticeBuilder != null)
                   widget.noticeBuilder!(context),
-                if (m.operationError != null)
-                  Container(
-                    color: Desk.warning.withValues(alpha: .1),
-                    padding: const EdgeInsets.only(left: 10),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            m.operationError!,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: Desk.warning,
-                            ),
-                          ),
-                        ),
-                        Tool(Icons.close, '关闭提示', () {
-                          m.operationError = null;
-                          m.changed();
-                        }),
-                      ],
-                    ),
-                  ),
+                OperationNotice(model: m),
                 Expanded(
                   child: switch (m.page) {
                     WorkPage.hosts => HostManager(key: _hosts, model: m),

@@ -53,6 +53,7 @@ class TerminalController extends ChangeNotifier {
   String connectionLabel = '当前SSH终端';
   String title = 'HSPTerm';
   bool visible = true;
+  double fontZoom = 0;
   rust.RenderFrame? metadata;
   List<List<rust.RenderCell>> rows = [];
   List<int> rowVersions = [];
@@ -803,8 +804,22 @@ class TerminalController extends ChangeNotifier {
     }
   }
 
+  void dismissError(String expected) {
+    if (error != expected) return;
+    error = null;
+    notifyListeners();
+  }
+
   void resize(int columns, int lines, double width, double height) {
-    if (_disposed) return;
+    // Minimized/hidden surfaces can report a zero viewport. Sending a 2x2
+    // clamped PTY destroys TUI geometry and needlessly reflows all history.
+    if (_disposed ||
+        columns < 2 ||
+        lines < 2 ||
+        !width.isFinite ||
+        !height.isFinite) {
+      return;
+    }
     final desired = (
       columns.clamp(2, 4096),
       lines.clamp(2, 4096),
@@ -819,7 +834,7 @@ class TerminalController extends ChangeNotifier {
   void _scheduleResize() {
     _resizeTimer?.cancel();
     final desired = _desiredSize;
-    if (desired == null || _disposed) return;
+    if (desired == null || _disposed || !visible) return;
     _resizeTimer = Timer(const Duration(milliseconds: 60), () async {
       final value = id;
       if (value == null || _disposed) return;
@@ -844,6 +859,11 @@ class TerminalController extends ChangeNotifier {
     if (_disposed) return;
     if (visible == value) return;
     visible = value;
+    if (value) {
+      _scheduleResize();
+    } else {
+      _resizeTimer?.cancel();
+    }
     final terminal = id;
     if (terminal != null) await _nativeVisibility(terminal, value);
     // A snapshot already taken by Rust advances its delta baseline. Drain that

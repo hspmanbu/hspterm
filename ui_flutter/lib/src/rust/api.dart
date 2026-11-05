@@ -27,7 +27,7 @@ import 'transfers.dart';
 import 'transfers/explorer.dart';
 import 'transfers/export_cleanup.dart';
 
-// These functions are ignored because they are not marked as `pub`: `agent_connected`, `agent_scope`, `allowed_integration`, `apply_entry_preferences`, `bind_display`, `check_directory_session`, `close_terminal_owned`, `configuration_restored`, `configuration_synchronized`, `connect_terminal_inner`, `connect_terminal_run`, `credential`, `display_sources`, `ensure_command_source`, `entry`, `event`, `history_version`, `integrated_result`, `integration_guard`, `integration_status`, `invalidate_backup_agents`, `invalidate_synchronized_agents`, `key_credential`, `migrate_legacy_profiles`, `modifiers`, `next_id`, `persist_key_file`, `publish_terminal_preferences`, `record_integration_commands`, `record`, `remember_host_key`, `remote_sftp`, `replace_display`, `retire_suggestions_for`, `retire_suggestions`, `sessions`, `suggestion_context`, `terminal_path_context_revision`, `terminal_path_context`, `tmux_event`, `transfer_connection`, `trust_id`, `unlock_vault_inner`, `validate_remote_path`, `vault`, `with_vault`
+// These functions are ignored because they are not marked as `pub`: `agent_connected`, `agent_scope`, `allowed_integration`, `apply_entry_preferences`, `bind_display`, `check_directory_session`, `check_file_generation`, `close_terminal_owned`, `configuration_restored`, `configuration_synchronized`, `connect_terminal_inner`, `connect_terminal_run`, `credential`, `display_sources`, `ensure_command_source`, `entry`, `event`, `history_version`, `integrated_result`, `integration_guard`, `integration_status`, `invalidate_backup_agents`, `invalidate_synchronized_agents`, `key_credential`, `migrate_legacy_profiles`, `modifiers`, `next_id`, `persist_key_file`, `property_children`, `publish_terminal_preferences`, `record_integration_commands`, `record`, `remember_host_key`, `remote_sftp`, `replace_display`, `retire_suggestions_for`, `retire_suggestions`, `sessions`, `suggestion_context`, `terminal_path_context_revision`, `terminal_path_context`, `tmux_event`, `transfer_connection`, `trust_id`, `unlock_vault_inner`, `validate_remote_path`, `vault`, `with_vault`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Entry`, `SavedProfile`, `SuggestionProposal`, `SuggestionsCache`, `TerminalCloseState`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `from`, `from`, `from`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`, `default`
@@ -313,11 +313,13 @@ Future<String> insertTerminalPaths({
   required int generation,
   required List<String> paths,
   required bool enterDirectory,
+  bool? namesOnly,
 }) => RustLib.instance.api.crateApiInsertTerminalPaths(
   id: id,
   generation: generation,
   paths: paths,
   enterDirectory: enterDirectory,
+  namesOnly: namesOnly,
 );
 
 /// Only small invalidations/platform events cross FFI; no history command body.
@@ -1817,6 +1819,59 @@ Future<void> terminateRemoteProcess({
   confirmed: confirmed,
 );
 
+Future<RemoteProperties> sftpProperties({
+  required int id,
+  required int generation,
+  required String path,
+  bool? includeDirectorySize,
+}) => RustLib.instance.api.crateApiSftpProperties(
+  id: id,
+  generation: generation,
+  path: path,
+  includeDirectorySize: includeDirectorySize,
+);
+
+Future<void> sftpSetProperties({
+  required int id,
+  required int generation,
+  required String path,
+  int? permissions,
+  int? uid,
+  int? gid,
+  required bool recursive,
+}) => RustLib.instance.api.crateApiSftpSetProperties(
+  id: id,
+  generation: generation,
+  path: path,
+  permissions: permissions,
+  uid: uid,
+  gid: gid,
+  recursive: recursive,
+);
+
+Future<void> sftpCreateFile({
+  required int id,
+  required int generation,
+  required String path,
+}) => RustLib.instance.api.crateApiSftpCreateFile(
+  id: id,
+  generation: generation,
+  path: path,
+);
+
+/// Clipboard copy on one SSH session: no local download/relay, no overwrite.
+Future<void> sftpCopyOnServer({
+  required int id,
+  required int generation,
+  required String source,
+  required String destination,
+}) => RustLib.instance.api.crateApiSftpCopyOnServer(
+  id: id,
+  generation: generation,
+  source: source,
+  destination: destination,
+);
+
 class BridgeEvent {
   final String kind;
   final int generation;
@@ -2326,6 +2381,59 @@ class RemoteFileSearchPage {
           scanned == other.scanned &&
           directories == other.directories &&
           done == other.done;
+}
+
+/// Explicit properties query. Directory size is the sum of remote entry sizes,
+/// never the directory inode's size. No file contents are downloaded.
+class RemoteProperties {
+  final String path;
+  final int size;
+  final int files;
+  final int directories;
+  final int? permissions;
+  final int? uid;
+  final int? gid;
+  final String? linkTarget;
+  final bool sizeComplete;
+
+  const RemoteProperties({
+    required this.path,
+    required this.size,
+    required this.files,
+    required this.directories,
+    this.permissions,
+    this.uid,
+    this.gid,
+    this.linkTarget,
+    required this.sizeComplete,
+  });
+
+  @override
+  int get hashCode =>
+      path.hashCode ^
+      size.hashCode ^
+      files.hashCode ^
+      directories.hashCode ^
+      permissions.hashCode ^
+      uid.hashCode ^
+      gid.hashCode ^
+      linkTarget.hashCode ^
+      sizeComplete.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RemoteProperties &&
+          runtimeType == other.runtimeType &&
+          path == other.path &&
+          size == other.size &&
+          files == other.files &&
+          directories == other.directories &&
+          permissions == other.permissions &&
+          uid == other.uid &&
+          gid == other.gid &&
+          linkTarget == other.linkTarget &&
+          sizeComplete == other.sizeComplete;
 }
 
 class RenderCell {

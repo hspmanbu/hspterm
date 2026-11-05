@@ -448,6 +448,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RemoteMoveInspection dco_decode_remote_move_inspection(dynamic raw);
 
   @protected
+  RemoteProperties dco_decode_remote_properties(dynamic raw);
+
+  @protected
   RenderCell dco_decode_render_cell(dynamic raw);
 
   @protected
@@ -1060,6 +1063,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RemoteMoveInspection sse_decode_remote_move_inspection(
     SseDeserializer deserializer,
   );
+
+  @protected
+  RemoteProperties sse_decode_remote_properties(SseDeserializer deserializer);
 
   @protected
   RenderCell sse_decode_render_cell(SseDeserializer deserializer);
@@ -1830,6 +1836,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_remote_move_inspection(
     RemoteMoveInspection self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_remote_properties(
+    RemoteProperties self,
     SseSerializer serializer,
   );
 

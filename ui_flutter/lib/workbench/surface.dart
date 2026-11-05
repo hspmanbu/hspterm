@@ -1,3 +1,5 @@
+import '../app_notice.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -67,6 +69,15 @@ class _LiveTerminalSurfaceState extends State<LiveTerminalSurface> {
   @override
   Widget build(BuildContext context) {
     final c = widget.session.controller;
+    final recovery = c.reconnectNotice;
+    if (c.connected && recovery != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && c.reconnectNotice == recovery) {
+          showAppNotice(context, recovery);
+          c.dismissReconnectNotice();
+        }
+      });
+    }
     return Column(
       children: [
         if (widget.typographyNotice != null)
@@ -86,32 +97,7 @@ class _LiveTerminalSurfaceState extends State<LiveTerminalSurface> {
               ),
             ],
           ),
-        if (c.connected && c.reconnectNotice != null)
-          Padding(
-            padding: const EdgeInsets.only(left: 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Tooltip(
-                    message: c.reconnectNotice!,
-                    child: Text(
-                      c.reconnectNotice!,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  tooltip: '关闭恢复报告',
-                  onPressed: c.dismissReconnectNotice,
-                  icon: const Icon(Icons.close, size: 13),
-                  visualDensity: VisualDensity.compact,
-                ),
-              ],
-            ),
-          ),
-        if (!c.connected || c.error != null)
+        if (!c.connected)
           Container(
             constraints: const BoxConstraints(minHeight: 31),
             padding: const EdgeInsets.only(left: 9, right: 3),
