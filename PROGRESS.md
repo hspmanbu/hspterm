@@ -1,6 +1,8 @@
 # HSPTerm 开发进度
 
-## 2026-11-05 第四轮 Windows 反馈十五项修正（源码+本机可执行验证完成，待推送CI）
+## 2026-11-05 第四轮 Windows 反馈十五项修正（已发布：源码de00e3a，Windows CI成功）
+
+- Windows发布：源码de00e3a已推送，run42055723033/job127343453179全部成功（15:30–15:52Z，约21分钟）：正规FRB、MSVC Release、Analyze0、CI固定14文件组件测试（含本轮重写的file_properties_dialog/sftp_feedback_ui）、原生启动/正常退出、正常关闭重开窗口几何恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42055723033/artifacts/13431500392 （HSPTerm-windows-x64，40,087,426字节，2026-11-19到期）。锁库启动工作集120.73/117.56/117.53MiB（artifact13431345518，Server2022口径，与上轮121.59/117.40/117.38持平）。旧run42021544762为e9368f8基线，未重发。
 
 - 根因修复（#1/#5 同源）：e9368f8重写探测时把版本判定表达式抄错一个右括号（旧代码表达式本来平衡，cf13882前路径直送正常），旧探测通道丢弃stderr故从未暴露；新探测在PTY上运行导致bash报错直接可见且探测退出码非42→集成被禁用。现恢复平衡表达式+内层检查2>/dev/null+括号平衡与bash -n双重回归测试；探测成功路径直送随之恢复。
 - #2 多标签"终端尺寸无效"：日志定位api.rs:510 create_configured_terminal→Terminal::new→HistoryPager IO错误被SshError::Terminal统一显示为"尺寸无效"。public_errors新增Terminal分支区分InvalidSize与History（含io ErrorKind枚举，无原始文本）；HistoryPager创建加120/240ms退避重试3次（AV/索引器瞬时失败）。真实Windows根因待下一份日志的io类别确认。
