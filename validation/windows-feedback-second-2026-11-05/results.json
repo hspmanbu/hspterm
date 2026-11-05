@@ -9,9 +9,10 @@
     "real_openssh_bash": 9
   },
   "flutter": {
-    "distinct_component_cases": 61,
-    "native_ssh_sftp": 4,
-    "real_gtk": 1
+    "distinct_component_cases": 65,
+    "native_ssh_sftp": 5,
+    "real_gtk": 2,
+    "mock_gtk": 1
   },
   "python": {
     "server_only_copy": 3,
@@ -38,6 +39,20 @@
     "hspterm-second-ssh-unit-final.log",
     "hspterm-second-gtk-final.log",
     "hspterm-second-clippy-ack-final.log",
-    "hspterm-second-analysis-final0.log"
-  ]
+    "hspterm-second-analysis-final0.log",
+    "hspterm-second-composition-guard.log",
+    "hspterm-second-relative-regression.log",
+    "hspterm-second-full-gtk3.log",
+    "hspterm-second-prototype-gtk.log",
+    "hspterm-second-delivery-debug-build.log",
+    "hspterm-second-delivery-smoke.log"
+  ],
+  "windows": {
+    "source_commit": "a0910cee20bcca55505f94ea9eeff3e3ff7d270f",
+    "run_id": 41971663339,
+    "job_id": 127061543477,
+    "status": "in_progress",
+    "user_Windows_11_IME": "pending",
+    "user_Windows_11_minimize": "pending"
+  }
 }

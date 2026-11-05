@@ -43,3 +43,11 @@ GTK可运行工作台、最终构建/格式、Windows Actions 状态另行补记
 ## 发布后补充
 
 55ad8c7已正常Git推送并触发Windows run41970895508。补充UI组合态门控与失焦后旧IME快照抑制，24项组件回归与Analyze0通过。相对路径菜单旧用例按用户四项菜单修订更新（不再打开菜单便发起OSC7查询），对应3组件+原Native相对路径1项通过。大型GTK回归脚本同步新书签/子菜单/同机服务器内操作；首轮到目录失败重扫处因ensureVisible后未pump点击旧坐标失败，正在第二轮，不计整例通过。发布状态以PROGRESS最新head/run为准。
+
+## 大GTK回归通过
+
+最终/tmp/hspterm-second-full-gtk3.log，03:34 +1 All tests passed。真实上传/队列/目录重扫/批量更名/4096项懒列表、书签、内置和Mousepad编辑、GBK及CRLF、16MiB以上文件原字节编辑、目录搜索、同机服务器内复制与rename、跨标签子菜单、失败重扫保留成功项、目录补全、统一应用文件打开/传输设置、主密码与加密主机/草稿流程全部验证。第二轮后半段失败是旧脚本仍找已取消的单项保存按钮，已同步settings-apply；没有删去断言来规避业务失败。
+
+补充后本轮去重65组件、5个Native真实SSH/SFTP、2个GTK整例通过；不是把每个整例内部断言虚增为多个测试。最新产品源码a0910ce；Windows run41971663339/job127061543477仍在运行。本轮末尾维护只涉及Ubuntu整例脚本旧选择器与验证文字，产品源码与此云构建一致。
+
+原Mock工作台GTK截图/交互整例也实际00:29 +1通过，保留独立原型入口；其中数据明确为Mock，不计真实SSH/SFTP验收。截图只在/tmp/hspterm-feedback-second-prototype供本轮检查，不提交。正式工作台同产品源码的独立启动已过，最后再次恢复lib/workbench_main.dart入口，避免留测试入口的bundle。

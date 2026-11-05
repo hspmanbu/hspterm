@@ -1506,9 +1506,7 @@ void main() {
           );
           await tester.ensureVisible(previewLimit);
           await tester.enterText(previewLimit, '50');
-          final savePreview = find.byKey(
-            const ValueKey('save-file-open-settings'),
-          );
+          final savePreview = find.byKey(const ValueKey('settings-apply'));
           await tester.ensureVisible(savePreview);
           await tester.pumpAndSettle();
           await tester.tap(savePreview);
@@ -1554,11 +1552,9 @@ void main() {
           await tester.tap(find.text('更名另存，保留旧目标').last);
           await tester.pumpAndSettle();
           await tester.ensureVisible(
-            find.byKey(const ValueKey('save-transfer-settings')),
+            find.byKey(const ValueKey('settings-apply')),
           );
-          await tester.tap(
-            find.byKey(const ValueKey('save-transfer-settings')),
-          );
+          await tester.tap(find.byKey(const ValueKey('settings-apply')));
           for (
             var i = 0;
             i < 100 && (await rust.transferPreferences()).concurrency != 2;

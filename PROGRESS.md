@@ -1,9 +1,9 @@
-## 2026-11-05 第二轮发布与补充回归
+## 2026-11-05 第二轮发布与补充回归（最新a0910ce）
 
-- 已提交并正常Git推送55ad8c7，Windows run41970895508已触发，正在正式构建；这不是用户Windows11实机通过。
+- 正式修正55ad8c7及IME门控/回归补充a0910ce均已正常Git推送。最新Windows run41971663339/job127061543477已实际运行：https://github.com/hspmanbu/hspterm/actions/runs/41971663339 。旧run41970895508由新head替代，不重复触发；当前尚不能宣称新Windows包通过，更不等于用户Windows11实机通过。
 - 补充发现IME组合期间受控路径操作需UI门控：Controller标记组合态，开始及排队执行时双重检查；失焦/销毁清理，已分离TextInput连接的旧快照不再发送。该补充24项回归已通过，Analyze0。
-- 与本次明确修订对应的旧相对路径菜单测试改为断言四项菜单/绝对路径不探测CWD，真实相对路径Native能力继续保留并通过；此组4项过。旧GTK脚本同步双书签、直接主机子菜单、同机无下载任务及显式路径编辑，未删除原目录重扫/编辑/队列覆盖。大GTK第二轮在/tmp/hspterm-second-full-gtk2.log；首轮已到远端失败目录重扫，因ensureVisible后未pump导致点击旧坐标而失败，夹具已补等待。当前不能称该大GTK整例通过。
-- 以下补充即将随下一稳定提交推送，Actions会自动用新head替代前一轮；恢复先查询最新head对应run，不手动dispatch重复作业。原用户.log、ssh-screen/和tools/AGENTS.md仍原样未跟踪。
+- 与本次明确修订对应的旧相对路径菜单测试改为断言四项菜单/绝对路径不探测CWD，真实相对路径Native能力继续保留并通过；此组4项过。旧GTK脚本同步双书签、直接主机子菜单、同机无下载任务及显式路径编辑，未删除原目录重扫/编辑/队列覆盖。大GTK第三轮在/tmp/hspterm-second-full-gtk3.log；首轮因ensureVisible后未pump点击旧坐标失败，已修。第二轮已通过远端重扫/候选补全，随后发现旧脚本仍找上轮已取消的子页保存按钮，现改为统一settings-apply并跑第三轮。第三轮已实际03:34 +1 All tests passed，包含大目录/编辑/同机与跨机/失败重扫/补全/统一应用及Vault真实UI。组件去重65、Native5、GTK2均过；正式入口最后重建与独立启动/缩放/正常退出0已通过；各5秒空闲/失焦CPU0%，无历史/编辑副本/预览run残留。保留原Mock入口的GTK脚本同步菜单后已00:29 +1通过（只是原型回归，不当正式SFTP业务验收）；随后重新恢复正式workbench_main.dart入口。
+- 补充已随a0910ce推送，Actions已用新head替代前一轮；恢复先查询最新head对应run，不手动dispatch重复作业。原用户.log、ssh-screen/和tools/AGENTS.md仍原样未跟踪。
 
 ## 2026-11-05 第二轮 Windows 实机反馈（Ubuntu验证完成，待发布Windows构建）
 
