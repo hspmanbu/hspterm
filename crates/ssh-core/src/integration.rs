@@ -104,11 +104,14 @@ pub(crate) async fn probe_on_pty(
 }
 /// Distinctive success exit status; any other outcome means unavailable.
 const CAPABLE_EXIT: u32 = 42;
+/// The arithmetic check runs with its stderr discarded: the probe executes on
+/// the interactive PTY, and anything the inner bash prints (including errors
+/// on exotic shells) would land verbatim in the user's terminal.
 const PROBE_COMMAND: &str = concat!(
     "if [ -r /dev/fd/0 ] && command -v bash >/dev/null 2>&1 ",
     "&& bash --noprofile --norc -c ",
-    "'(( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1)) ))' ",
-    "</dev/null; then exit 42; fi\nexit 1\n"
+    "'(( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) ))' ",
+    "</dev/null 2>/dev/null; then exit 42; fi\nexit 1\n"
 );
 
 #[cfg(test)]
@@ -124,10 +127,32 @@ mod tests {
         assert!(PROBE_COMMAND.trim_end().ends_with("exit 1"));
         assert!(PROBE_COMMAND.contains("[ -r /dev/fd/0 ]"));
         assert!(PROBE_COMMAND.contains("BASH_VERSINFO[1] >= 1"));
+        // A failing version check must never leak its shell diagnostics into
+        // the interactive PTY stream.
+        assert!(PROBE_COMMAND.contains("</dev/null 2>/dev/null"));
         // Only the distinctive status means capable; 0/1/127 are unavailable.
         assert_ne!(0, CAPABLE_EXIT);
         assert_ne!(1, CAPABLE_EXIT);
         assert_ne!(127, CAPABLE_EXIT);
+        // The embedded arithmetic must stay syntactically balanced: an extra
+        // parenthesis once made every probe fail with exit 2, silently
+        // disabling the whole integration on all hosts.
+        let check = PROBE_COMMAND
+            .split("bash --noprofile --norc -c '")
+            .nth(1)
+            .and_then(|rest| rest.split("' </dev/null").next())
+            .expect("probe script shape changed");
+        assert!(check.starts_with("((") && check.trim_end().ends_with("))"));
+        let opened = check.matches('(').count();
+        let closed = check.matches(')').count();
+        assert_eq!(opened, closed, "unbalanced probe arithmetic: {check}");
+        // Where a local bash exists, syntax-check the entire probe script.
+        if let Ok(status) = std::process::Command::new("bash")
+            .args(["-n", "-c", PROBE_COMMAND])
+            .status()
+        {
+            assert!(status.success(), "probe script fails bash -n");
+        }
     }
     #[test]
     fn fresh_launches_have_distinct_fixed_size_tokens_and_no_custom_command_api() {

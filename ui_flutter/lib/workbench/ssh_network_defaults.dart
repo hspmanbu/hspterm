@@ -40,10 +40,16 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
       _response = TextEditingController(),
       _failures = TextEditingController();
   bool _busy = true, _loaded = false;
+  bool _autoReconnect = false;
   String? _error, _status;
   Object? _originalView;
-  Object get _view =>
-      (_timeout.text, _interval.text, _response.text, _failures.text);
+  Object get _view => (
+    _timeout.text,
+    _interval.text,
+    _response.text,
+    _failures.text,
+    _autoReconnect,
+  );
   bool get _dirty => _loaded && _originalView != _view;
   @override
   void initState() {
@@ -65,6 +71,7 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
       _interval.text = '${value.keepaliveSeconds}';
       _response.text = '${value.responseTimeoutSeconds}';
       _failures.text = '${value.keepaliveFailures}';
+      _autoReconnect = value.autoReconnect;
       _originalView = _view;
       setState(() => _loaded = true);
     } catch (error) {
@@ -88,6 +95,7 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
           keepaliveSeconds: int.parse(_interval.text),
           responseTimeoutSeconds: int.parse(_response.text),
           keepaliveFailures: int.parse(_failures.text),
+          autoReconnect: _autoReconnect,
         ),
       );
       if (mounted) {
@@ -137,6 +145,19 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
             const Text('仅对使用全局参数的主机生效。心跳间隔0关闭；心跳响应以SSH ACK为准。'),
             const SizedBox(height: 12),
             if (_busy) const LinearProgressIndicator(),
+            CompactSettingsToggle(
+              child: SwitchListTile(
+                key: const ValueKey('ssh-default-auto-reconnect'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('断联自动重连'),
+                subtitle: const Text('意外断开后按原保存主机自动尝试一次重连；默认关闭。临时连接不适用。'),
+                value: _autoReconnect,
+                onChanged: _busy || !_loaded
+                    ? null
+                    : (value) => setState(() => _autoReconnect = value),
+              ),
+            ),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 12,
               runSpacing: 12,

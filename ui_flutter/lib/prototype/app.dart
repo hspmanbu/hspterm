@@ -386,27 +386,6 @@ class PrototypeAppState extends State<PrototypeApp> {
                         if (await leave()) m.newTab();
                       }, key: const ValueKey('new-terminal')),
                       PopupMenuButton<String>(
-                        key: const ValueKey('session-list'),
-                        tooltip: '全局 SSH 会话 · 仅导航',
-                        icon: const Icon(Icons.view_list_outlined, size: 17),
-                        onSelected: tab,
-                        itemBuilder: (_) => [
-                          if (m.tabs.isEmpty)
-                            const DeskMenuItem(
-                              enabled: false,
-                              child: Text('暂无 SSH 会话'),
-                            ),
-                          for (final g in m.layoutGroups)
-                            for (final t in g.tabs)
-                              DeskMenuItem(
-                                value: t.id,
-                                child: Text(
-                                  '${t.name} · ${m.isMock ? (m.session(t).disconnected ? '已断开' : '模拟') : m.session(t).statusLabel}${m.tabGroups.length > 1 ? ' · 区域 ${m.layoutGroups.indexOf(g) + 1}' : ''}',
-                                ),
-                              ),
-                        ],
-                      ),
-                      PopupMenuButton<String>(
                         key: const ValueKey('app-menu'),
                         tooltip: '应用菜单',
                         icon: const Icon(Icons.more_horiz, size: 18),

@@ -50,17 +50,27 @@ void main() {
           await tester.pumpAndSettle();
         }
 
+        // User revision: right-click paste stays local even while the remote
+        // reports mouse events; TUI leftovers must not eat button 3.
         await right();
-        expect(b.mouseActions, isNotEmpty);
-        expect(b.pastes, isEmpty);
-        c.applyFrame(fixture(mouse: false));
+        expect(b.mouseActions, isEmpty);
+        expect(b.pastes, [('synthetic single line', false)]);
+        // A real mouse-consuming TUI without the shell proof still forwards.
+        c.shellInputReady = false;
+        c.rightClickPaste = false;
         await tester.pump();
         await right();
-        expect(b.pastes, [('synthetic single line', false)]);
+        expect(b.mouseActions, isNotEmpty);
+        expect(b.pastes.length, 1);
+        c.applyFrame(fixture(mouse: false));
+        c.rightClickPaste = true;
+        await tester.pump();
+        await right();
+        expect(b.pastes.length, 2);
         await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
         await right();
         expect(find.text('复制'), findsOneWidget);
-        expect(b.pastes.length, 1);
+        expect(b.pastes.length, 2);
         await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
         await tester.tapAt(const Offset(1, 1));
         await tester.pumpAndSettle();

@@ -127,6 +127,11 @@ class TerminalController extends ChangeNotifier {
   /// Source-bound dialogs can retire without repainting a disposing view.
   final closingChanges = ValueNotifier<bool>(false);
   final shellInputChanges = ValueNotifier<int>(0);
+
+  /// True while the private plain-shell input proof is ready. An exited TUI
+  /// often leaves mouse reporting on; forwarding events then only feeds the
+  /// shell echo stream, so the view keeps them local instead.
+  bool shellInputReady = false;
   Future<void> flushInput() async {
     // Input can be appended while a controlled operation is awaiting its ACK.
     // Read candidates only after the latest tail, not an earlier snapshot.
@@ -385,7 +390,10 @@ class TerminalController extends ChangeNotifier {
           await backend.clipboard(value, event.requestId, data?.text ?? '');
         }
       case 'shellInput':
-        if (event.generation == generation) shellInputChanges.value++;
+        if (event.generation == generation) {
+          shellInputReady = event.detail == 'ready';
+          shellInputChanges.value++;
+        }
       case 'historyWarning':
         if (event.generation == generation) {
           report(StateError('合格命令历史未获保存确认；终端输入继续。'));
@@ -888,6 +896,8 @@ class TerminalController extends ChangeNotifier {
 
   void select(Point<int> start, Point<int> end) {
     if (_disposed) return;
+    // Both ends snap out of a wide character's trailing spacer column so the
+    // highlight box always covers whole CJK glyphs instead of half cells.
     Point<int> anchor(Point<int> p) {
       if (p.y >= 0 &&
           p.y < rows.length &&

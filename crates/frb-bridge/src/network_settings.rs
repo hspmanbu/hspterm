@@ -8,6 +8,7 @@ pub struct SshNetworkDefaults {
     pub keepalive_seconds: u32,
     pub keepalive_failures: u32,
     pub response_timeout_seconds: u32,
+    pub auto_reconnect: bool,
 }
 impl From<NetworkDefaults> for SshNetworkDefaults {
     fn from(value: NetworkDefaults) -> Self {
@@ -16,6 +17,7 @@ impl From<NetworkDefaults> for SshNetworkDefaults {
             keepalive_seconds: value.keepalive_seconds,
             keepalive_failures: value.keepalive_failures,
             response_timeout_seconds: value.response_timeout_seconds,
+            auto_reconnect: value.auto_reconnect,
         }
     }
 }
@@ -32,6 +34,7 @@ pub(crate) async fn save(value: SshNetworkDefaults) -> Result<SshNetworkDefaults
                 keepalive_seconds: value.keepalive_seconds,
                 keepalive_failures: value.keepalive_failures,
                 response_timeout_seconds: value.response_timeout_seconds,
+                auto_reconnect: value.auto_reconnect,
             };
             value.save(v)?;
             Ok(value.into())

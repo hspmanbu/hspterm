@@ -22,6 +22,7 @@ fn sftp_view_defaults_are_allowlisted_for_backup_and_encrypted_configuration_uni
                 folders_first: false,
                 show_hidden: true,
                 compact: true,
+                restore_last_directory: false,
             },
         },
     )

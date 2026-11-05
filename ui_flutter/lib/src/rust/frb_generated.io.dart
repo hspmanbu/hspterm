@@ -338,6 +338,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<SftpBookmark> dco_decode_list_sftp_bookmark(dynamic raw);
 
   @protected
+  List<SftpLastDir> dco_decode_list_sftp_last_dir(dynamic raw);
+
+  @protected
   List<TmuxSessionInfo> dco_decode_list_tmux_session_info(dynamic raw);
 
   @protected
@@ -494,6 +497,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SftpBookmark dco_decode_sftp_bookmark(dynamic raw);
+
+  @protected
+  SftpLastDir dco_decode_sftp_last_dir(dynamic raw);
 
   @protected
   SshNetworkDefaults dco_decode_ssh_network_defaults(dynamic raw);
@@ -925,6 +931,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<SftpLastDir> sse_decode_list_sftp_last_dir(SseDeserializer deserializer);
+
+  @protected
   List<TmuxSessionInfo> sse_decode_list_tmux_session_info(
     SseDeserializer deserializer,
   );
@@ -1129,6 +1138,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SftpBookmark sse_decode_sftp_bookmark(SseDeserializer deserializer);
+
+  @protected
+  SftpLastDir sse_decode_sftp_last_dir(SseDeserializer deserializer);
 
   @protected
   SshNetworkDefaults sse_decode_ssh_network_defaults(
@@ -1690,6 +1702,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_sftp_last_dir(
+    List<SftpLastDir> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_tmux_session_info(
     List<TmuxSessionInfo> self,
     SseSerializer serializer,
@@ -1934,6 +1952,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_sftp_bookmark(SftpBookmark self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_sftp_last_dir(SftpLastDir self, SseSerializer serializer);
 
   @protected
   void sse_encode_ssh_network_defaults(

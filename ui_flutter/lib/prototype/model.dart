@@ -210,6 +210,10 @@ class TerminalSession {
   String get statusLabel => disconnected ? '已断开' : '模拟连接';
   bool disconnected;
   int connectionGeneration = 1;
+
+  /// Connection generation whose listings are currently reusable in the
+  /// session directory cache; a reconnect invalidates them.
+  int directoryCacheGeneration = 0;
   bool sftpEnabled = true, loadingDirectory = false;
   String? sftpError;
   RemoteFileLocation? pendingFileLocation;
@@ -828,6 +832,7 @@ class WorkbenchModel extends ChangeNotifier {
     TerminalSession session,
     String path, {
     bool remember = true,
+    bool refresh = false,
   }) async {
     if (remember) {
       session.navigate(path);

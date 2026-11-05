@@ -24,6 +24,10 @@ pub struct NetworkDefaults {
     pub keepalive_seconds: u32,
     pub keepalive_failures: u32,
     pub response_timeout_seconds: u32,
+    /// User opt-in (2026-11-05 revision, default off): after an unexpected
+    /// drop, one automatic reconnect attempt per connection generation.
+    #[serde(default)]
+    pub auto_reconnect: bool,
 }
 impl Default for NetworkDefaults {
     fn default() -> Self {
@@ -33,6 +37,7 @@ impl Default for NetworkDefaults {
             keepalive_seconds: 30,
             keepalive_failures: 3,
             response_timeout_seconds: 10,
+            auto_reconnect: false,
         }
     }
 }
@@ -123,6 +128,7 @@ mod tests {
             keepalive_failures: 11,
             response_timeout_seconds: 7,
             version: 1,
+            auto_reconnect: false,
         };
         chosen.save(&mut vault).unwrap();
         drop(vault);

@@ -260,20 +260,25 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
             width: 32,
             child: PopupMenuButton<String>(
               key: ValueKey('tab-overflow-${group.id}'),
-              tooltip: '此区域的终端标签',
+              // One navigation menu: every session across all groups, so the
+              // former separate global-session list stays unnecessary.
+              tooltip: '全部 SSH 会话 · 仅导航',
               icon: const Icon(Icons.keyboard_arrow_down, size: 15),
               padding: EdgeInsets.zero,
               onSelected: (id) async {
                 if (await leave()) model.selectTab(id);
               },
               itemBuilder: (_) => [
-                for (final t in group.tabs)
-                  DeskMenuItem(
-                    value: t.id,
-                    child: Text(
-                      '${t.pinned ? '固定 · ' : ''}${t.name}${model.session(t).disconnected ? ' · 已断开' : ''}',
+                for (final g in model.layoutGroups)
+                  for (final t in g.tabs)
+                    DeskMenuItem(
+                      value: t.id,
+                      child: Text(
+                        '${t.pinned ? '固定 · ' : ''}${t.name}'
+                        '${model.tabGroups.length > 1 ? ' · 区域 ${model.layoutGroups.indexOf(g) + 1}' : ''}'
+                        '${model.session(t).disconnected ? ' · 已断开' : ''}',
+                      ),
                     ),
-                  ),
               ],
             ),
           ),

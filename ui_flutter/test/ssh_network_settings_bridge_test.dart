@@ -34,6 +34,7 @@ void main() {
           timeoutSeconds: 10,
           keepaliveSeconds: 2,
           responseTimeoutSeconds: 1,
+      autoReconnect: false,
           keepaliveFailures: 1,
         ),
       );
@@ -104,6 +105,7 @@ void main() {
           timeoutSeconds: 10,
           keepaliveSeconds: 0,
           responseTimeoutSeconds: 1,
+      autoReconnect: false,
           keepaliveFailures: 1,
         ),
       );

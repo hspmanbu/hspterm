@@ -11,6 +11,10 @@ pub struct Settings {
     pub folders_first: bool,
     pub show_hidden: bool,
     pub compact: bool,
+    /// Opt-in: restore the last SFTP directory of each formal host on the
+    /// next connection (device-local memory, default off).
+    #[serde(default)]
+    pub restore_last_directory: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -18,6 +22,7 @@ impl Default for Settings {
             folders_first: true,
             show_hidden: false,
             compact: false,
+            restore_last_directory: false,
         }
     }
 }
@@ -141,6 +146,7 @@ mod tests {
             folders_first: false,
             show_hidden: true,
             compact: true,
+            restore_last_directory: true,
         };
         let saved = save(&mut v, proposal(&first, selected)).unwrap();
         assert_eq!(load(&v).unwrap().settings, selected);

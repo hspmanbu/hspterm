@@ -1,5 +1,21 @@
 # HSPTerm 开发进度
 
+## 2026-11-05 第四轮 Windows 反馈十五项修正（源码+本机可执行验证完成，待推送CI）
+
+- 根因修复（#1/#5 同源）：e9368f8重写探测时把版本判定表达式抄错一个右括号（旧代码表达式本来平衡，cf13882前路径直送正常），旧探测通道丢弃stderr故从未暴露；新探测在PTY上运行导致bash报错直接可见且探测退出码非42→集成被禁用。现恢复平衡表达式+内层检查2>/dev/null+括号平衡与bash -n双重回归测试；探测成功路径直送随之恢复。
+- #2 多标签"终端尺寸无效"：日志定位api.rs:510 create_configured_terminal→Terminal::new→HistoryPager IO错误被SshError::Terminal统一显示为"尺寸无效"。public_errors新增Terminal分支区分InvalidSize与History（含io ErrorKind枚举，无原始文本）；HistoryPager创建加120/240ms退避重试3次（AV/索引器瞬时失败）。真实Windows根因待下一份日志的io类别确认。
+- SFTP UI：#3编辑框Center包裹与原文字同中线同字号；#4竖向滚动条改为固定可视区右缘（外层Scrollbar(controller:_vertical)包裹横向视口），横向条独立14px底行不再交叉；#6底部计数行与终端联动3按钮合并一行（SftpTerminalActions类删除，_terminalLinkActions内联）；#9列表Ctrl+滚轮字号0.8–1.6（行高/名称/元数据/表头全缩放，本次运行有效）。
+- #10 Explorer拖入热区：列表右侧72px热区强制上传到当前目录（hover/drop双路径判定），拖拽悬浮反馈=顶部文字横幅（热区/文件夹/当前目录三态）+热区高亮，IgnorePointer不挡列表。
+- #11 中文选区：select()两端都做宽字符spacer列吸附，框选与整字对齐。
+- #12 右键与残留鼠标：捕获模式下右键（无Shift、开启右键粘贴）不再转发远端而是本地粘贴；shellInput事件detail新增"ready"（integration_input证明就绪），controller.shellInputReady驱动_forwardRemoteMouse——TUI退出后残留mouse reporting不再把事件注入回显流（codex退出"35;..M"尾巴的主因）。kitty keyboard响应尾巴("9::..u")未完全消除，待复测。
+- #13 日志：AppLogEvent新增12个固定事件（SFTP目录加载/缓存命中/失败、导航、传输冲突提示/解决、Explorer拖入、自动重连触发/禁用等），model/queue/files接线，仍无路径/命令/正文。
+- #14 会话目录缓存+上次目录：loadDirectory先查session缓存（同连接代次+已连接+非刷新/非OSC7才复用；刷新按钮/变异后refresh:true强制网络），断开重连代次变化自动失效；storage-sync新模块sftp_last_dirs（device-sftp-last-dirs-v1，64主机上限、绝对路径校验、损坏报错）+load/record API；SFTP浏览设置新增"连接后进入上次目录"（默认关，serde兼容旧3字段记录），_restoreSftp按开关恢复，每次列表成功2s去抖落盘。
+- #15 断联自动重连（用户修订默认关）：NetworkDefaults.auto_reconnect（serde默认false），SSH连接设置新开关；LiveTerminalSession每代次一次自动重连尝试（wasConnected边沿触发，临时连接排除，异步读取全局默认判定），日志记录触发/禁用。V1.4末尾已修订"绝不自动重连"硬性边界。
+- #7 冲突自动弹窗：LiveTransferQueue检测conflicts>0且非busy且未提示过的任务，postFrame自动resolveBatch（每任务一次，_operations中不弹）。
+- #8 菜单去重：区域标签菜单升级为"全部SSH会话·仅导航"（跨组+区域标注），app.dart删除session-list按钮。
+- 验证：FRB2.13重新生成（+3 API：load/record_sftp_last_dir、SftpLastDir DTO、autoReconnect字段）；Rust fmt/严格Clippy(-D warnings)0；term-core42/ssh-core79/storage-sync218单测过（新增sftp_last_dirs、探测脚本语法回归、auto_reconnect初值）；bridge_contracts 251函数/79DTO/302Dart 0发现；Flutter Analyze0；受影响组件测试78项全过（含workbench sidebar回归——Stack包裹后Column需stretch，已修；file_navigation_ownership两测试为存量失败，按面包屑UI重写；terminal_paste_lifecycle按新右键策略更新断言）。
+- 边界：Native桥接测试仍因本机无SO未跑；真实Ubuntu横幅+集成、codex复测（右键粘贴/退出乱码）、Windows第二标签HistoryPager重试、热区/字号/缓存/自动重连实测待用户。kitty keyboard响应回显尾巴未完全解决。
+
 ## 2026-11-05 第三轮 Windows 反馈九项修正（已发布：源码e9368f8，Windows CI成功）
 
 - Windows发布：源码e9368f8已推送，run42021544762/job127225263699全部成功（约23分钟）：正规FRB、MSVC Release、Analyze0、CI固定14文件组件测试（含本轮重写的file_properties_dialog/sftp_feedback_ui）、原生启动/正常退出、正常关闭重开窗口几何恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42021544762/artifacts/13412329605 （HSPTerm-windows-x64，40,064,513字节，2026-11-19到期）。锁库启动工作集121.59/117.40/117.38MiB（artifact13413136935，Windows Server2022 runner口径，上轮115.00/111.97/111.94，差值在runner噪声与新增功能范围内，不替代用户Win11实测）。旧run41971663339为a0910ce基线，未重发。

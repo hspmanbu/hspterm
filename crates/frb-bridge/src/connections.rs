@@ -198,6 +198,7 @@ mod tests {
             keepalive_seconds: 7,
             keepalive_failures: 2,
             response_timeout_seconds: 5,
+            auto_reconnect: false,
         };
         chosen.save(&mut vault).unwrap();
         let mut host = HostRecord::new(

@@ -205,7 +205,25 @@ pub(crate) struct HistoryPager {
 }
 impl HistoryPager {
     pub fn new(ram_rows: usize) -> io::Result<Self> {
-        Self::new_in(&history_root()?, ram_rows)
+        let root = history_root()?;
+        // Windows endpoints hit transient create/lock failures under antivirus
+        // or indexing scanners; a fresh run directory name dodges them without
+        // masking persistent permission errors (which still surface verbatim).
+        let mut last = None;
+        for attempt in 0..3 {
+            match Self::new_in(&root, ram_rows) {
+                Ok(pager) => return Ok(pager),
+                Err(error) => {
+                    last = Some(error);
+                    if attempt + 1 < 3 {
+                        std::thread::sleep(std::time::Duration::from_millis(
+                            120 * (attempt as u64 + 1),
+                        ));
+                    }
+                }
+            }
+        }
+        Err(last.unwrap_or_else(|| io::Error::other("终端临时历史创建失败")))
     }
     pub(crate) fn new_in(root: &Path, ram_rows: usize) -> io::Result<Self> {
         ensure_root(root)?;

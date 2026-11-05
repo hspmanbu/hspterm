@@ -13,39 +13,51 @@ class SftpViewSettings {
     this.foldersFirst = true,
     this.showHidden = false,
     this.compact = false,
+    this.restoreLastDirectory = false,
   });
   factory SftpViewSettings.parse(Map<String, dynamic> value) {
-    if (value.length != 3 ||
+    // The restore flag is serde-defaulted on the Rust side: legacy payloads
+    // with exactly the first three keys stay readable.
+    final legacy = value.length == 3 && value['restore_last_directory'] == null;
+    if (value.length != (legacy ? 3 : 4) ||
         value['folders_first'] is! bool ||
         value['show_hidden'] is! bool ||
-        value['compact'] is! bool) {
+        value['compact'] is! bool ||
+        (!legacy && value['restore_last_directory'] is! bool)) {
       throw const FormatException('SFTP浏览设置格式无效');
     }
     return SftpViewSettings(
       foldersFirst: value['folders_first'] as bool,
       showHidden: value['show_hidden'] as bool,
       compact: value['compact'] as bool,
+      restoreLastDirectory: legacy
+          ? false
+          : value['restore_last_directory'] as bool,
     );
   }
-  final bool foldersFirst, showHidden, compact;
+  final bool foldersFirst, showHidden, compact, restoreLastDirectory;
   SftpViewSettings copyWith({
     bool? foldersFirst,
     bool? showHidden,
     bool? compact,
+    bool? restoreLastDirectory,
   }) => SftpViewSettings(
     foldersFirst: foldersFirst ?? this.foldersFirst,
     showHidden: showHidden ?? this.showHidden,
     compact: compact ?? this.compact,
+    restoreLastDirectory: restoreLastDirectory ?? this.restoreLastDirectory,
   );
   Map<String, dynamic> toJson() => {
     'folders_first': foldersFirst,
     'show_hidden': showHidden,
     'compact': compact,
+    'restore_last_directory': restoreLastDirectory,
   };
   bool sameAs(SftpViewSettings other) =>
       foldersFirst == other.foldersFirst &&
       showHidden == other.showHidden &&
-      compact == other.compact;
+      compact == other.compact &&
+      restoreLastDirectory == other.restoreLastDirectory;
 }
 
 class SftpViewSnapshot {
@@ -268,6 +280,14 @@ class _SftpViewSettingsPanelState extends State<SftpViewSettingsPanel> {
             '紧凑列表',
             settings.compact,
             settings.copyWith(compact: !settings.compact),
+          ),
+          toggle(
+            'sftp-default-restore-last-dir',
+            '连接后进入上次目录',
+            settings.restoreLastDirectory,
+            settings.copyWith(
+              restoreLastDirectory: !settings.restoreLastDirectory,
+            ),
           ),
           if (controller.error != null)
             Text(

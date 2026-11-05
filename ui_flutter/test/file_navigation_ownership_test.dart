@@ -16,6 +16,7 @@ class _NavigationModel extends WorkbenchModel {
     TerminalSession source,
     String path, {
     bool remember = true,
+    bool refresh = false,
   }) async {
     if (defer) {
       final completion = Completer<void>();
@@ -60,14 +61,22 @@ Future<void> _mount(WidgetTester tester, _NavigationModel model) async {
 }
 
 void main() {
-  testWidgets('superseded back reads do not consume history', (tester) async {
+  // The back/forward buttons were removed with the breadcrumb revision; the
+  // navigation ownership invariants stay covered through breadcrumb-driven
+  // navigate() calls.
+  testWidgets('superseded directory reads do not consume history', (
+    tester,
+  ) async {
     final model = _NavigationModel()..openHost(WorkbenchModel().hosts.first);
     final source = model.focus!..path = '/current';
     source.back.addAll(['/first', '/previous']);
     model.defer = true;
     await _mount(tester, model);
-    await tester.tap(find.byTooltip('后退'));
-    await tester.tap(find.byTooltip('后退'));
+    final state = tester.state(find.byType(FilesPanel));
+    // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+    (state as dynamic).navigate('/late');
+    // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+    (state as dynamic).navigate('/early');
     expect(model.reads, hasLength(2));
     model.reads[1].complete();
     await tester.pump();
@@ -78,22 +87,22 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('back and forward preserve the departure directory', (
+  testWidgets('navigation keeps the departure directory in history', (
     tester,
   ) async {
     final model = _NavigationModel()..openHost(WorkbenchModel().hosts.first);
     final source = model.focus!..path = '/current';
-    source.back.add('/previous');
     await _mount(tester, model);
-    await tester.tap(find.byTooltip('后退'));
+    await tester.tap(find.byKey(const ValueKey('sftp-path-bar')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('remote-path')),
+      '/previous',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(source.path, '/previous');
-    expect(source.back, isEmpty);
-    expect(source.forward, ['/current']);
-    await tester.tap(find.byTooltip('前进'));
-    await tester.pumpAndSettle();
-    expect(source.path, '/current');
-    expect(source.back, ['/previous']);
+    expect(source.back, ['/current']);
     expect(source.forward, isEmpty);
   });
 

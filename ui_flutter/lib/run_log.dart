@@ -24,6 +24,24 @@ enum AppLogEvent {
   exportRequested,
   exported,
   exportFailed,
+  // Third-round additions: fixed non-content events only. No paths, file
+  // names, command text or payloads ever enter the log.
+  sftpDirectoryLoaded,
+  sftpDirectoryFailed,
+  sftpDirectoryCacheHit,
+  sftpNavigationApplied,
+  transferEnqueued,
+  transferConflictPrompt,
+  transferConflictResolved,
+  transferStateFailed,
+  editorOpened,
+  editorSaved,
+  editorSaveFailed,
+  previewOpened,
+  propertiesOpened,
+  explorerDropAccepted,
+  autoReconnectTriggered,
+  autoReconnectDisabled,
 }
 
 /// Current launch only. Accept fixed events/numbers and code locations, never
@@ -49,7 +67,8 @@ class AppRunLog {
     final level = event.name.endsWith('Failed')
         ? 'ERROR'
         : (event == AppLogEvent.pathUnavailable ||
-              event == AppLogEvent.pathUnconfirmed)
+              event == AppLogEvent.pathUnconfirmed ||
+              event == AppLogEvent.transferConflictPrompt)
         ? 'WARN'
         : 'INFO';
     final type = error?.runtimeType.toString().replaceAll(

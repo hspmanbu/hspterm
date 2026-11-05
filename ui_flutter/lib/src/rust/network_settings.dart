@@ -12,12 +12,14 @@ class SshNetworkDefaults {
   final int keepaliveSeconds;
   final int keepaliveFailures;
   final int responseTimeoutSeconds;
+  final bool autoReconnect;
 
   const SshNetworkDefaults({
     required this.timeoutSeconds,
     required this.keepaliveSeconds,
     required this.keepaliveFailures,
     required this.responseTimeoutSeconds,
+    required this.autoReconnect,
   });
 
   @override
@@ -25,7 +27,8 @@ class SshNetworkDefaults {
       timeoutSeconds.hashCode ^
       keepaliveSeconds.hashCode ^
       keepaliveFailures.hashCode ^
-      responseTimeoutSeconds.hashCode;
+      responseTimeoutSeconds.hashCode ^
+      autoReconnect.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -35,5 +38,6 @@ class SshNetworkDefaults {
           timeoutSeconds == other.timeoutSeconds &&
           keepaliveSeconds == other.keepaliveSeconds &&
           keepaliveFailures == other.keepaliveFailures &&
-          responseTimeoutSeconds == other.responseTimeoutSeconds;
+          responseTimeoutSeconds == other.responseTimeoutSeconds &&
+          autoReconnect == other.autoReconnect;
 }

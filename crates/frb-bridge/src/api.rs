@@ -2193,7 +2193,11 @@ pub async fn watch_events(id: u32, sink: StreamSink<BridgeEvent>) -> Result<()> 
             result=history_changes.changed()=>{if result.is_err(){break;} history_changes.borrow_and_update();}
             _=async { if let Some(at)=shell_at {tokio::time::sleep_until(at).await;} else {std::future::pending::<()>().await;} }=>{
                 shell_at=None;
-                if sink.add(event("shellInput",entry.session.status().generation,None)).is_err(){break;}
+                // Detail tells the UI whether the plain-shell input proof is
+                // currently ready: while it is, mouse reporting left on by an
+                // exited TUI must not forward events into the echo stream.
+                let ready=entry.session.integration_input().is_some();
+                if sink.add(event("shellInput",entry.session.status().generation,if ready{Some("ready".into())}else{None})).is_err(){break;}
             }
             _=async {
                 if let Some(at)=forwarding_at {tokio::time::sleep_until(at).await;}
@@ -2983,6 +2987,45 @@ pub async fn host_catalog_snapshot() -> Result<HostCatalogSnapshot> {
 
 /// Device-local convenience list of recently opened formal host IDs. Not
 /// synced, not backed up, and never proof that a host still exists.
+/// Device-local last SFTP directory per formal host; pairs only, no secrets.
+pub async fn load_sftp_last_dirs() -> Result<Vec<SftpLastDir>> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(|| {
+            with_vault(|v| {
+                Ok(hspterm_storage_sync::sftp_last_dirs::load(v)?
+                    .into_iter()
+                    .map(|(host_id, path)| SftpLastDir { host_id, path })
+                    .collect())
+            })
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+/// Remembers one host's last SFTP directory for the next connection.
+pub async fn record_sftp_last_dir(host_id: String, path: String) -> Result<()> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(move || {
+            with_vault(|v| {
+                hspterm_storage_sync::sftp_last_dirs::record(v, &host_id, &path)?;
+                Ok(())
+            })
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+pub struct SftpLastDir {
+    pub host_id: String,
+    pub path: String,
+}
+
 pub async fn load_recent_hosts() -> Result<Vec<String>> {
     /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
     let outcome: Result<_> = crate::public_errors::guard(async move {

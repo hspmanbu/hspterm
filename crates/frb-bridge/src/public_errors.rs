@@ -140,6 +140,14 @@ fn ssh_summary(error: &hspterm_ssh_core::SshError) -> String {
             error.to_string()
         }
         SshError::Jump(source) => format!("跳板机连接失败：{}", ssh_summary(source)),
+        // Bounded enum metadata only: the raw io message never crosses FFI.
+        SshError::Terminal(hspterm_term_core::TerminalError::InvalidSize) => {
+            "终端行列必须在 2..=4096，且可见单元格不得超过 1048576".into()
+        }
+        SshError::Terminal(hspterm_term_core::TerminalError::History(io)) => format!(
+            "终端临时历史不可用（{:?}）；终端未创建，原数据未修改",
+            io.kind()
+        ),
         _ => {
             let display = error.to_string();
             if literals::PUBLIC_LITERALS.contains(&display.as_str()) {

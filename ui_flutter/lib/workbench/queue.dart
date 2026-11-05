@@ -3,10 +3,12 @@ import 'transfer_connections.dart';
 
 import 'dart:async';
 
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../prototype/design.dart';
+import '../run_log.dart';
 import '../src/rust/api.dart' as rust;
 import '../src/rust/transfers.dart' as jobs;
 import 'model.dart';
@@ -27,6 +29,11 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   bool completedOpen = false;
   LiveWorkbenchModel get m => widget.model;
   final _operations = <String>{};
+
+  /// Task IDs that already had their conflict dialog auto-opened once; a
+  /// later task refresh with conflicts resolves through the same dialog.
+  final _conflictPrompted = <String>{};
+  bool _autoPromptRunning = false;
   List<jobs.TransferTaskView> get tasks {
     final native = (m.focus as LiveTerminalSession?)?.controller.id;
     return m.transferTasks
@@ -601,10 +608,46 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         : result;
   }
 
+  /// A transfer that just hit same-name conflicts asks for a decision by
+  /// itself instead of waiting for the user to open its menu. Only one dialog
+  /// per task; user-cancelled prompts are not forced open again.
+  void _scheduleConflictPrompt(List<jobs.TransferTaskView> list) {
+    if (_autoPromptRunning) return;
+    final candidate = list
+        .where(
+          (t) =>
+              t.conflicts > 0 &&
+              !t.busy &&
+              !_conflictPrompted.contains(t.id) &&
+              !_operations.contains(t.id),
+        )
+        .firstOrNull;
+    if (candidate == null) return;
+    _conflictPrompted.add(candidate.id);
+    _autoPromptRunning = true;
+    AppRunLog.instance.event(
+      AppLogEvent.transferConflictPrompt,
+      terminal: candidate.terminalId,
+      count: candidate.conflicts,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        if (mounted) await resolveBatch(candidate);
+        AppRunLog.instance.event(
+          AppLogEvent.transferConflictResolved,
+          terminal: candidate.terminalId,
+        );
+      } finally {
+        _autoPromptRunning = false;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final list = tasks;
     selected.removeWhere((id) => !list.any((t) => t.id == id));
+    _scheduleConflictPrompt(list);
     final activity = list
         .where((t) => !ended(t) && !['Partial', 'Failed'].contains(t.state))
         .toList();

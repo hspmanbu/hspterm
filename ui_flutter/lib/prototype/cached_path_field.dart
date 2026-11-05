@@ -181,28 +181,32 @@ class _CachedPathFieldState extends State<CachedPathField> {
       textEditingController: widget.controller,
       focusNode: _focus,
       optionsBuilder: _options,
-      fieldViewBuilder: (context, controller, focus, accept) => TextField(
-        contextMenuBuilder: (context, field) =>
-            AdaptiveTextSelectionToolbar.buttonItems(
-              anchors: field.contextMenuAnchors,
-              buttonItems: [
-                ...field.contextMenuButtonItems,
-                ...?widget.contextMenuExtras?.call(field),
-              ],
-            ),
-        key: const ValueKey('remote-path'),
-        controller: controller,
-        focusNode: focus,
-        // Entering edit moves the keyboard focus straight into the field.
-        autofocus: true,
-        style: const TextStyle(fontSize: 11, fontFamily: 'JetBrainsMono'),
-        // Keep the themed filled/bordered box and its symmetric padding so the
-        // editor fills the address-bar height instead of a raised small input.
-        decoration: const InputDecoration(hintText: '绝对路径（仅缓存补全）'),
-        onSubmitted: (_) {
-          accept();
-          widget.onSubmitted(controller.text);
-        },
+      fieldViewBuilder: (context, controller, focus, accept) => Center(
+        // The address bar keeps a fixed row height; centering the field keeps
+        // the text on the same midline as the breadcrumb it replaces.
+        child: TextField(
+          contextMenuBuilder: (context, field) =>
+              AdaptiveTextSelectionToolbar.buttonItems(
+                anchors: field.contextMenuAnchors,
+                buttonItems: [
+                  ...field.contextMenuButtonItems,
+                  ...?widget.contextMenuExtras?.call(field),
+                ],
+              ),
+          key: const ValueKey('remote-path'),
+          controller: controller,
+          focusNode: focus,
+          // Entering edit moves the keyboard focus straight into the field.
+          autofocus: true,
+          style: const TextStyle(fontSize: 11, fontFamily: 'JetBrainsMono'),
+          // Keep the themed filled/bordered box and its symmetric padding so the
+          // editor fills the address-bar height instead of a raised small input.
+          decoration: const InputDecoration(hintText: '绝对路径（仅缓存补全）'),
+          onSubmitted: (_) {
+            accept();
+            widget.onSubmitted(controller.text);
+          },
+        ),
       ),
       optionsViewBuilder: (context, select, values) {
         final options = values.toList();

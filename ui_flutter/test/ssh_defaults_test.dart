@@ -10,6 +10,7 @@ class DefaultsFixture implements SshDefaultsGateway {
     timeoutSeconds: 30,
     keepaliveSeconds: 30,
     responseTimeoutSeconds: 10,
+      autoReconnect: false,
     keepaliveFailures: 3,
   );
   @override

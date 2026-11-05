@@ -420,6 +420,17 @@ Future<HostCatalogSnapshot> hostCatalogSnapshot() =>
 
 /// Device-local convenience list of recently opened formal host IDs. Not
 /// synced, not backed up, and never proof that a host still exists.
+/// Device-local last SFTP directory per formal host; pairs only, no secrets.
+Future<List<SftpLastDir>> loadSftpLastDirs() =>
+    RustLib.instance.api.crateApiLoadSftpLastDirs();
+
+/// Remembers one host's last SFTP directory for the next connection.
+Future<void> recordSftpLastDir({
+  required String hostId,
+  required String path,
+}) =>
+    RustLib.instance.api.crateApiRecordSftpLastDir(hostId: hostId, path: path);
+
 Future<List<String>> loadRecentHosts() =>
     RustLib.instance.api.crateApiLoadRecentHosts();
 
@@ -2865,6 +2876,24 @@ class SftpBookmark {
           name == other.name &&
           path == other.path &&
           hostId == other.hostId;
+}
+
+class SftpLastDir {
+  final String hostId;
+  final String path;
+
+  const SftpLastDir({required this.hostId, required this.path});
+
+  @override
+  int get hashCode => hostId.hashCode ^ path.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SftpLastDir &&
+          runtimeType == other.runtimeType &&
+          hostId == other.hostId &&
+          path == other.path;
 }
 
 class TemporaryConnectionOptions {

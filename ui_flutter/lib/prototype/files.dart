@@ -14,6 +14,7 @@ import 'package:file_selector/file_selector.dart' as picker;
 import 'dart:io';
 
 import 'design.dart';
+import '../run_log.dart';
 import 'model.dart';
 import 'cached_path_field.dart';
 import 'queue.dart';
@@ -111,8 +112,6 @@ class SftpSidebar extends StatelessWidget {
                         onEditorDrafts: onEditorDrafts,
                       ),
               ),
-            if (!model.queueMaximized && model.focus != null)
-              SftpTerminalActions(model: model, source: model.focus!),
             if (!model.queueMaximized)
               ColoredBox(
                 color: Theme.of(context).colorScheme.primary
@@ -181,6 +180,13 @@ class _FilesPanelState extends State<FilesPanel> {
   final _vertical = ScrollController();
   String? editing, renameError, anchor, hoverTarget, _newEntryTail;
   bool _renameBusy = false, _pathEditing = false;
+
+  /// Ctrl+wheel list font scale, session-only like the terminal zoom.
+  static const _fontScaleMin = 0.8, _fontScaleMax = 1.6;
+  double _fontScale = 1.0;
+  double get _rowHeight => (compact ? 28 : 33) * _fontScale;
+  double get _nameSize => 11 * _fontScale;
+  double get _metaSize => 10 * _fontScale;
   late String _shownPath;
   late int _shownGeneration;
   bool hidden = false, compact = false, filtering = false, foldersFirst = true;
@@ -256,6 +262,11 @@ class _FilesPanelState extends State<FilesPanel> {
   final _folderBounds = <String, GlobalKey>{};
   final _folderObjects = <String, DemoFile>{};
   bool _explorerOver = false;
+
+  /// True while an Explorer drag hovers the right-edge hot strip: dropping
+  /// there targets the current directory instead of the row under it.
+  bool _explorerHotZone = false;
+  static const _explorerHotZoneWidth = 72.0;
   List<DemoFile> clipboard = [];
   bool cut = false;
   WorkbenchModel get m => widget.model;
@@ -1337,6 +1348,18 @@ class _FilesPanelState extends State<FilesPanel> {
     }
   }
 
+  /// The right-edge strip of the file list always targets the current
+  /// directory; only pointers left of it can drop into a hovered folder.
+  bool _inHotZone(Offset point) {
+    final box = context.findRenderObject();
+    return box is RenderBox &&
+        box.hasSize &&
+        point.dx >=
+            box.localToGlobal(Offset.zero).dx +
+                box.size.width -
+                _explorerHotZoneWidth;
+  }
+
   DemoFile? _explorerFolder(Offset point) {
     _folderBounds.removeWhere((_, key) => key.currentContext == null);
     _folderObjects.removeWhere((id, _) => !_folderBounds.containsKey(id));
@@ -1356,11 +1379,17 @@ class _FilesPanelState extends State<FilesPanel> {
 
   void _explorerHover(Offset? point) {
     if (!mounted) return;
-    final folder = point == null ? null : _explorerFolder(point);
-    if (_explorerOver == (point != null) && hoverTarget == folder?.id) return;
+    final hot = point != null && _inHotZone(point);
+    final folder = point == null || hot ? null : _explorerFolder(point);
+    if (_explorerOver == (point != null) &&
+        _explorerHotZone == hot &&
+        hoverTarget == folder?.id) {
+      return;
+    }
     _hoverTimer?.cancel();
     setState(() {
       _explorerOver = point != null;
+      _explorerHotZone = hot;
       hoverTarget = folder?.id;
     });
     if (folder == null) return;
@@ -1384,7 +1413,14 @@ class _FilesPanelState extends State<FilesPanel> {
 
   Future<void> _explorerDrop(List<String> paths, Offset point) async {
     final model = m, source = p, generation = p.connectionGeneration;
-    final directory = p.path, folder = _explorerFolder(point);
+    AppRunLog.instance.event(
+      AppLogEvent.explorerDropAccepted,
+      terminal: source is LiveTerminalSession ? source.controller.id : null,
+      generation: generation,
+      count: paths.length,
+    );
+    final hot = _inHotZone(point);
+    final directory = p.path, folder = hot ? null : _explorerFolder(point);
     final destination = folder == null
         ? directory
         : pathOf(directory, folder.name);
@@ -1567,711 +1603,871 @@ class _FilesPanelState extends State<FilesPanel> {
         ),
       );
     }
-    return Focus(
-      focusNode: _focus,
-      onKeyEvent: (node, e) {
-        // Descendant text fields own Delete/Enter/Ctrl+A while editing paths or
-        // filters. File actions belong only to the list's primary focus.
-        if (!node.hasPrimaryFocus || e is! KeyDownEvent || editing != null) {
-          return KeyEventResult.ignored;
+    return Listener(
+      // Ctrl+wheel adjusts the SFTP list font scale for this session, like
+      // the terminal zoom. Plain wheel scrolling stays with the list.
+      onPointerSignal: (event) {
+        if (event is PointerScrollEvent &&
+            event.scrollDelta.dy != 0 &&
+            HardwareKeyboard.instance.isControlPressed) {
+          setState(
+            () => _fontScale =
+                (_fontScale + (event.scrollDelta.dy < 0 ? .1 : -.1)).clamp(
+                  _fontScaleMin,
+                  _fontScaleMax,
+                ),
+          );
         }
-        if (e.logicalKey == LogicalKeyboardKey.f2) {
-          beginRename();
-          return KeyEventResult.handled;
-        }
-        if (e.logicalKey == LogicalKeyboardKey.delete) {
-          delete();
-          return KeyEventResult.handled;
-        }
-        if (e.logicalKey == LogicalKeyboardKey.enter && selected.isNotEmpty) {
-          open(p.files.firstWhere((f) => f.id == selected.first));
-          return KeyEventResult.handled;
-        }
-        if (HardwareKeyboard.instance.isControlPressed &&
-            e.logicalKey == LogicalKeyboardKey.keyA) {
-          setState(() => selected.addAll(visible.map((f) => f.id)));
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored; // No Ctrl+C/X/V file shortcuts.
       },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            height: 33,
-            child: Row(
-              children: [
-                const SizedBox(width: 10),
-                const Icon(Icons.folder_open_outlined, size: 16),
-                const SizedBox(width: 7),
-                const Text(
-                  'SFTP',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: Text(
-                    p.host.name,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Theme.of(context).hintColor,
-                      fontSize: 10,
+      child: Focus(
+        focusNode: _focus,
+        onKeyEvent: (node, e) {
+          // Descendant text fields own Delete/Enter/Ctrl+A while editing paths or
+          // filters. File actions belong only to the list's primary focus.
+          if (!node.hasPrimaryFocus || e is! KeyDownEvent || editing != null) {
+            return KeyEventResult.ignored;
+          }
+          if (e.logicalKey == LogicalKeyboardKey.f2) {
+            beginRename();
+            return KeyEventResult.handled;
+          }
+          if (e.logicalKey == LogicalKeyboardKey.delete) {
+            delete();
+            return KeyEventResult.handled;
+          }
+          if (e.logicalKey == LogicalKeyboardKey.enter && selected.isNotEmpty) {
+            open(p.files.firstWhere((f) => f.id == selected.first));
+            return KeyEventResult.handled;
+          }
+          if (HardwareKeyboard.instance.isControlPressed &&
+              e.logicalKey == LogicalKeyboardKey.keyA) {
+            setState(() => selected.addAll(visible.map((f) => f.id)));
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored; // No Ctrl+C/X/V file shortcuts.
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 33,
+              child: Row(
+                children: [
+                  const SizedBox(width: 10),
+                  const Icon(Icons.folder_open_outlined, size: 16),
+                  const SizedBox(width: 7),
+                  const Text(
+                    'SFTP',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      p.host.name,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Theme.of(context).hintColor,
+                        fontSize: 10,
+                      ),
                     ),
                   ),
-                ),
-                Tool(
-                  m.filesMaximized ? Icons.fullscreen_exit : Icons.fullscreen,
-                  'SFTP 临时最大化',
-                  () {
-                    m.filesMaximized = !m.filesMaximized;
-                    m.changed();
-                  },
-                  key: const ValueKey('maximize-files'),
-                ),
-                Tool(
-                  Icons.chevron_left,
-                  '收起 SFTP',
-                  m.toggleSidebar,
-                  key: const ValueKey('collapse-sftp'),
-                ),
-              ],
+                  Tool(
+                    m.filesMaximized ? Icons.fullscreen_exit : Icons.fullscreen,
+                    'SFTP 临时最大化',
+                    () {
+                      m.filesMaximized = !m.filesMaximized;
+                      m.changed();
+                    },
+                    key: const ValueKey('maximize-files'),
+                  ),
+                  Tool(
+                    Icons.chevron_left,
+                    '收起 SFTP',
+                    m.toggleSidebar,
+                    key: const ValueKey('collapse-sftp'),
+                  ),
+                ],
+              ),
             ),
-          ),
-          if (p.loadingDirectory) const LinearProgressIndicator(minHeight: 2),
+            if (p.loadingDirectory) const LinearProgressIndicator(minHeight: 2),
 
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 5),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SizedBox(
-                    height: 36,
-                    child: _pathEditing
-                        ? CachedPathField(
-                            key: ValueKey(
-                              'cached-path-${p.id}-${p.connectionGeneration}',
-                            ),
-                            controller: _path,
-                            currentDirectory: p.path,
-                            cache: p.directories,
-                            contextMenuExtras: pathMenu,
-                            onFocusLost: () {
-                              if (_pathEditing) {
-                                setState(() => _pathEditing = false);
-                              }
-                            },
-                            onSubmitted: (value) {
-                              if (value.startsWith('/') &&
-                                  !value.contains('\u0000')) {
-                                setState(() => _pathEditing = false);
-                                navigate(value);
-                              } else {
-                                notice(context, '请输入绝对远端路径');
-                              }
-                            },
-                          )
-                        : GestureDetector(
-                            // The whole breadcrumb strip enters path editing;
-                            // breadcrumb segments still navigate themselves.
-                            key: const ValueKey('sftp-path-bar'),
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () => setState(() => _pathEditing = true),
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  InkWell(
-                                    onTap: () => navigate('/'),
-                                    child: const Padding(
-                                      padding: EdgeInsets.symmetric(
-                                        horizontal: 7,
-                                        vertical: 8,
-                                      ),
-                                      child: Text('/'),
-                                    ),
-                                  ),
-                                  for (
-                                    var i = 0;
-                                    i <
-                                        p.path
-                                            .split('/')
-                                            .where((s) => s.isNotEmpty)
-                                            .length;
-                                    i++
-                                  ) ...[
-                                    const Icon(Icons.chevron_right, size: 13),
-                                    Builder(
-                                      builder: (context) {
-                                        final parts = p.path
-                                            .split('/')
-                                            .where((s) => s.isNotEmpty)
-                                            .toList();
-                                        return InkWell(
-                                          onTap: () => navigate(
-                                            '/${parts.take(i + 1).join('/')}',
-                                          ),
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 5,
-                                              vertical: 8,
-                                            ),
-                                            child: Text(parts[i]),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ),
-                  ),
-                ),
-                Tool(Icons.refresh, m.isMock ? '刷新模拟目录' : '刷新目录', () {
-                  setState(() => _newEntryTail = null);
-                  run(m.loadDirectory(p, p.path, remember: false));
-                }),
-                Builder(
-                  builder: (c) => Tool(
-                    Icons.bookmark_border,
-                    '书签',
-                    () =>
-                        run(showDirectoryBookmarkPopup(c, m, p, global: false)),
-                  ),
-                ),
-                Builder(
-                  builder: (c) => Tool(
-                    Icons.public,
-                    '全局书签',
-                    () =>
-                        run(showDirectoryBookmarkPopup(c, m, p, global: true)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 5),
-            child: Row(
-              children: [
-                Tool(Icons.note_add_outlined, '新建文件', newFile),
-                Tool(Icons.create_new_folder_outlined, '新建文件夹', newFolder),
-                Tool(Icons.file_upload_outlined, m.isMock ? '模拟上传' : '上传', () {
-                  if (m.isMock) {
-                    m.addTransfer('example-upload.zip', upload: true);
-                  } else {
-                    run(upload());
-                  }
-                }),
-                Tool(
-                  Icons.file_download_outlined,
-                  m.isMock ? '模拟下载选中项目' : '下载选中项目',
-                  selected.isEmpty
-                      ? null
-                      : () {
-                          if (!m.isMock) {
-                            run(
-                              download(
-                                p.files
-                                    .where((f) => selected.contains(f.id))
-                                    .toList(),
-                              ),
-                            );
-                            return;
-                          }
-                          for (final f in p.files.where(
-                            (f) => selected.contains(f.id),
-                          )) {
-                            m.addTransfer(
-                              f.name,
-                              upload: false,
-                              folder: f.folder,
-                            );
-                          }
-                        },
-                ),
-                Tool(
-                  Icons.search,
-                  '筛选文件',
-                  () => setState(() => filtering = !filtering),
-                ),
-                const Spacer(),
-                PopupMenuButton<String>(
-                  tooltip: '文件视图选项',
-                  icon: const Icon(Icons.more_horiz, size: 17),
-                  onSelected: (s) {
-                    if (s == 'columns') {
-                      unawaited(configureColumns());
-                      return;
-                    }
-                    if (s == 'search-files') {
-                      run(searchFiles());
-                      return;
-                    }
-                    if (s == 'editor-drafts') {
-                      final action = widget.onEditorDrafts;
-                      if (action != null) run(action(context));
-                      return;
-                    }
-                    setState(() {
-                      if (s == 'hidden') hidden = !hidden;
-                      if (s == 'compact') compact = !compact;
-                      if (s == 'folders-first') foldersFirst = !foldersFirst;
-                    });
-                  },
-                  itemBuilder: (_) => [
-                    const DeskMenuItem(
-                      value: 'columns',
-                      child: Text('显示与排列列…'),
-                    ),
-                    if (widget.onSearchFiles != null)
-                      const DeskMenuItem(
-                        value: 'search-files',
-                        child: Text('递归查找文件…'),
-                      ),
-                    if (widget.onEditorDrafts != null)
-                      const DeskMenuItem(
-                        value: 'editor-drafts',
-                        child: Text('本机编辑草稿…'),
-                      ),
-                    DeskCheckedMenuItem(
-                      value: 'folders-first',
-                      checked: foldersFirst,
-                      child: const Text('目录优先'),
-                    ),
-                    DeskCheckedMenuItem(
-                      value: 'hidden',
-                      checked: hidden,
-                      child: const Text('显示隐藏文件'),
-                    ),
-                    DeskCheckedMenuItem(
-                      value: 'compact',
-                      checked: compact,
-                      child: const Text('紧凑列表'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (filtering)
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
-              child: SizedBox(
-                height: 30,
-                child: TextField(
-                  controller: _filter,
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    hintText: '筛选当前目录',
-                    prefixIcon: Icon(Icons.search, size: 15),
+              padding: const EdgeInsets.symmetric(horizontal: 5),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: 36,
+                      child: _pathEditing
+                          ? CachedPathField(
+                              key: ValueKey(
+                                'cached-path-${p.id}-${p.connectionGeneration}',
+                              ),
+                              controller: _path,
+                              currentDirectory: p.path,
+                              cache: p.directories,
+                              contextMenuExtras: pathMenu,
+                              onFocusLost: () {
+                                if (_pathEditing) {
+                                  setState(() => _pathEditing = false);
+                                }
+                              },
+                              onSubmitted: (value) {
+                                if (value.startsWith('/') &&
+                                    !value.contains('\u0000')) {
+                                  setState(() => _pathEditing = false);
+                                  navigate(value);
+                                } else {
+                                  notice(context, '请输入绝对远端路径');
+                                }
+                              },
+                            )
+                          : GestureDetector(
+                              // The whole breadcrumb strip enters path editing;
+                              // breadcrumb segments still navigate themselves.
+                              key: const ValueKey('sftp-path-bar'),
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => setState(() => _pathEditing = true),
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    InkWell(
+                                      onTap: () => navigate('/'),
+                                      child: const Padding(
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: 7,
+                                          vertical: 8,
+                                        ),
+                                        child: Text('/'),
+                                      ),
+                                    ),
+                                    for (
+                                      var i = 0;
+                                      i <
+                                          p.path
+                                              .split('/')
+                                              .where((s) => s.isNotEmpty)
+                                              .length;
+                                      i++
+                                    ) ...[
+                                      const Icon(Icons.chevron_right, size: 13),
+                                      Builder(
+                                        builder: (context) {
+                                          final parts = p.path
+                                              .split('/')
+                                              .where((s) => s.isNotEmpty)
+                                              .toList();
+                                          return InkWell(
+                                            onTap: () => navigate(
+                                              '/${parts.take(i + 1).join('/')}',
+                                            ),
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 5,
+                                                    vertical: 8,
+                                                  ),
+                                              child: Text(parts[i]),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+                  Tool(Icons.refresh, m.isMock ? '刷新模拟目录' : '刷新目录', () {
+                    setState(() => _newEntryTail = null);
+                    run(
+                      m.loadDirectory(
+                        p,
+                        p.path,
+                        remember: false,
+                        refresh: true,
+                      ),
+                    );
+                  }),
+                  Builder(
+                    builder: (c) => Tool(
+                      Icons.bookmark_border,
+                      '书签',
+                      () => run(
+                        showDirectoryBookmarkPopup(c, m, p, global: false),
+                      ),
+                    ),
+                  ),
+                  Builder(
+                    builder: (c) => Tool(
+                      Icons.public,
+                      '全局书签',
+                      () => run(
+                        showDirectoryBookmarkPopup(c, m, p, global: true),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 5),
+              child: Row(
+                children: [
+                  Tool(Icons.note_add_outlined, '新建文件', newFile),
+                  Tool(Icons.create_new_folder_outlined, '新建文件夹', newFolder),
+                  Tool(
+                    Icons.file_upload_outlined,
+                    m.isMock ? '模拟上传' : '上传',
+                    () {
+                      if (m.isMock) {
+                        m.addTransfer('example-upload.zip', upload: true);
+                      } else {
+                        run(upload());
+                      }
+                    },
+                  ),
+                  Tool(
+                    Icons.file_download_outlined,
+                    m.isMock ? '模拟下载选中项目' : '下载选中项目',
+                    selected.isEmpty
+                        ? null
+                        : () {
+                            if (!m.isMock) {
+                              run(
+                                download(
+                                  p.files
+                                      .where((f) => selected.contains(f.id))
+                                      .toList(),
+                                ),
+                              );
+                              return;
+                            }
+                            for (final f in p.files.where(
+                              (f) => selected.contains(f.id),
+                            )) {
+                              m.addTransfer(
+                                f.name,
+                                upload: false,
+                                folder: f.folder,
+                              );
+                            }
+                          },
+                  ),
+                  Tool(
+                    Icons.search,
+                    '筛选文件',
+                    () => setState(() => filtering = !filtering),
+                  ),
+                  const Spacer(),
+                  PopupMenuButton<String>(
+                    tooltip: '文件视图选项',
+                    icon: const Icon(Icons.more_horiz, size: 17),
+                    onSelected: (s) {
+                      if (s == 'columns') {
+                        unawaited(configureColumns());
+                        return;
+                      }
+                      if (s == 'search-files') {
+                        run(searchFiles());
+                        return;
+                      }
+                      if (s == 'editor-drafts') {
+                        final action = widget.onEditorDrafts;
+                        if (action != null) run(action(context));
+                        return;
+                      }
+                      setState(() {
+                        if (s == 'hidden') hidden = !hidden;
+                        if (s == 'compact') compact = !compact;
+                        if (s == 'folders-first') foldersFirst = !foldersFirst;
+                      });
+                    },
+                    itemBuilder: (_) => [
+                      const DeskMenuItem(
+                        value: 'columns',
+                        child: Text('显示与排列列…'),
+                      ),
+                      if (widget.onSearchFiles != null)
+                        const DeskMenuItem(
+                          value: 'search-files',
+                          child: Text('递归查找文件…'),
+                        ),
+                      if (widget.onEditorDrafts != null)
+                        const DeskMenuItem(
+                          value: 'editor-drafts',
+                          child: Text('本机编辑草稿…'),
+                        ),
+                      DeskCheckedMenuItem(
+                        value: 'folders-first',
+                        checked: foldersFirst,
+                        child: const Text('目录优先'),
+                      ),
+                      DeskCheckedMenuItem(
+                        value: 'hidden',
+                        checked: hidden,
+                        child: const Text('显示隐藏文件'),
+                      ),
+                      DeskCheckedMenuItem(
+                        value: 'compact',
+                        checked: compact,
+                        child: const Text('紧凑列表'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (filtering)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+                child: SizedBox(
+                  height: 30,
+                  child: TextField(
+                    controller: _filter,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      hintText: '筛选当前目录',
+                      prefixIcon: Icon(Icons.search, size: 15),
+                    ),
                   ),
                 ),
               ),
-            ),
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onSecondaryTapUp: (event) => run(blankMenu(event.globalPosition)),
-              child: dropTarget(
-                child: Scrollbar(
-                  controller: _horizontal,
-                  thumbVisibility: true,
-                  child: SingleChildScrollView(
-                    controller: _horizontal,
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(
-                      width: _columns.fold<double>(
-                        0,
-                        (sum, i) => sum + widths[i],
-                      ),
-                      child: Column(
-                        children: [
-                          SizedBox(
-                            height: 27,
-                            child: Row(
-                              children: [
-                                for (final i in _columns)
-                                  SizedBox(
-                                    width: widths[i],
-                                    child: Row(
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onSecondaryTapUp: (event) =>
+                    run(blankMenu(event.globalPosition)),
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: dropTarget(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // The vertical scrollbar wraps the viewport so its thumb
+                            // stays pinned to the visible right edge; the horizontal
+                            // bar is a separate row below and never crosses it.
+                            Expanded(
+                              child: Scrollbar(
+                                controller: _vertical,
+                                thumbVisibility: true,
+                                child: SingleChildScrollView(
+                                  controller: _horizontal,
+                                  scrollDirection: Axis.horizontal,
+                                  child: SizedBox(
+                                    width: _columns.fold<double>(
+                                      0,
+                                      (sum, i) => sum + widths[i],
+                                    ),
+                                    child: Column(
                                       children: [
-                                        Expanded(
-                                          child: InkWell(
-                                            onTap: () => setState(() {
-                                              ascending = sortColumn == i
-                                                  ? !ascending
-                                                  : true;
-                                              sortColumn = i;
-                                              _newEntryTail = null;
-                                            }),
-                                            child: Padding(
-                                              padding: const EdgeInsets.only(
-                                                left: 10,
-                                              ),
-                                              child: Text(
-                                                '${_columnNames[i]}${sortColumn == i ? (ascending ? '  ↑' : '  ↓') : ''}',
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: Theme.of(context)
-                                                      .hintColor,
+                                        SizedBox(
+                                          height: (27 * _fontScale)
+                                              .roundToDouble(),
+                                          child: Row(
+                                            children: [
+                                              for (final i in _columns)
+                                                SizedBox(
+                                                  width: widths[i],
+                                                  child: Row(
+                                                    children: [
+                                                      Expanded(
+                                                        child: InkWell(
+                                                          onTap: () => setState(
+                                                            () {
+                                                              ascending =
+                                                                  sortColumn ==
+                                                                      i
+                                                                  ? !ascending
+                                                                  : true;
+                                                              sortColumn = i;
+                                                              _newEntryTail =
+                                                                  null;
+                                                            },
+                                                          ),
+                                                          child: Padding(
+                                                            padding:
+                                                                const EdgeInsets.only(
+                                                                  left: 10,
+                                                                ),
+                                                            child: Text(
+                                                              '${_columnNames[i]}${sortColumn == i ? (ascending ? '  ↑' : '  ↓') : ''}',
+                                                              style: TextStyle(
+                                                                fontSize:
+                                                                    _metaSize,
+                                                                color: Theme.of(
+                                                                  context,
+                                                                ).hintColor,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      ResizeGrip(
+                                                        key: ValueKey(
+                                                          'file-column-$i',
+                                                        ),
+                                                        horizontal: true,
+                                                        onDelta: (d) =>
+                                                            setState(
+                                                              () => widths[i] =
+                                                                  (widths[i] +
+                                                                          d)
+                                                                      .clamp(
+                                                                        70,
+                                                                        500,
+                                                                      ),
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
                                                 ),
-                                              ),
-                                            ),
+                                            ],
                                           ),
                                         ),
-                                        ResizeGrip(
-                                          key: ValueKey('file-column-$i'),
-                                          horizontal: true,
-                                          onDelta: (d) => setState(
-                                            () => widths[i] = (widths[i] + d)
-                                                .clamp(70, 500),
+                                        Divider(
+                                          height: 1,
+                                          color: Theme.of(context).dividerColor,
+                                        ),
+                                        Expanded(
+                                          child: ListView.builder(
+                                            controller: _vertical,
+                                            itemCount: visible.length + 1,
+                                            itemBuilder: (c, index) {
+                                              if (index == 0) {
+                                                return InkWell(
+                                                  key: const ValueKey(
+                                                    'sftp-parent-directory',
+                                                  ),
+                                                  onDoubleTap: () {
+                                                    final slash = p.path
+                                                        .lastIndexOf('/');
+                                                    navigate(
+                                                      slash <= 0
+                                                          ? '/'
+                                                          : p.path.substring(
+                                                              0,
+                                                              slash,
+                                                            ),
+                                                    );
+                                                  },
+                                                  child: SizedBox(
+                                                    height: _rowHeight,
+                                                    child: const Row(
+                                                      children: [
+                                                        SizedBox(width: 10),
+                                                        Icon(
+                                                          Icons
+                                                              .drive_folder_upload_outlined,
+                                                          size: 16,
+                                                        ),
+                                                        SizedBox(width: 8),
+                                                        Text('..'),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                              final f = visible[index - 1];
+                                              if (f.folder) {
+                                                _folderObjects[f.id] = f;
+                                              }
+                                              Widget row = SelectionTarget(
+                                                behavior:
+                                                    HitTestBehavior.opaque,
+                                                onTapDown: (_) => select(f),
+                                                onDoubleTap: () => open(f),
+                                                // Complete the pointer sequence before pushing
+                                                // a modal menu/editor that can steal input.
+                                                onSecondaryTapUp: (d) => run(
+                                                  menu(d.globalPosition, f),
+                                                ),
+                                                child: Container(
+                                                  key: ValueKey(
+                                                    'file-${f.name}',
+                                                  ),
+                                                  height:
+                                                      editing == f.id &&
+                                                          renameError != null
+                                                      ? _rowHeight + 21
+                                                      : compact
+                                                      ? 28
+                                                      : 33,
+                                                  color: selected.contains(f.id)
+                                                      ? Theme.of(c)
+                                                            .colorScheme
+                                                            .primary
+                                                            .withValues(
+                                                              alpha: .12,
+                                                            )
+                                                      : null,
+                                                  // While renaming, the whole row becomes
+                                                  // one full-width editor; only Enter in the
+                                                  // field applies the change.
+                                                  child: editing == f.id
+                                                      ? Padding(
+                                                          padding:
+                                                              const EdgeInsets.only(
+                                                                left: 34,
+                                                                right: 10,
+                                                              ),
+                                                          child: Center(
+                                                            // Keep the edited name
+                                                            // on the same text
+                                                            // midline as the row.
+                                                            child: Focus(
+                                                              onKeyEvent: (_, e) {
+                                                                if (e
+                                                                        is KeyDownEvent &&
+                                                                    e.logicalKey ==
+                                                                        LogicalKeyboardKey
+                                                                            .escape) {
+                                                                  setState(() {
+                                                                    editing =
+                                                                        null;
+                                                                    renameError =
+                                                                        null;
+                                                                  });
+                                                                  _focus
+                                                                      .requestFocus();
+                                                                  return KeyEventResult
+                                                                      .handled;
+                                                                }
+                                                                return KeyEventResult
+                                                                    .ignored;
+                                                              },
+                                                              child: TextField(
+                                                                key:
+                                                                    const ValueKey(
+                                                                      'inline-rename',
+                                                                    ),
+                                                                controller:
+                                                                    _rename,
+                                                                focusNode:
+                                                                    _renameFocus,
+                                                                autofocus: true,
+                                                                style: TextStyle(
+                                                                  fontSize:
+                                                                      _nameSize,
+                                                                ),
+                                                                decoration: InputDecoration(
+                                                                  errorText:
+                                                                      renameError,
+                                                                  contentPadding:
+                                                                      const EdgeInsets.symmetric(
+                                                                        horizontal:
+                                                                            8,
+                                                                        vertical:
+                                                                            6,
+                                                                      ),
+                                                                ),
+                                                                onSubmitted: (
+                                                                  _,
+                                                                ) => commitRename(),
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        )
+                                                      : Row(
+                                                          children: [
+                                                            for (final column
+                                                                in _columns)
+                                                              if (column == 0)
+                                                                SizedBox(
+                                                                  width:
+                                                                      widths[0],
+                                                                  child: Row(
+                                                                    children: [
+                                                                      const SizedBox(
+                                                                        width:
+                                                                            10,
+                                                                      ),
+                                                                      Icon(
+                                                                        f.folder
+                                                                            ? Icons.folder_outlined
+                                                                            : f.kind == 'YAML' || f.kind == 'JSON'
+                                                                            ? Icons.data_object
+                                                                            : Icons.description_outlined,
+                                                                        size:
+                                                                            16,
+                                                                        color:
+                                                                            f.folder
+                                                                            ? Desk.warning
+                                                                            : Theme.of(
+                                                                                c,
+                                                                              ).hintColor,
+                                                                      ),
+                                                                      const SizedBox(
+                                                                        width:
+                                                                            8,
+                                                                      ),
+                                                                      Expanded(
+                                                                        child: Text(
+                                                                          f.name,
+                                                                          style: TextStyle(
+                                                                            fontSize:
+                                                                                _nameSize,
+                                                                          ),
+                                                                          overflow:
+                                                                              TextOverflow.ellipsis,
+                                                                        ),
+                                                                      ),
+                                                                      const SizedBox(
+                                                                        width:
+                                                                            7,
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                )
+                                                              else
+                                                                SizedBox(
+                                                                  width:
+                                                                      widths[column],
+                                                                  child: Padding(
+                                                                    padding:
+                                                                        const EdgeInsets.only(
+                                                                          left:
+                                                                              10,
+                                                                        ),
+                                                                    child: Text(
+                                                                      [
+                                                                        '',
+                                                                        f.modified,
+                                                                        f.folder
+                                                                            ? '—'
+                                                                            : f.size,
+                                                                        f.kind,
+                                                                      ][column],
+                                                                      style: TextStyle(
+                                                                        fontSize:
+                                                                            _metaSize,
+                                                                        color: Theme.of(
+                                                                          c,
+                                                                        ).hintColor,
+                                                                      ),
+                                                                      overflow:
+                                                                          TextOverflow
+                                                                              .ellipsis,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                          ],
+                                                        ),
+                                                ),
+                                              );
+                                              row = Draggable<RemoteDrag>(
+                                                // Secondary clicks belong to the file menu;
+                                                // never enter a drag arena for that button.
+                                                allowedButtonsFilter: (buttons) =>
+                                                    buttons ==
+                                                        kPrimaryMouseButton &&
+                                                    !explorerExportGesture,
+                                                data: RemoteDrag(
+                                                  p.id,
+                                                  p.path,
+                                                  selected.contains(f.id)
+                                                      ? visible
+                                                            .where(
+                                                              (f) => selected
+                                                                  .contains(
+                                                                    f.id,
+                                                                  ),
+                                                            )
+                                                            .toList()
+                                                      : [f],
+                                                  generation:
+                                                      p.connectionGeneration,
+                                                ),
+                                                feedback:
+                                                    const SizedBox.shrink(),
+                                                child: row,
+                                              );
+                                              final live = m;
+                                              if (live is LiveWorkbenchModel &&
+                                                  p is LiveTerminalSession) {
+                                                row = ExplorerExportDrag(
+                                                  model: live,
+                                                  source:
+                                                      p as LiveTerminalSession,
+                                                  selection: () =>
+                                                      selected.contains(f.id)
+                                                      ? visible
+                                                            .where(
+                                                              (
+                                                                entry,
+                                                              ) => selected
+                                                                  .contains(
+                                                                    entry.id,
+                                                                  ),
+                                                            )
+                                                            .toList()
+                                                      : [f],
+                                                  child: row,
+                                                );
+                                              }
+                                              return f.folder
+                                                  ? KeyedSubtree(
+                                                      key: _folderBounds
+                                                          .putIfAbsent(
+                                                            f.id,
+                                                            GlobalKey.new,
+                                                          ),
+                                                      child: dropTarget(
+                                                        folder: f,
+                                                        child: row,
+                                                      ),
+                                                    )
+                                                  : row;
+                                            },
                                           ),
                                         ),
                                       ],
                                     ),
                                   ),
-                              ],
-                            ),
-                          ),
-                          Divider(
-                            height: 1,
-                            color: Theme.of(context).dividerColor,
-                          ),
-                          Expanded(
-                            child: Scrollbar(
-                              controller: _vertical,
-                              thumbVisibility: true,
-                              child: ListView.builder(
-                                controller: _vertical,
-                                itemCount: visible.length + 1,
-                                itemBuilder: (c, index) {
-                                  if (index == 0) {
-                                    return InkWell(
-                                      key: const ValueKey(
-                                        'sftp-parent-directory',
-                                      ),
-                                      onDoubleTap: () {
-                                        final slash = p.path.lastIndexOf('/');
-                                        navigate(
-                                          slash <= 0
-                                              ? '/'
-                                              : p.path.substring(0, slash),
-                                        );
-                                      },
-                                      child: SizedBox(
-                                        height: compact ? 28 : 33,
-                                        child: const Row(
-                                          children: [
-                                            SizedBox(width: 10),
-                                            Icon(
-                                              Icons
-                                                  .drive_folder_upload_outlined,
-                                              size: 16,
-                                            ),
-                                            SizedBox(width: 8),
-                                            Text('..'),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                  final f = visible[index - 1];
-                                  if (f.folder) _folderObjects[f.id] = f;
-                                  Widget row = SelectionTarget(
-                                    behavior: HitTestBehavior.opaque,
-                                    onTapDown: (_) => select(f),
-                                    onDoubleTap: () => open(f),
-                                    // Complete the pointer sequence before pushing
-                                    // a modal menu/editor that can steal input.
-                                    onSecondaryTapUp: (d) =>
-                                        run(menu(d.globalPosition, f)),
-                                    child: Container(
-                                      key: ValueKey('file-${f.name}'),
-                                      height:
-                                          editing == f.id && renameError != null
-                                          ? 54
-                                          : compact
-                                          ? 28
-                                          : 33,
-                                      color: selected.contains(f.id)
-                                          ? Theme.of(c).colorScheme.primary
-                                                .withValues(alpha: .12)
-                                          : null,
-                                      // While renaming, the whole row becomes
-                                      // one full-width editor; only Enter in the
-                                      // field applies the change.
-                                      child: editing == f.id
-                                          ? Padding(
-                                              padding: const EdgeInsets.only(
-                                                left: 34,
-                                                right: 10,
-                                              ),
-                                              child: Focus(
-                                                onKeyEvent: (_, e) {
-                                                  if (e is KeyDownEvent &&
-                                                      e.logicalKey ==
-                                                          LogicalKeyboardKey
-                                                              .escape) {
-                                                    setState(() {
-                                                      editing = null;
-                                                      renameError = null;
-                                                    });
-                                                    _focus.requestFocus();
-                                                    return KeyEventResult
-                                                        .handled;
-                                                  }
-                                                  return KeyEventResult.ignored;
-                                                },
-                                                child: TextField(
-                                                  key: const ValueKey(
-                                                    'inline-rename',
-                                                  ),
-                                                  controller: _rename,
-                                                  focusNode: _renameFocus,
-                                                  autofocus: true,
-                                                  style: const TextStyle(
-                                                    fontSize: 11,
-                                                  ),
-                                                  decoration: InputDecoration(
-                                                    errorText: renameError,
-                                                    contentPadding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 8,
-                                                          vertical: 6,
-                                                        ),
-                                                  ),
-                                                  onSubmitted: (_) =>
-                                                      commitRename(),
-                                                ),
-                                              ),
-                                            )
-                                          : Row(
-                                              children: [
-                                                for (final column in _columns)
-                                                  if (column == 0)
-                                                    SizedBox(
-                                                      width: widths[0],
-                                                      child: Row(
-                                                        children: [
-                                                          const SizedBox(
-                                                            width: 10,
-                                                          ),
-                                                          Icon(
-                                                            f.folder
-                                                                ? Icons
-                                                                      .folder_outlined
-                                                                : f.kind ==
-                                                                          'YAML' ||
-                                                                      f.kind ==
-                                                                          'JSON'
-                                                                ? Icons
-                                                                      .data_object
-                                                                : Icons
-                                                                      .description_outlined,
-                                                            size: 16,
-                                                            color: f.folder
-                                                                ? Desk.warning
-                                                                : Theme.of(
-                                                                    c,
-                                                                  ).hintColor,
-                                                          ),
-                                                          const SizedBox(
-                                                            width: 8,
-                                                          ),
-                                                          Expanded(
-                                                            child: Text(
-                                                              f.name,
-                                                              style:
-                                                                  const TextStyle(
-                                                                    fontSize:
-                                                                        11,
-                                                                  ),
-                                                              overflow:
-                                                                  TextOverflow
-                                                                      .ellipsis,
-                                                            ),
-                                                          ),
-                                                          const SizedBox(
-                                                            width: 7,
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    )
-                                                  else
-                                                    SizedBox(
-                                                      width: widths[column],
-                                                      child: Padding(
-                                                        padding:
-                                                            const EdgeInsets.only(
-                                                              left: 10,
-                                                            ),
-                                                        child: Text(
-                                                          [
-                                                            '',
-                                                            f.modified,
-                                                            f.folder
-                                                                ? '—'
-                                                                : f.size,
-                                                            f.kind,
-                                                          ][column],
-                                                          style: TextStyle(
-                                                            fontSize: 10,
-                                                            color: Theme.of(c)
-                                                                .hintColor,
-                                                          ),
-                                                          overflow: TextOverflow
-                                                              .ellipsis,
-                                                        ),
-                                                      ),
-                                                    ),
-                                              ],
-                                            ),
-                                    ),
-                                  );
-                                  row = Draggable<RemoteDrag>(
-                                    // Secondary clicks belong to the file menu;
-                                    // never enter a drag arena for that button.
-                                    allowedButtonsFilter: (buttons) =>
-                                        buttons == kPrimaryMouseButton &&
-                                        !explorerExportGesture,
-                                    data: RemoteDrag(
-                                      p.id,
-                                      p.path,
-                                      selected.contains(f.id)
-                                          ? visible
-                                                .where(
-                                                  (f) =>
-                                                      selected.contains(f.id),
-                                                )
-                                                .toList()
-                                          : [f],
-                                      generation: p.connectionGeneration,
-                                    ),
-                                    feedback: const SizedBox.shrink(),
-                                    child: row,
-                                  );
-                                  final live = m;
-                                  if (live is LiveWorkbenchModel &&
-                                      p is LiveTerminalSession) {
-                                    row = ExplorerExportDrag(
-                                      model: live,
-                                      source: p as LiveTerminalSession,
-                                      selection: () => selected.contains(f.id)
-                                          ? visible
-                                                .where(
-                                                  (entry) => selected.contains(
-                                                    entry.id,
-                                                  ),
-                                                )
-                                                .toList()
-                                          : [f],
-                                      child: row,
-                                    );
-                                  }
-                                  return f.folder
-                                      ? KeyedSubtree(
-                                          key: _folderBounds.putIfAbsent(
-                                            f.id,
-                                            GlobalKey.new,
-                                          ),
-                                          child: dropTarget(
-                                            folder: f,
-                                            child: row,
-                                          ),
-                                        )
-                                      : row;
-                                },
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                            SizedBox(
+                              height: 14,
+                              child: Scrollbar(
+                                controller: _horizontal,
+                                thumbVisibility: true,
+                                child: const SizedBox.expand(),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
+                    if (_explorerOver)
+                      IgnorePointer(
+                        child: Stack(
+                          children: [
+                            if (_explorerHotZone)
+                              Positioned(
+                                top: 0,
+                                right: 0,
+                                bottom: 0,
+                                width: _explorerHotZoneWidth,
+                                child: ColoredBox(
+                                  color: Theme.of(context).colorScheme.primary
+                                      .withValues(alpha: .16),
+                                ),
+                              ),
+                            Positioned(
+                              top: 8,
+                              left: 0,
+                              right: 0,
+                              child: Center(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.primary
+                                        .withValues(alpha: .9),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    _explorerHotZone
+                                        ? '松开上传到当前目录（右侧热区）'
+                                        : hoverTarget != null
+                                        ? '松开上传到文件夹「${_folderObjects[hoverTarget]?.name ?? ''}」'
+                                        : '松开上传到当前目录',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
-          ),
-          SizedBox(
-            height: 25,
-            child: Row(
-              children: [
-                const SizedBox(width: 10),
-                Text(
-                  '${visible.length} 项${selected.isNotEmpty ? ' · 已选 ${selected.length}' : ''}',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Theme.of(context).hintColor,
+            SizedBox(
+              // One merged status row: item count left, terminal link actions
+              // right; no separate strip below the list.
+              height: 30,
+              child: Row(
+                children: [
+                  const SizedBox(width: 10),
+                  Text(
+                    '${visible.length} 项${selected.isNotEmpty ? ' · 已选 ${selected.length}' : ''}',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Theme.of(context).hintColor,
+                    ),
                   ),
-                ),
-                const Spacer(),
-                if (m.isMock) const DeskBadge('模拟数据'),
-                const SizedBox(width: 8),
-              ],
+                  const Spacer(),
+                  if (m.isMock) const DeskBadge('模拟数据'),
+                  const SizedBox(width: 8),
+                  _terminalLinkActions(context, m),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-class SftpTerminalActions extends StatelessWidget {
-  const SftpTerminalActions({
-    super.key,
-    required this.model,
-    required this.source,
-  });
-  final WorkbenchModel model;
-  final TerminalSession source;
-  void _run(Future<void> action) =>
-      unawaited(action.catchError(model.reportOperation));
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 32,
-    child: Row(
-      children: [
-        const Spacer(),
-        Tool(Icons.drive_file_move_outlined, '发送当前目录路径到关联终端', () {
-          if (model is LiveWorkbenchModel && source is LiveTerminalSession) {
-            final live = source as LiveTerminalSession;
-            _run(
-              sendSessionPaths(context, model as LiveWorkbenchModel, live, [
-                source.path,
-              ], expectedGeneration: live.controller.generation),
-            );
-          } else {
-            source.draft += quotePath(source.path);
-            model.changed();
-            notice(context, '仅模拟插入路径；未执行');
-          }
-        }),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(4),
-            color: model.followsTerminalDirectory(source)
-                ? Theme.of(context).colorScheme.primary.withValues(alpha: .15)
-                : null,
-          ),
-          child: Tool(
-            Icons.sync_alt,
-            '自动跟随终端路径',
-            () => _run(
-              model.setTerminalDirectoryFollow(
-                source,
-                !model.followsTerminalDirectory(source),
-              ),
+/// The three terminal-link tools, shared by the SFTP bottom status row.
+Widget _terminalLinkActions(BuildContext context, WorkbenchModel m) {
+  final source = m.focus;
+  if (source == null) return const SizedBox.shrink();
+  void runAction(Future<void> action) =>
+      unawaited(action.catchError(m.reportOperation));
+  return Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Tool(Icons.drive_file_move_outlined, '发送当前目录路径到关联终端', () {
+        if (m is LiveWorkbenchModel && source is LiveTerminalSession) {
+          final live = source;
+          runAction(
+            sendSessionPaths(context, m, live, [
+              source.path,
+            ], expectedGeneration: live.controller.generation),
+          );
+        } else {
+          source.draft += quotePath(source.path);
+          m.changed();
+          notice(context, '仅模拟插入路径；未执行');
+        }
+      }),
+      DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(4),
+          color: m.followsTerminalDirectory(source)
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: .15)
+              : null,
+        ),
+        child: Tool(
+          Icons.sync_alt,
+          '自动跟随终端路径',
+          () => runAction(
+            m.setTerminalDirectoryFollow(
+              source,
+              !m.followsTerminalDirectory(source),
             ),
           ),
         ),
-        Tool(
-          Icons.my_location_outlined,
-          '跳转至终端路径',
-          () => _run(model.jumpToTerminalDirectory(source)),
-        ),
-      ],
-    ),
+      ),
+      Tool(
+        Icons.my_location_outlined,
+        '跳转至终端路径',
+        () => runAction(m.jumpToTerminalDirectory(source)),
+      ),
+    ],
   );
 }

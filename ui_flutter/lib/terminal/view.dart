@@ -558,6 +558,10 @@ class TerminalViewState extends State<TerminalView>
     }
   }
 
+  /// Remote mouse forwarding only while the capture is credible: with the
+  /// plain-shell proof ready, leftover TUI mouse mode gets no events.
+  bool get _forwardRemoteMouse => _capture && !c.shellInputReady;
+
   void down(PointerDownEvent event) {
     _suggestions.dismiss();
     _focus.requestFocus();
@@ -566,7 +570,16 @@ class TerminalViewState extends State<TerminalView>
         : event.buttons & kMiddleMouseButton != 0
         ? 1
         : 2;
-    _remoteDrag = _capture;
+    // Right-click paste stays local even while the remote reports mouse
+    // events: TUI programs almost never bind button 3, and terminal users
+    // expect right-click paste in CLI tools like codex. Shift+right-click
+    // still opens the local menu path below.
+    if (_capture && _button == 2 && c.rightClickPaste && _mods & 1 == 0) {
+      _anchor = null;
+      _run(paste());
+      return;
+    }
+    _remoteDrag = _forwardRemoteMouse;
     if (_remoteDrag) {
       _mouse(event.localPosition, 0, _button);
       return;
@@ -823,14 +836,14 @@ class TerminalViewState extends State<TerminalView>
                     _button = 3;
                   },
                   onPointerMove: (e) {
-                    if (_remoteDrag || _capture) {
+                    if (_remoteDrag || _forwardRemoteMouse) {
                       _mouse(e.localPosition, 2, _button);
                     } else if (_anchor != null) {
                       c.select(_anchor!, _point(e.localPosition));
                     }
                   },
                   onPointerHover: (e) {
-                    if (_capture) {
+                    if (_forwardRemoteMouse) {
                       _mouse(e.localPosition, 2, 3);
                     } else {
                       final point = _point(e.localPosition);
@@ -855,7 +868,7 @@ class TerminalViewState extends State<TerminalView>
                                       .clamp(9, 36) -
                                   (widget.typography?.size ?? widget.fontSize),
                             );
-                          } else if (_capture) {
+                          } else if (_forwardRemoteMouse) {
                             _mouse(
                               e.localPosition,
                               e.scrollDelta.dy < 0 ? 3 : 4,

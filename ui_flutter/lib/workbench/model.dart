@@ -1,4 +1,5 @@
 import '../app_notice.dart';
+import '../run_log.dart';
 import 'staging_cleanup_port.dart';
 import '../terminal/application_keys.dart';
 import '../src/rust/shortcut_settings.dart' as shortcut;
@@ -122,6 +123,11 @@ class LiveTerminalSession extends TerminalSession {
   void disposeInspection() => _inspection?.dispose();
 
   bool temporaryConnection = false;
+
+  /// Connection generation that already used its single automatic reconnect
+  /// attempt; user-initiated reconnects are never blocked by it.
+  int autoReconnectAttempted = 0;
+  bool wasConnected = false;
   TemporaryTarget? temporaryTarget;
   once.TemporarySource? pendingTemporarySource;
   TemporaryConnectionInput? pendingTemporaryInput;
@@ -927,7 +933,12 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
           if (!isClosing &&
               source.controller.generation == clip.generation &&
               source.controller.connected) {
-            await loadDirectory(source, source.path, remember: false);
+            await loadDirectory(
+              source,
+              source.path,
+              remember: false,
+              refresh: true,
+            );
           }
         }
       });
@@ -1108,7 +1119,14 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
               }
               session.directoryCache.remove(parent.isEmpty ? '/' : parent);
             }
-            _track(loadDirectory(session, session.path, remember: false));
+            _track(
+              loadDirectory(
+                session,
+                session.path,
+                remember: false,
+                refresh: true,
+              ),
+            );
           }
         }
         changed();
@@ -1310,7 +1328,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
             target.path == parent) {
           // Cleanup already succeeded. A subsequent listing error is a separate
           // refresh failure, never a reason to send the DELETE ticket again.
-          _track(loadDirectory(target, parent, remember: false));
+          _track(loadDirectory(target, parent, remember: false, refresh: true));
         }
       }
     }, reportFailure: false);
@@ -1900,6 +1918,14 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     String? observedReconnectNotice;
     s.changedListener = () {
       if (_disposed || !sessions.contains(s)) return;
+      // 2026-11-05 revision (default off): one automatic reconnect attempt
+      // per connection generation after an unexpected drop; temporary
+      // connections never reconnect implicitly.
+      final connected = s.controller.connected;
+      if (s.wasConnected && !connected && !s.temporaryConnection) {
+        unawaited(_autoReconnectIfEnabled(s));
+      }
+      s.wasConnected = connected;
       if (observedDirectory != s.controller.directoryReportVersion) {
         observedDirectory = s.controller.directoryReportVersion;
         if (identical(_followSubject, s) && _followBusy) {
@@ -1960,8 +1986,85 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     }
   }
 
+  Future<void> _autoReconnectIfEnabled(LiveTerminalSession s) async {
+    final generation = s.controller.generation;
+    if (s.autoReconnectAttempted == generation ||
+        _disposed ||
+        _shutdown != null ||
+        !sessions.contains(s)) {
+      return;
+    }
+    try {
+      final defaults = await rust.sshNetworkDefaults();
+      if (_disposed ||
+          _shutdown != null ||
+          !sessions.contains(s) ||
+          s.controller.connected ||
+          !defaults.autoReconnect ||
+          s.autoReconnectAttempted == generation) {
+        return;
+      }
+      s.autoReconnectAttempted = generation;
+      AppRunLog.instance.event(
+        AppLogEvent.autoReconnectTriggered,
+        terminal: s.controller.id,
+        generation: generation,
+      );
+      await s.controller.connect(s.host.id);
+    } catch (error) {
+      AppRunLog.instance.event(
+        AppLogEvent.autoReconnectDisabled,
+        terminal: s.controller.id,
+        generation: generation,
+        error: error,
+      );
+    }
+  }
+
+  final _sftpLastDirs = <String, String>{};
+  bool _sftpLastDirsLoaded = false;
+  Timer? _sftpLastDirFlush;
+
+  Future<void> _loadSftpLastDirs() async {
+    if (_sftpLastDirsLoaded || _disposed || _shutdown != null) return;
+    _sftpLastDirsLoaded = true;
+    try {
+      final entries = await rust.loadSftpLastDirs();
+      if (_disposed || _shutdown != null) return;
+      _sftpLastDirs
+        ..clear()
+        ..addEntries(entries.map((e) => MapEntry(e.hostId, e.path)));
+    } catch (_) {
+      // Convenience only; failures fall back to the default start directory.
+    }
+  }
+
+  void _rememberSftpLastDir(LiveTerminalSession s) {
+    final host = s.host.id, path = s.path;
+    if (path.isEmpty || !path.startsWith('/')) return;
+    _sftpLastDirs[host] = path;
+    _sftpLastDirFlush?.cancel();
+    _sftpLastDirFlush = Timer(const Duration(seconds: 2), () {
+      if (_disposed || _shutdown != null) return;
+      _track(
+        rust.recordSftpLastDir(hostId: host, path: path),
+        reportFailure: () => false,
+      );
+    });
+  }
+
   Future<void> _restoreSftp(LiveTerminalSession s) async {
     try {
+      await _loadSftpLastDirs();
+      final restore =
+          sftpView.value?.settings.restoreLastDirectory ??
+          sftpView.confirmed?.settings.restoreLastDirectory ??
+          false;
+      final remembered = _sftpLastDirs[s.host.id];
+      if (restore && remembered != null && s.controller.connected) {
+        await loadDirectory(s, remembered, remember: false);
+        return;
+      }
       await loadDirectory(s, s.path, remember: false, fromOsc7: true);
     } catch (error) {
       s.sftpError = 'SFTP 初始化失败：$error';
@@ -2236,11 +2339,33 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     String path, {
     bool remember = true,
     bool fromOsc7 = false,
+    bool refresh = false,
   }) async {
     final s = _connected(session);
     if (!fromOsc7) {
       if (identical(_followSubject, s)) _cancelDirectoryFollow();
       s.followedDirectoryVersion = s.controller.directoryReportVersion;
+    }
+    // WinSCP-style session cache: this connection's earlier listings are
+    // reused for navigation. Explicit refresh, mutations and a new connection
+    // generation always reload from the server.
+    if (!refresh &&
+        !fromOsc7 &&
+        s.controller.connected &&
+        s.directoryCacheGeneration == s.connectionGeneration &&
+        s.directoryCache.files.containsKey(path)) {
+      if (remember && s.path != path) {
+        s.back.add(s.path);
+        s.forward.clear();
+      }
+      s.path = path;
+      AppRunLog.instance.event(
+        AppLogEvent.sftpDirectoryCacheHit,
+        terminal: s.controller.id,
+        generation: s.controller.generation,
+      );
+      changed();
+      return;
     }
     final epoch = ++s.directoryEpoch;
     s.pendingFileLocation = null;
@@ -2269,8 +2394,24 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       }
       s.path = result.path;
       s.sftpEnabled = true;
+      s.directoryCacheGeneration = s.connectionGeneration;
       s.directoryCache.store(result);
+      if (session is LiveTerminalSession) {
+        _rememberSftpLastDir(session);
+      }
+      AppRunLog.instance.event(
+        AppLogEvent.sftpDirectoryLoaded,
+        terminal: s.controller.id,
+        generation: generation,
+        count: result.files.length,
+      );
     } catch (error) {
+      AppRunLog.instance.event(
+        AppLogEvent.sftpDirectoryFailed,
+        terminal: s.controller.id,
+        generation: generation,
+        error: error,
+      );
       if (s.directoryEpoch == epoch) s.sftpError = '目录读取失败：$error';
       rethrow;
     } finally {
