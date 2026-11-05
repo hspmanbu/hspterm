@@ -60,7 +60,7 @@ Future<void> menu(WidgetTester tester) async {
 
 void main() {
   testWidgets(
-    'relative copy revalidates the original directory and writes only clipboard text',
+    'explicit absolute copy writes only text and never probes cwd while opening a menu',
     (tester) async {
       final model = RelativePathsTestModel();
       final writes = <String>[];
@@ -75,10 +75,10 @@ void main() {
         final source = await mount(tester, model);
         final taskCount = model.transfers.length;
         await menu(tester);
-        await tester.tap(find.text('复制相对路径'));
+        await tester.tap(find.text('复制路径'));
         await tester.pumpAndSettle();
-        expect(model.calls, 2);
-        expect(writes, ['./README.md']);
+        expect(model.calls, 0);
+        expect(writes, ['${source.path}/README.md']);
         expect(source.entered, isEmpty);
         expect(model.transfers.length, taskCount);
       } finally {
@@ -90,7 +90,7 @@ void main() {
     },
   );
   testWidgets(
-    'unknown cwd disables the option and changed cwd refuses stale menu data',
+    'unknown cwd does not block absolute path actions or trigger capability errors',
     (tester) async {
       final model = RelativePathsTestModel()..unavailable = true;
       var writes = 0;
@@ -102,19 +102,13 @@ void main() {
       try {
         await mount(tester, model);
         await menu(tester);
-        final item = find.byWidgetPredicate(
-          (w) => w is DeskMenuItem<String> && w.value == 'relative',
-        );
-        expect(tester.widget<DeskMenuItem<String>>(item).enabled, false);
+        expect(find.text('复制相对路径'), findsNothing);
+        expect(find.text('复制路径'), findsOneWidget);
+        expect(find.text('发送文件/文件夹名至终端'), findsOneWidget);
+        expect(model.calls, 0);
+        expect(writes, 0);
         await tester.tapAt(const Offset(1, 1));
         await tester.pumpAndSettle();
-        model.unavailable = false;
-        await menu(tester);
-        model.directoryChanged = true;
-        await tester.tap(find.text('复制相对路径'));
-        await tester.pumpAndSettle();
-        expect(writes, 0);
-        expect(find.textContaining('未复制相对路径'), findsOneWidget);
       } finally {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
             .setMockMethodCallHandler(SystemChannels.platform, null);
@@ -123,13 +117,14 @@ void main() {
       }
     },
   );
-  testWidgets('late capability response after shutdown does not open a popup', (
+  testWidgets('closing prevents a new popup without starting capability work', (
     tester,
   ) async {
     final model = RelativePathsTestModel()
       ..pending = Completer<RemoteRelativePaths>();
     try {
       await mount(tester, model);
+      model.closing = true;
       final row = find.byKey(const ValueKey('file-README.md'));
       await tester.ensureVisible(row);
       await tester.tap(row, buttons: kSecondaryMouseButton);
@@ -137,7 +132,8 @@ void main() {
       model.closing = true;
       model.pending!.complete(RemoteRelativePaths(11, ['./README.md']));
       await tester.pumpAndSettle();
-      expect(find.text('复制相对路径'), findsNothing);
+      expect(find.text('复制路径'), findsNothing);
+      expect(model.calls, 0);
     } finally {
       await tester.pumpWidget(const SizedBox());
       model.dispose();

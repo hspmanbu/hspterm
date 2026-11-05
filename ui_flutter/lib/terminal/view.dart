@@ -122,6 +122,7 @@ class TerminalViewState extends State<TerminalView>
   void didUpdateWidget(TerminalView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != c) {
+      oldWidget.controller.composing = false;
       oldWidget.controller.removeListener(_changed);
       _suggestions.dispose();
       _suggestions = TerminalSuggestionsController(c);
@@ -129,6 +130,7 @@ class TerminalViewState extends State<TerminalView>
       _cache.clear();
       _pendingTextKey = null;
       _ime.reset();
+      c.composing = false;
       _preedit.value = '';
       _connection?.setEditingState(_empty);
       _visibility();
@@ -248,6 +250,7 @@ class TerminalViewState extends State<TerminalView>
   void _focusChanged() {
     if (_focus.hasFocus) {
       _ime.reset();
+      c.composing = false;
       _preedit.value = '';
       _connection = TextInput.attach(
         this,
@@ -268,6 +271,8 @@ class TerminalViewState extends State<TerminalView>
     } else {
       _connection?.close();
       _connection = null;
+      c.composing = false;
+      _preedit.value = '';
     }
     final id = c.id;
     if (id != null && c.connected) _run(c.focus(_focus.hasFocus));
@@ -987,7 +992,9 @@ class TerminalViewState extends State<TerminalView>
   AutofillScope? get currentAutofillScope => null;
   @override
   void updateEditingValue(TextEditingValue value) {
+    if (!_focus.hasFocus || !(_connection?.attached ?? false)) return;
     final change = _ime.update(value);
+    c.composing = _ime.composing;
     _suggestions.inputChanged();
     _preedit.value = change.preedit;
     final pending = _pendingTextKey;
@@ -1010,6 +1017,7 @@ class TerminalViewState extends State<TerminalView>
 
   @override
   void performAction(TextInputAction action) {
+    if (!_focus.hasFocus || _ime.composing) return;
     _run(c.key(rust.KeyboardInput(key: 'Enter', modifiers: 0, kind: 0)));
     _ime.reset();
     _connection?.setEditingState(_empty);
@@ -1030,6 +1038,7 @@ class TerminalViewState extends State<TerminalView>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    c.composing = false;
     c.removeListener(_changed);
     _suggestions.dispose();
     _focus.removeListener(_focusChanged);

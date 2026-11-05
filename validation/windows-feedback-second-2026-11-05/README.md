@@ -39,3 +39,7 @@ GTK可运行工作台、最终构建/格式、Windows Actions 状态另行补记
 - Native4项最终全过；同机复制回执改为本次随机nonce框定标记，允许非交互Shell自己的banner而不把它当复制失败，相关真实SFTP两项再验通过。
 - 重新构建正式lib/workbench_main.dart Debug包（不交付测试入口），独立GTK启动/退出结果见debug-startup.json。
 - 本轮两张GTK检查截图保留在/tmp/hspterm-feedback-second-{properties,workbench}.png作临时视觉检查，不进入仓库；布局已实际查看。用户自己的ssh-screen截图不清理。
+
+## 发布后补充
+
+55ad8c7已正常Git推送并触发Windows run41970895508。补充UI组合态门控与失焦后旧IME快照抑制，24项组件回归与Analyze0通过。相对路径菜单旧用例按用户四项菜单修订更新（不再打开菜单便发起OSC7查询），对应3组件+原Native相对路径1项通过。大型GTK回归脚本同步新书签/子菜单/同机服务器内操作；首轮到目录失败重扫处因ensureVisible后未pump点击旧坐标失败，正在第二轮，不计整例通过。发布状态以PROGRESS最新head/run为准。

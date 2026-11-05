@@ -394,7 +394,9 @@ void main() {
           final bookmarkGeneration = active.controller.generation;
           final bookmarkPath = active.path;
           final sidebarWidth = model.sidebarWidth;
-          await tester.tap(find.byTooltip('目录书签'));
+          await tester.tap(find.byTooltip('书签'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('管理书签…'));
           await tester.pumpAndSettle();
           await tester.tap(find.byKey(const ValueKey('bookmark-add')));
           await tester.pumpAndSettle();
@@ -441,7 +443,9 @@ void main() {
           expect(active.path, bookmarkPath);
           expect(active.controller.generation, bookmarkGeneration);
           expect(model.sidebarWidth, sidebarWidth);
-          await tester.tap(find.byTooltip('目录书签'));
+          await tester.tap(find.byTooltip('书签'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('管理书签…'));
           await tester.pumpAndSettle();
           await tester.tap(find.byTooltip('删除书签 GTK 全局书签'));
           await tester.pumpAndSettle();
@@ -1036,7 +1040,7 @@ void main() {
             'Verified GTK real recursive filename search and original-session SFTP selection',
           );
           final completionParent = active.path;
-          // Real context-menu copy/paste, explicit relay consent and queue.
+          // Same-tab copy/paste is a server filesystem operation, without relay.
           // No external clipboard payload or local temp body is used.
           final clipboardRoot = Directory('$completionParent/clipboard UI');
           final clipboardDestination = Directory(
@@ -1094,16 +1098,19 @@ void main() {
             ),
           );
           await fileMenu('anchor.txt', '粘贴');
-          await tester.tap(find.text('允许中转并复制'));
-          await waitEditor(() async {
-            await model.refreshTransfers();
-            return model.transferTasks.any(
-              (t) =>
-                  t.sourceRemote?.endsWith('/copy 中文.txt') == true &&
-                  !t.busy &&
-                  t.state == 'Complete',
-            );
-          }, 'real GTK file clipboard copy');
+          await tester.tap(find.text('确认复制'));
+          await waitEditor(
+            () async =>
+                File('${clipboardDestination.path}/copy 中文.txt').exists(),
+            'real GTK server-only clipboard copy',
+          );
+          await model.refreshTransfers();
+          expect(
+            model.transferTasks.where(
+              (t) => t.sourceRemote?.endsWith('/copy 中文.txt') == true,
+            ),
+            isEmpty,
+          );
           expect(
             await File('${clipboardDestination.path}/copy 中文.txt')
                 .readAsString(),
@@ -1111,9 +1118,6 @@ void main() {
           );
           expect(active.controller.generation, editorGeneration);
           await tester.pumpAndSettle();
-          final copiedTask = model.transferTasks.singleWhere(
-            (t) => t.sourceRemote?.endsWith('/copy 中文.txt') == true,
-          );
           Future<void> showFileTask(String id) async {
             final collapsedDone = find.textContaining(RegExp(r'^▸ 已结束 ·'));
             if (collapsedDone.evaluate().isNotEmpty) {
@@ -1138,8 +1142,10 @@ void main() {
             await tester.pumpAndSettle();
           }
 
-          await showFileTask(copiedTask.id);
-          expect(find.textContaining('远端复制：'), findsOneWidget);
+          expect(
+            find.byKey(const ValueKey('file-copy 中文.txt')),
+            findsOneWidget,
+          );
           final copyImage =
               await (capture.currentContext!.findRenderObject()!
                       as RenderRepaintBoundary)
@@ -1174,17 +1180,13 @@ void main() {
           await tester.pumpAndSettle();
           expect(await moveSource.exists(), true);
           await fileMenu('anchor.txt', '粘贴');
-          await tester.tap(find.text('确认移动并允许跨服中转'));
-          await waitEditor(() async {
-            await model.refreshTransfers();
-            return model.transferTasks.any(
-              (t) =>
-                  t.remoteOperation == 'move' &&
-                  t.sourceRemote?.endsWith('/move 中文.txt') == true &&
-                  !t.busy &&
-                  t.state == 'Complete',
-            );
-          }, 'real GTK cut and confirmed same-account move');
+          await tester.tap(find.text('确认移动'));
+          await waitEditor(
+            () async =>
+                !await moveSource.exists() &&
+                await File('${clipboardDestination.path}/move 中文.txt').exists(),
+            'real GTK server-side rename',
+          );
           expect(await moveSource.exists(), false);
           expect(
             await File('${clipboardDestination.path}/move 中文.txt')
@@ -1193,14 +1195,13 @@ void main() {
           );
           expect(model.remoteFileClipboardDescription, isNull);
           expect(active.controller.generation, editorGeneration);
-          final movedTask = model.transferTasks.singleWhere(
-            (t) =>
-                t.remoteOperation == 'move' &&
-                t.sourceRemote?.endsWith('/move 中文.txt') == true,
+          await model.refreshTransfers();
+          expect(
+            model.transferTasks.where(
+              (t) => t.sourceRemote?.endsWith('/move 中文.txt') == true,
+            ),
+            isEmpty,
           );
-          await showFileTask(movedTask.id);
-          expect(find.textContaining('远端移动：'), findsOneWidget);
-          expect(find.text('服务器直接移动；未扫描内部目录，不统计传输字节'), findsOneWidget);
           final moveImage =
               await (capture.currentContext!.findRenderObject()!
                       as RenderRepaintBoundary)
@@ -1233,9 +1234,25 @@ void main() {
           model.copyRemoteFileClipboard(active, [
             active.files.singleWhere((f) => f.name == 'copy 中文.txt'),
           ]);
+          final targetSession = model.sessions
+              .whereType<LiveTerminalSession>()
+              .firstWhere(
+                (s) => !identical(s, active) && s.controller.connected,
+              );
+          await model.loadDirectory(
+            targetSession,
+            explicitTarget.path,
+            remember: false,
+          );
+          final targetLabel =
+              '${targetSession.host.name} · ${targetSession.path}';
           final independentRevision = model.remoteFileClipboardRevision;
           final independentDescription = model.remoteFileClipboardDescription;
-          Future<void> destinationMenu(String name, String action) async {
+          Future<void> destinationMenu(
+            String name,
+            String action, {
+            bool select = true,
+          }) async {
             final row = find.byKey(ValueKey('file-$name'));
             await tester.ensureVisible(row);
             await tester.pumpAndSettle();
@@ -1248,20 +1265,20 @@ void main() {
             await tester.pumpAndSettle();
             await tester.tap(find.text(action));
             await tester.pumpAndSettle();
+            if (select) {
+              await tester.tap(find.text(targetLabel));
+              await tester.pumpAndSettle();
+            }
           }
 
-          await destinationMenu('copy to 中文.txt', '复制到…');
-          await tester.tap(find.text('关闭').last);
+          await destinationMenu('copy to 中文.txt', '复制到', select: false);
+          await tester.tapAt(const Offset(1200, 700));
           await tester.pumpAndSettle();
           expect(
             await File('${explicitTarget.path}/copy to 中文.txt').exists(),
             false,
           );
-          await destinationMenu('copy to 中文.txt', '复制到…');
-          await tester.enterText(
-            find.byKey(const ValueKey('remote-destination-path')),
-            explicitTarget.path,
-          );
+          await destinationMenu('copy to 中文.txt', '复制到', select: false);
           await tester.pumpAndSettle();
           final destinationImage =
               await (capture.currentContext!.findRenderObject()!
@@ -1273,7 +1290,7 @@ void main() {
           await File('/tmp/hspterm-remote-destination.png')
               .writeAsBytes(destinationPng!.buffer.asUint8List());
           destinationImage.dispose();
-          await tester.tap(find.text('允许中转并复制'));
+          await tester.tap(find.text(targetLabel));
           await waitEditor(() async {
             await model.refreshTransfers();
             return model.transferTasks.any(
@@ -1300,12 +1317,8 @@ void main() {
             remember: false,
           );
           await tester.pumpAndSettle();
-          await destinationMenu('move to 中文.txt', '移动到…');
-          await tester.enterText(
-            find.byKey(const ValueKey('remote-destination-path')),
-            explicitTarget.path,
-          );
-          await tester.tap(find.text('确认移动并允许跨服中转'));
+          await destinationMenu('move to 中文.txt', '移动到');
+          await tester.tap(find.text('确认移动'));
           await waitEditor(() async {
             await model.refreshTransfers();
             return model.transferTasks.any(
@@ -1353,12 +1366,7 @@ void main() {
             remember: false,
           );
           await tester.pumpAndSettle();
-          await destinationMenu('rescan UI source', '复制到…');
-          await tester.enterText(
-            find.byKey(const ValueKey('remote-destination-path')),
-            explicitTarget.path,
-          );
-          await tester.tap(find.text('允许中转并复制'));
+          await destinationMenu('rescan UI source', '复制到');
           await waitEditor(() async {
             await model.refreshTransfers();
             return model.transferTasks.any(
@@ -1391,6 +1399,7 @@ void main() {
               'remote directory failure details',
             );
             await tester.ensureVisible(detail);
+            await tester.pumpAndSettle();
             await tester.tap(detail);
             await tester.pumpAndSettle();
             expect(find.text('重新扫描此失败目录？'), findsOneWidget);
@@ -1456,6 +1465,8 @@ void main() {
           await tester.pumpAndSettle();
           final completionEpoch = active.directoryEpoch;
           final completionGeneration = active.controller.generation;
+          await tester.tap(find.byTooltip('编辑目录路径'));
+          await tester.pumpAndSettle();
           final pathField = find.byKey(const ValueKey('remote-path'));
           await tester.enterText(pathField, '$completionParent/completion 中');
           await tester.pumpAndSettle();

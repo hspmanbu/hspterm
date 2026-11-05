@@ -60,4 +60,56 @@ void main() {
       c.dispose();
     },
   );
+  testWidgets(
+    'active composition blocks controlled input and late detached IME snapshots are ignored',
+    (tester) async {
+      final backend = FakeBackend(), key = GlobalKey<TerminalViewState>();
+      final c = TerminalController(backend);
+      await c.start();
+      c.phase = 'Connected';
+      c.applyFrame(fixture());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TerminalView(key: key, controller: c),
+          ),
+        ),
+      );
+      await tester.tap(find.byType(TerminalView));
+      await tester.pump();
+      key.currentState!.updateEditingValue(
+        const TextEditingValue(
+          text: '\u200bni',
+          composing: TextRange(start: 1, end: 3),
+        ),
+      );
+      expect(c.composing, true);
+      var controlled = 0;
+      expect(
+        await c.controlledInput((_, _) async {
+          controlled++;
+          return 'Applied';
+        }),
+        'Unavailable',
+      );
+      expect(controlled, 0);
+      expect(backend.texts, isEmpty);
+      key.currentState!.updateEditingValue(
+        const TextEditingValue(text: '\u200b你'),
+      );
+      await tester.pump();
+      expect(c.composing, false);
+      expect(backend.texts, ['你']);
+      FocusManager.instance.primaryFocus!.unfocus();
+      await tester.pump();
+      key.currentState!.updateEditingValue(
+        const TextEditingValue(text: '\u200b你重复'),
+      );
+      await tester.pump();
+      expect(backend.texts, ['你']);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      c.dispose();
+    },
+  );
 }

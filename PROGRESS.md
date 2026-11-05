@@ -1,3 +1,10 @@
+## 2026-11-05 第二轮发布与补充回归
+
+- 已提交并正常Git推送55ad8c7，Windows run41970895508已触发，正在正式构建；这不是用户Windows11实机通过。
+- 补充发现IME组合期间受控路径操作需UI门控：Controller标记组合态，开始及排队执行时双重检查；失焦/销毁清理，已分离TextInput连接的旧快照不再发送。该补充24项回归已通过，Analyze0。
+- 与本次明确修订对应的旧相对路径菜单测试改为断言四项菜单/绝对路径不探测CWD，真实相对路径Native能力继续保留并通过；此组4项过。旧GTK脚本同步双书签、直接主机子菜单、同机无下载任务及显式路径编辑，未删除原目录重扫/编辑/队列覆盖。大GTK第二轮在/tmp/hspterm-second-full-gtk2.log；首轮已到远端失败目录重扫，因ensureVisible后未pump导致点击旧坐标而失败，夹具已补等待。当前不能称该大GTK整例通过。
+- 以下补充即将随下一稳定提交推送，Actions会自动用新head替代前一轮；恢复先查询最新head对应run，不手动dispatch重复作业。原用户.log、ssh-screen/和tools/AGENTS.md仍原样未跟踪。
+
 ## 2026-11-05 第二轮 Windows 实机反馈（Ubuntu验证完成，待发布Windows构建）
 
 用户日志/截图/复制的 tools/AGENTS.md 为用户未跟踪文件，保留且不提交。当前范围：IME 重复、最小化历史、Shell/OSC7/133/历史联想、6秒可关闭统一提示、字体滚轮/搜索菜单，以及本轮明确修订的 SFTP 导航/书签/新建/属性/同机与跨机操作。Bash 已确认5.2.21。welcome 项含义已异步询问，其他工作继续；本轮已进入集中验证，具体实际结果见 validation/windows-feedback-second-2026-11-05/README.md；不沿用上一轮通过冒称本轮验收。

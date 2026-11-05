@@ -141,9 +141,9 @@ void main() {
         buttons: 2,
       );
       await tester.pumpAndSettle();
-      expect(find.text('复制 Shell 安全引用路径'), findsOneWidget);
+      expect(find.text('复制路径'), findsOneWidget);
       await shot('04-file-context-menu');
-      await tester.tap(find.text('复制文件名'));
+      await tester.tap(find.text('复制文件/文件夹名'));
       await tester.pumpAndSettle();
       await tester.tapAt(
         tester.getTopLeft(find.byKey(const ValueKey('file-README.md'))) +

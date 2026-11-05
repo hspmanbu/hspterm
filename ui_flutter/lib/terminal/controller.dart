@@ -138,13 +138,19 @@ class TerminalController extends ChangeNotifier {
 
   /// Keep controlled actions ordered with real keys/IME commits. A stale source
   /// is proved unsent; an unknown native outcome is never repeated here.
+  bool composing = false;
+
   Future<String> controlledInput(Future<String> Function(int, int) action) {
     final native = id, expected = generation;
-    if (_disposed || !connected || native == null) {
+    if (_disposed || composing || !connected || native == null) {
       return Future.value('Unavailable');
     }
     final work = _inputTail.then((_) async {
-      if (_disposed || !connected || id != native || generation != expected) {
+      if (_disposed ||
+          composing ||
+          !connected ||
+          id != native ||
+          generation != expected) {
         return 'Unavailable';
       }
       return action(native, expected);
