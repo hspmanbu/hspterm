@@ -55,3 +55,10 @@ GTK可运行工作台、最终构建/格式、Windows Actions 状态另行补记
 ## 缓存清理
 
 最终恢复正式入口后，已安全清理本轮target/build/.dart_tool/ephemeral和生成插件元数据及本轮测试PNG；实际释放3,969,970,176字节，恢复约12.97GiB可用空间，详cache-cleanup.json。源码、正式FRB生成物、字体/vendor/锁、文字/JSON测试证据及Git历史均保留。用户原始.log、ssh-screen/、tools/AGENTS.md未清理且不提交。现在没有可运行的Linux bundle；恢复必须先prepare_native_extensions.py和pub get后重建。
+
+## Windows 云构建成功
+
+- run41971663339/job127061543477正式completed/success，产品源码a0910cee20bcca55505f94ea9eeff3e3ff7d270f。MSVC Release、Flutter Analyze0、66组件用例、原生启动退出、正常关闭位置与大小恢复全部通过。Ubuntu脚本维护及文档提交不改变此产品源代码，已逐路径diff验证。
+- 完整包：[HSPTerm-windows-x64](https://github.com/hspmanbu/hspterm/actions/runs/41971663339/artifacts/13390548974)，40,000,381字节，SHA256 3a2957eb889dd2470acd3a45a399e953a34b792263c53bd356ec799b206972f4；2026-11-19到期。完整解压后保留同目录DLL/data并运行hspterm.exe。
+- 同类云runner锁库启动三样本工作集：此前115.66/111.66/111.64MiB，本轮115.00/111.97/111.94MiB，保留before/after JSON；不足以据此判断用户机器的精确内存或长期泄漏，未冒称Windows11实机结果。
+- 本轮产品任务已收尾，用户Windows11原生IME/实际最小化和新的SFTP交互仍须复测；Codex/Vim等复杂TUI不会因启用Bash助手而允许盲注入，继续安全复制。欢迎信息仍待用户明确显示或隐藏。

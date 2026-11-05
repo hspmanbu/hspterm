@@ -51,8 +51,20 @@
     "source_commit": "a0910cee20bcca55505f94ea9eeff3e3ff7d270f",
     "run_id": 41971663339,
     "job_id": 127061543477,
-    "status": "in_progress",
+    "status": "completed",
     "user_Windows_11_IME": "pending",
-    "user_Windows_11_minimize": "pending"
+    "user_Windows_11_minimize": "pending",
+    "conclusion": "success",
+    "compiler": "MSVC x64 Release",
+    "flutter_analyze": "0 issues",
+    "component_tests": 66,
+    "native_startup_exit": "passed",
+    "normal_close_geometry_restore": "passed",
+    "artifact_id": 13390548974,
+    "artifact_bytes": 40000381,
+    "artifact_sha256": "3a2957eb889dd2470acd3a45a399e953a34b792263c53bd356ec799b206972f4",
+    "artifact_url": "https://github.com/hspmanbu/hspterm/actions/runs/41971663339/artifacts/13390548974",
+    "artifact_expires_at": "2026-11-19T05:24:58Z",
+    "application_sources_equal_after_test_documentation_commits": true
   }
 }

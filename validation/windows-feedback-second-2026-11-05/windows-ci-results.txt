@@ -1,0 +1,12 @@
+Windows job 127061543477, run 41971663339, application source a0910cee20bcca55505f94ea9eeff3e3ff7d270f.
+Only bounded non-sensitive result lines, not runtime terminal output.
+
+2026-11-05T05:23:30.5532653Z √ Built build\windows\x64\runner\Release\hspterm.exe
+2026-11-05T05:23:53.2428268Z No issues found! (ran in 17.1s)
+2026-11-05T05:24:37.4658727Z 00:32 +66: All tests passed!
+2026-11-05T05:24:57.9219250Z Native normal-close position and size restoration passed (locked startup). Integrated border dragging needs interactive Windows verification.
+2026-11-05T05:25:02.1004544Z Artifact HSPTerm-windows-x64 has been successfully uploaded! Final size is 40000381 bytes. Artifact ID is 13390548974
+2026-11-05T05:25:02.1022155Z Artifact download URL: https://github.com/hspmanbu/hspterm/actions/runs/41971663339/artifacts/13390548974
+2026-11-05T05:25:03.0378648Z Artifact windows-startup-memory has been successfully uploaded! Final size is 420 bytes. Artifact ID is 13391205408
+2026-11-05T05:25:03.0384060Z Artifact download URL: https://github.com/hspmanbu/hspterm/actions/runs/41971663339/artifacts/13391205408
+

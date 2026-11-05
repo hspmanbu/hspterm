@@ -1,3 +1,11 @@
+## 2026-11-05 第二轮 Windows 反馈正式交付
+
+- 产品源码a0910ce（主修55ad8c7）已实际Windows MSVC Release构建成功；run41971663339/job127061543477已completed/success。Flutter Analyze0、66组件、原生启动退出、正常关闭后位置/大小恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/41971663339/artifacts/13390548974 （HSPTerm-windows-x64，40,000,381字节，2026-11-19到期）。后续19194de和文档提交只改Ubuntu脚本/证据，产品源码与云构建逐项diff相同。不要重跑旧CI。
+- 本轮已实现IME增量/迟到快照抑制/组合期受控操作保护、无效/隐藏viewport不resize、Bash连字符误判修复+OSC7/133+独立Readline证明、6秒可关闭统一通知、Ctrl滚轮/右键搜索及完整反馈SFTP导航/书签/新建/属性/同机和跨机操作。Ubuntu验证见上一节和validation/windows-feedback-second-2026-11-05。
+- 云端锁库启动工作集：上轮115.66/111.66/111.64MiB，本轮115.00/111.97/111.94MiB，未见本轮额外启动内存增长；这是Windows Server2022云runner，不能替代用户Windows11的70–80MB实测。原始非敏感三样本JSON/构建结果行已保留。
+- 当前无在途本机runner或构建。已清理本轮中间构建物和测试截图，释放3.70GiB，可用约13GiB；用户原始.log、ssh-screen/及tools/AGENTS.md仍原样未跟踪，不提交、不清理。下一次编译须prepare_native_extensions.py、pub get；不能运行已删除bundle。
+- 仍待用户Win11实际复测TSF中文、真实最小化恢复，以及新SFTP交互。路径直送只用于已启用助手且可靠的普通Bash提示符；Codex/Vim/tmux/隐藏输入等仍安全复制降级。新助手只对新连接及完整新命令产生OSC7/133，旧输出不补造。welcome/机器信息究竟恢复显示还是隐藏仍未明确，未改写终端输出。Android按用户要求暂停。
+
 ## 2026-11-05 本轮验证收齐与缓存清理
 
 - 应用源码a0910ce已推送；19194de仅同步Linux GTK旧按钮选择器及测试记录，正式产品源代码与a0910ce相同，已用git diff逐项验证。该维护提交避免重复构建同一应用，Windows仍验run41971663339/job127061543477，不要换回旧run或重发dispatch。
