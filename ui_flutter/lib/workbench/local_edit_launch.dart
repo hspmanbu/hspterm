@@ -44,7 +44,6 @@ class LocalEditSession {
   Timer? _stability;
   Timer? _poll;
   DateTime _lastModified = DateTime.fromMillisecondsSinceEpoch(0);
-  int _lastUploadedSize = -1;
   bool _uploading = false, _conflicted = false, _disposed = false;
 
   Directory get _home => _file.parent;
@@ -115,7 +114,6 @@ class LocalEditSession {
 
   Future<void> _open() async {
     _lastModified = await _file.lastModified();
-    _lastUploadedSize = await _file.length();
     _watch = _file.parent.watch().listen((event) {
       if (event.path == _file.path &&
           (event.type == FileSystemEvent.modify ||
@@ -217,7 +215,6 @@ class LocalEditSession {
         );
       }
       _originSize = bytes.length;
-      _lastUploadedSize = bytes.length;
       _conflicted = false;
       AppRunLog.instance.event(
         AppLogEvent.editUploaded,
