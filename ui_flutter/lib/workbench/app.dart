@@ -104,6 +104,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
       AppRunLog.instance.event(
         AppLogEvent.memorySample,
         count: (ProcessInfo.currentRss / 1024).round(),
+        fields: {'bytes': ProcessInfo.currentRss, 'kind': 'rssKiB'},
       );
     });
     _noticeHub = TerminalNoticeHub(
@@ -475,12 +476,8 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
         sidebarBuilder: (_) => SftpSidebar(
           model: m,
           queueBuilder: (_) => LiveTransferQueue(model: m),
-          onOpenFile: (context, source, file) => openLocalEdit(
-            context,
-            m,
-            source as LiveTerminalSession,
-            file,
-          ),
+          onOpenFile: (context, source, file) =>
+              openLocalEdit(context, m, source as LiveTerminalSession, file),
           onSearchFiles: showRemoteFileSearch,
           onTransferTo: (context, source, files, move) =>
               showRemoteDestination(context, m, source, files, move),

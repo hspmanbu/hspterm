@@ -11303,8 +11303,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RemoteProperties dco_decode_remote_properties(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return RemoteProperties(
       path: dco_decode_String(arr[0]),
       size: dco_decode_CastedPrimitive_u_64(arr[1]),
@@ -11315,6 +11315,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       gid: dco_decode_opt_box_autoadd_u_32(arr[6]),
       linkTarget: dco_decode_opt_String(arr[7]),
       sizeComplete: dco_decode_bool(arr[8]),
+      mtime: dco_decode_opt_CastedPrimitive_u_64(arr[9]),
     );
   }
 
@@ -13584,6 +13585,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_gid = sse_decode_opt_box_autoadd_u_32(deserializer);
     var var_linkTarget = sse_decode_opt_String(deserializer);
     var var_sizeComplete = sse_decode_bool(deserializer);
+    var var_mtime = sse_decode_opt_CastedPrimitive_u_64(deserializer);
     return RemoteProperties(
       path: var_path,
       size: var_size,
@@ -13594,6 +13596,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       gid: var_gid,
       linkTarget: var_linkTarget,
       sizeComplete: var_sizeComplete,
+      mtime: var_mtime,
     );
   }
 
@@ -15694,6 +15697,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_u_32(self.gid, serializer);
     sse_encode_opt_String(self.linkTarget, serializer);
     sse_encode_bool(self.sizeComplete, serializer);
+    sse_encode_opt_CastedPrimitive_u_64(self.mtime, serializer);
   }
 
   @protected

@@ -66,6 +66,18 @@ class AppRunLog {
   final _records = Queue<({int stamp, String line})>();
   int _bytes = 0, dropped = 0;
   static const budget = 2 * 1024 * 1024;
+
+  /// Structured, allowlisted fields rendered as `key=value`. Only these
+  /// keys may appear; no free-form text crosses this boundary.
+  static const fieldKeys = {
+    'durationMs',
+    'bytes',
+    'result',
+    'errorCode',
+    'kind',
+    'count',
+  };
+
   void event(
     AppLogEvent event, {
     int? terminal,
@@ -73,7 +85,16 @@ class AppRunLog {
     int? count,
     Object? error,
     StackTrace? stack,
+    Map<String, Object?>? fields,
   }) {
+    final safeFields = <String, Object?>{
+      for (final entry in (fields ?? const {}).entries)
+        if (fieldKeys.contains(entry.key) &&
+            (entry.value is num ||
+                entry.value is bool ||
+                entry.value is String))
+          entry.key: entry.value,
+    };
     final level = event.name.endsWith('Failed')
         ? 'ERROR'
         : (event == AppLogEvent.pathUnavailable ||
@@ -98,6 +119,7 @@ class AppRunLog {
         '${terminal == null ? '' : ' terminal=$terminal'}'
         '${generation == null ? '' : ' generation=$generation'}'
         '${count == null ? '' : ' count=$count'}'
+        '${safeFields.isEmpty ? '' : ' ${safeFields.entries.map((e) => '${e.key}=${e.value}').join(' ')}'}'
         '${type == null ? '' : ' error-class=${type.substring(0, type.length.clamp(0, 100))}'}'
         '${locations.isEmpty ? '' : ' at=${locations.join(' <- ')}'}';
     final size = utf8.encode(line).length + 1;

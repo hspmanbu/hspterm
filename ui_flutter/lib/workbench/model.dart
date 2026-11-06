@@ -7,6 +7,7 @@ import 'typography_store.dart';
 import 'remote_inspection.dart';
 import 'configuration_backup.dart';
 import 'configuration_sync.dart';
+import 'local_edit_launch.dart';
 import 'google_drive_account.dart';
 import 'google_drive_objects.dart';
 import 'appearance.dart';
@@ -2030,6 +2031,8 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     }
   }
 
+  final localEdits = LocalEditRegistry();
+
   final _sftpSortPrefs = <String, (int, bool)>{};
   bool _sftpSortLoaded = false;
 
@@ -2456,7 +2459,10 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         AppLogEvent.sftpDirectoryTiming,
         terminal: s.controller.id,
         generation: generation,
-        count: DateTime.now().difference(timingStart).inMilliseconds,
+        fields: {
+          'durationMs': DateTime.now().difference(timingStart).inMilliseconds,
+          'result': 'loaded',
+        },
       );
     } catch (error) {
       AppRunLog.instance.event(
@@ -2735,6 +2741,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   Future<void> shutdown() => _shutdown ??=
       () async {
         await retireTerminalNotifications?.call();
+        await localEdits.disposeAll();
         await configurationSync.shutdown();
         await googleDriveObjects.shutdown();
         await googleDriveAccount.shutdown();

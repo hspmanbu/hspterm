@@ -314,7 +314,11 @@ class TerminalController extends ChangeNotifier {
             AppLogEvent.connectionTiming,
             terminal: value,
             generation: event.generation,
-            count: DateTime.now().difference(_connectingSince!).inMilliseconds,
+            fields: {
+              'durationMs': DateTime.now()
+                  .difference(_connectingSince!)
+                  .inMilliseconds,
+            },
           );
           _connectingSince = null;
         }
@@ -938,8 +942,7 @@ class TerminalController extends ChangeNotifier {
     // Drag direction does not determine which endpoint is the left edge.
     // Normalize the geometric boundaries first, then preserve direction for
     // callers that inspect the original anchor/focus order.
-    final reversed = start.y > end.y ||
-        (start.y == end.y && start.x > end.x);
+    final reversed = start.y > end.y || (start.y == end.y && start.x > end.x);
     final left = snapStart(reversed ? end : start);
     final right = snapEnd(reversed ? start : end);
     selectionStart = reversed ? right : left;

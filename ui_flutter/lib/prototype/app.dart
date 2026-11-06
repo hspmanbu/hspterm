@@ -626,10 +626,16 @@ class _WorkbenchBody extends StatelessWidget {
                   // loses pan deltas that arrive between rebuilds (visible
                   // as the grip lagging behind the pointer at high input
                   // rates / display scaling).
-                  m.sidebarWidth = (m.sidebarWidth + d).clamp(
-                    276,
-                    (b.maxWidth - 245).clamp(276, 660),
-                  );
+                  // Upper bound: never stretch far past the SFTP panel's
+                  // real column content into dead space. The window bound
+                  // still applies, and the minimum wins when the content
+                  // is narrower than it.
+                  final windowBound = (b.maxWidth - 245).clamp(276.0, 660.0);
+                  final content = m.sftpContentBound;
+                  final upper = content <= 0
+                      ? windowBound
+                      : content.clamp(276.0, windowBound);
+                  m.sidebarWidth = (m.sidebarWidth + d).clamp(276, upper);
                   m.changed();
                 },
               ),

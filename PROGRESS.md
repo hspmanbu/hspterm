@@ -1,5 +1,19 @@
 # HSPTerm 开发进度
 
+## 2026-11-06 第七轮 Windows 反馈修复（分支fix/round7-windows-feedback；源码+Ubuntu验证完成，待推送CI）
+
+- 基线a8b2bfe+选择性吸收静态审查分支fix/static-review-round6-20261106（PR#1）四提交（cherry-pick e1632c1/e315869/1777ffe/b1f08b2），其中PR#1的`scrollBehavior:`参数在SingleChildScrollView/ListView上不存在（PR未编译验证），改为ScrollConfiguration(scrollbars:false)包裹两个滚动体，分析通过。
+- #1 重命名框：PR#1方案落地（isDense+constraints.tightFor(_rowHeight)+显式OutlineInputBorder+去竖向padding，行容器高度统一_rowHeight不再硬编码28/33）。新组件测试直接比较编辑框RenderBox与行容器RenderBox边界（≥rowHeight-2、横向位置在图标槽后），并覆盖紧凑模式。Windows窄框的根因是行高硬编码与装饰约束缺失叠加。
+- #2 双竖向滚动条：根因是桌面平台ScrollBehavior给两个滚动体又包了自动Scrollbar（一条贴内容右缘即"类型列右侧"，一条是我们钉在面板右缘的显式条）。修复=禁用自动滚动条（PR#1思路正确但参数写法错误）。新Windows平台组件测试（debugDefaultTargetPlatformOverride=windows，测试体内重置）断言：恰好2条RawScrollbar、0条框架Scrollbar、竖条绑定列表控制器、maxScrollExtent精确可达。
+- #3 分隔条边界：model新增sftpContentBound（面板每次构建发布列宽总和+24），侧栏拖动上界=content.clamp(276,窗口界)（不再固定660），列宽调整/隐藏列后自然更新。
+- #4 反向选区：吸收PR#1几何方向归一（先定左右端再分别吸附，保留方向）；新增反向拖选测试：方向无关性（正反向selectedText相同）、反向跨宽字、反向落在lead cell的整字覆盖、起点在spacer的排除语义。
+- #5 级联菜单：根因确认为showMenu(PopupMenuRoute)内嵌SubmenuButton不兼容（二级覆盖一级）。整菜单迁移MenuAnchor+MenuItemButton+SubmenuButton（菜单构建_buildFileMenuChildren、分发menuDispatch(action,file)复用原switch全部业务含跨主机复制/移动确认链）。行右键与空白右键共用锚点（空白仍showMenu无子菜单）。新组件测试：真实hover手势展开子菜单、一级菜单保持显示、子菜单几何在父项右侧、点击目标完成mock复制、无其他主机显示禁用项。
+- #6 双击编辑回传重写（local_edit_launch.dart 全量重写）：启动改url_launcher file URI+结果校验（PR#1）+失败清理；sanitizeLocalName消毒（扩展名保留//保留字符/.. 阻断）；修改检测改为内容字节比较（同长度变化上传、相同不重复、0字节上传）；冲突=size+mtime（RemoteProperties新增mtime:Option<u64>来自attrs.mtime，FRB已重生成）；上传=远端临时文件+renameOver（sftpRename）原子替换、失败不破坏原文件、上传后stat刷新快照防自冲突；LocalEditRegistry挂LiveWorkbenchModel（上限16、shutdown时disposeAll清理监测器/Timer/临时文件）；断线/失败保留+retry；重连校验代次防跨主机误传；网关抽象（LocalEditGateway）+launchOverride/rootOverride可注入。9项测试全过：消毒、同长度变化、0字节、mtime冲突不覆盖、失败保留可重试、原子上传路径、多文件独立、dispose清理、注册表上限。
+- #7 日志：AppRunLog白名单字段（durationMs/bytes/result/errorCode/kind/count）渲染key=value；connectionTiming/sftpDirectoryTiming/memorySample/editUploaded改用字段。
+- #8 内存静态检查：本轮新增代码自身即带生命周期管理（编辑会话dispose、注册表上限、Timer随dispose取消）；未发现其他明确泄漏，未动核心缓存。
+- 验证：Flutter Analyze0；新增/受影响组件测试53项全过（9新编辑回传+2重命名边界+1 Windows滚动条+2级联菜单+2宽字吸附+既有批次）；Rust fmt/严格Clippy(-D warnings)0（含u32→u64 From修正）；ssh-core80/term-core42、storage-sync未改存储层；FRB正规重生成（RemoteProperties.mtime）；bridge_contracts 253函数/80DTO/310Dart 0发现；Ubuntu debug构建+真实GTK冒烟通过（启动CPU≈1.4%后失焦0%、正常退出0、无编辑残留）。
+- 边界：url_launcher file URI在Windows的实机行为、编辑器原子保存(rename替换)检测、冲突提示UI、MenuAnchor样式、滚动条与重命名框Windows实测均待用户Win11；Linux冒烟不替代。
+
 ## 2026-11-06 第六轮 Windows 反馈八项修正（已发布：源码ca7d515，Windows CI成功）
 
 - Windows发布：源码482ee8b首次run42205715999在Build formal workbench失败——Rust端DiagnosticCode新增directorySizeRemote/Fallback后本地未重生成FRB，CI重生成枚举使diagnostics.dart穷举switch编译错误。修复ca7d515：本地正规FRB重生成入库+switch补两个带标签case（diagnostics/run_log 8项过、Analyze0）。run42208860724/job127862228889全部成功（11:15–11:37Z）：正规FRB、MSVC Release、Analyze0、CI固定14文件组件测试、原生启动/正常退出、正常关闭重开窗口几何恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42208860724/artifacts/13498499563 （HSPTerm-windows-x64，40,140,568字节，2026-11-20到期）。锁库启动工作集116.11/112.11/112.09MiB（artifact13498559405，Server2022口径，与上轮114/111持平）。旧run42165775926为d80edad基线，未重发。

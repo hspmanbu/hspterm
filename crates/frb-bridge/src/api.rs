@@ -6712,6 +6712,9 @@ pub struct RemoteProperties {
     pub gid: Option<u32>,
     pub link_target: Option<String>,
     pub size_complete: bool,
+    /// Remote modification time in seconds; the write-back editor uses it
+    /// with size for conflict detection.
+    pub mtime: Option<u64>,
 }
 fn check_file_generation(id: u32, generation: u64) -> Result<()> {
     let e = entry(id)?;
@@ -6745,6 +6748,7 @@ pub async fn sftp_properties(
                 permissions: root.permissions,
                 uid: root.uid,
                 gid: root.gid,
+                mtime: root.mtime.map(u64::from),
                 link_target: if root.is_symlink() {
                     Some(remote.read_link(path.clone()).await?)
                 } else {

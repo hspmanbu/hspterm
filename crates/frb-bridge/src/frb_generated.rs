@@ -10121,6 +10121,8 @@ impl SseDecode for crate::diagnostics::DiagnosticCode {
             20 => crate::diagnostics::DiagnosticCode::DownloadQueued,
             21 => crate::diagnostics::DiagnosticCode::TransferRequestRejected,
             22 => crate::diagnostics::DiagnosticCode::CoreWorkerPanicked,
+            23 => crate::diagnostics::DiagnosticCode::DirectorySizeRemote,
+            24 => crate::diagnostics::DiagnosticCode::DirectorySizeFallback,
             _ => unreachable!("Invalid variant for DiagnosticCode: {}", inner),
         };
     }
@@ -11641,6 +11643,7 @@ impl SseDecode for crate::api::RemoteProperties {
         let mut var_gid = <Option<u32>>::sse_decode(deserializer);
         let mut var_linkTarget = <Option<String>>::sse_decode(deserializer);
         let mut var_sizeComplete = <bool>::sse_decode(deserializer);
+        let mut var_mtime = <Option<u64>>::sse_decode(deserializer);
         return crate::api::RemoteProperties {
             path: var_path,
             size: var_size,
@@ -11651,6 +11654,7 @@ impl SseDecode for crate::api::RemoteProperties {
             gid: var_gid,
             link_target: var_linkTarget,
             size_complete: var_sizeComplete,
+            mtime: var_mtime,
         };
     }
 }
@@ -12740,6 +12744,8 @@ impl flutter_rust_bridge::IntoDart for crate::diagnostics::DiagnosticCode {
             Self::DownloadQueued => 20.into_dart(),
             Self::TransferRequestRejected => 21.into_dart(),
             Self::CoreWorkerPanicked => 22.into_dart(),
+            Self::DirectorySizeRemote => 23.into_dart(),
+            Self::DirectorySizeFallback => 24.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -13899,6 +13905,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::RemoteProperties {
             self.gid.into_into_dart().into_dart(),
             self.link_target.into_into_dart().into_dart(),
             self.size_complete.into_into_dart().into_dart(),
+            self.mtime.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -14602,6 +14609,8 @@ impl SseEncode for crate::diagnostics::DiagnosticCode {
                 crate::diagnostics::DiagnosticCode::DownloadQueued => 20,
                 crate::diagnostics::DiagnosticCode::TransferRequestRejected => 21,
                 crate::diagnostics::DiagnosticCode::CoreWorkerPanicked => 22,
+                crate::diagnostics::DiagnosticCode::DirectorySizeRemote => 23,
+                crate::diagnostics::DiagnosticCode::DirectorySizeFallback => 24,
                 _ => {
                     unimplemented!("");
                 }
@@ -15670,6 +15679,7 @@ impl SseEncode for crate::api::RemoteProperties {
         <Option<u32>>::sse_encode(self.gid, serializer);
         <Option<String>>::sse_encode(self.link_target, serializer);
         <bool>::sse_encode(self.size_complete, serializer);
+        <Option<u64>>::sse_encode(self.mtime, serializer);
     }
 }
 

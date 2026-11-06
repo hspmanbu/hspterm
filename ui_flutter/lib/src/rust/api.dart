@@ -2544,6 +2544,10 @@ class RemoteProperties {
   final String? linkTarget;
   final bool sizeComplete;
 
+  /// Remote modification time in seconds; the write-back editor uses it
+  /// with size for conflict detection.
+  final int? mtime;
+
   const RemoteProperties({
     required this.path,
     required this.size,
@@ -2554,6 +2558,7 @@ class RemoteProperties {
     this.gid,
     this.linkTarget,
     required this.sizeComplete,
+    this.mtime,
   });
 
   @override
@@ -2566,7 +2571,8 @@ class RemoteProperties {
       uid.hashCode ^
       gid.hashCode ^
       linkTarget.hashCode ^
-      sizeComplete.hashCode;
+      sizeComplete.hashCode ^
+      mtime.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -2581,7 +2587,8 @@ class RemoteProperties {
           uid == other.uid &&
           gid == other.gid &&
           linkTarget == other.linkTarget &&
-          sizeComplete == other.sizeComplete;
+          sizeComplete == other.sizeComplete &&
+          mtime == other.mtime;
 }
 
 class RenderCell {

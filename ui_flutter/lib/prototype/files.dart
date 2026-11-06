@@ -174,6 +174,9 @@ int _compareText(String a, String b) {
 }
 
 class _FilesPanelState extends State<FilesPanel> {
+  final _fileMenu = MenuController();
+  final _fileMenuAnchor = GlobalKey();
+  DemoFile? _menuFile;
   int _menuRequest = 0;
   int _navigationRequest = 0;
   final selected = <String>{};
@@ -824,7 +827,127 @@ class _FilesPanelState extends State<FilesPanel> {
     }
   }
 
-  Future<void> menu(Offset position, DemoFile file) async {
+  void _openFileMenuAt(Offset globalPosition, DemoFile file) {
+    _menuFile = file;
+    final box = _fileMenuAnchor.currentContext?.findRenderObject();
+    if (box is RenderBox && mounted) {
+      _fileMenu.open(position: box.globalToLocal(globalPosition));
+    }
+  }
+
+  List<Widget> _buildFileMenuChildren() => [
+    MenuItemButton(
+      leadingIcon: const Icon(Icons.copy, size: 16),
+      onPressed: () => _dispatchFileAction('copy'),
+      child: const Text('复制'),
+    ),
+    MenuItemButton(
+      leadingIcon: const Icon(Icons.content_cut, size: 16),
+      onPressed: () => _dispatchFileAction('cut'),
+      child: const Text('剪切'),
+    ),
+    MenuItemButton(
+      leadingIcon: const Icon(Icons.content_paste, size: 16),
+      onPressed: () => _dispatchFileAction('paste'),
+      child: const Text('粘贴'),
+    ),
+    MenuItemButton(
+      leadingIcon: const Icon(Icons.drive_file_rename_outline, size: 16),
+      onPressed: () => _dispatchFileAction('rename'),
+      child: const Text('重命名'),
+    ),
+    MenuItemButton(
+      leadingIcon: const Icon(Icons.delete_outline, size: 16),
+      onPressed: () => _dispatchFileAction('delete'),
+      child: const Text('删除'),
+    ),
+    const Divider(height: 8),
+    MenuItemButton(
+      onPressed: () => _dispatchFileAction('open'),
+      child: const Text('打开'),
+    ),
+    MenuItemButton(
+      onPressed: () => _dispatchFileAction('download'),
+      child: const Text('下载'),
+    ),
+    if (widget.onEditFile != null)
+      MenuItemButton(
+        onPressed: () => _dispatchFileAction('edit'),
+        child: const Text('编辑'),
+      ),
+    if (widget.onEditFileWithEncoding != null)
+      MenuItemButton(
+        onPressed: () => _dispatchFileAction('edit-encoding'),
+        child: const Text('按指定编码编辑…'),
+      ),
+    if (widget.onEditRawFile != null)
+      MenuItemButton(
+        onPressed: () => _dispatchFileAction('edit-raw'),
+        child: const Text('外部编辑大文件…'),
+      ),
+    for (final move in [false, true])
+      SubmenuButton(
+        menuChildren: [
+          for (final target in _remoteCopyTargets())
+            MenuItemButton(
+              onPressed: () => _dispatchFileAction(
+                '${move ? 'move' : 'copy'}-target:${target.$4}',
+              ),
+              child: Text('${target.$1.host.name} · ${target.$3}'),
+            ),
+          if (_remoteCopyTargets().isEmpty)
+            const MenuItemButton(onPressed: null, child: Text('没有其他已连接主机')),
+        ],
+        child: Text(move ? '移动到' : '复制到'),
+      ),
+    MenuItemButton(
+      onPressed: () => _dispatchFileAction('name'),
+      child: const Text('复制文件/文件夹名'),
+    ),
+    MenuItemButton(
+      onPressed: () => _dispatchFileAction('path'),
+      child: const Text('复制路径'),
+    ),
+    MenuItemButton(
+      onPressed: () => _dispatchFileAction('send-name'),
+      child: const Text('发送文件/文件夹名至终端'),
+    ),
+    MenuItemButton(
+      onPressed: () => _dispatchFileAction('send'),
+      child: const Text('发送路径至终端'),
+    ),
+    MenuItemButton(
+      onPressed: () => _dispatchFileAction('properties'),
+      child: const Text('属性'),
+    ),
+  ];
+
+  /// (session, generation, path, index) of other connected sessions.
+  List<(TerminalSession, int, String, int)> _remoteCopyTargets() {
+    final origin = p;
+    final result = <(TerminalSession, int, String, int)>[];
+    for (final item in m.sessions) {
+      if (identical(item, origin) ||
+          item.disconnected ||
+          (item is LiveTerminalSession && !item.controller.connected)) {
+        continue;
+      }
+      result.add((item, item.connectionGeneration, item.path, result.length));
+    }
+    return result;
+  }
+
+  Future<void> _dispatchFileAction(String action) async {
+    _fileMenu.close();
+    // Re-validate freshness at dispatch time, exactly like the old
+    // post-showMenu guard.
+    await menuDispatch(action, file: _menuFile);
+  }
+
+  /// Opens the shared MenuAnchor file menu at [position] for [file]; the
+  /// cascade (复制到/移动到) uses the framework's own menu machinery, so the
+  /// parent stays open, the child flips by screen space, and hover works.
+  Future<void> _openFileMenu(Offset position, DemoFile file) async {
     final request = ++_menuRequest;
     final origin = p;
     final generation = origin.connectionGeneration;
@@ -859,88 +982,40 @@ class _FilesPanelState extends State<FilesPanel> {
           (entry) => pathOf(directory, entry.value.name) == paths[entry.key],
         );
     if (!mounted || !current()) return;
-    final targets = m.sessions
-        .where(
-          (item) =>
-              !identical(item, origin) &&
-              !item.disconnected &&
-              (item is! LiveTerminalSession || item.controller.connected),
-        )
-        .map((item) => (item, item.connectionGeneration, item.path))
-        .toList();
-    final raw = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        position.dx,
-        position.dy,
-      ),
-      items: [
-        DeskMenuItem(
-          enabled: false,
-          height: 36,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final item in [
-                (Icons.copy, '复制', 'copy'),
-                (Icons.content_cut, '剪切', 'cut'),
-                (Icons.content_paste, '粘贴', 'paste'),
-                (Icons.drive_file_rename_outline, '重命名', 'rename'),
-                (Icons.delete_outline, '删除', 'delete'),
-              ])
-                Tool(item.$1, item.$2, () => Navigator.pop(context, item.$3)),
-            ],
-          ),
-        ),
-        const DeskMenuDivider(),
-        const DeskMenuItem(value: 'open', child: Text('打开')),
-        const DeskMenuItem(value: 'download', child: Text('下载')),
-        if (widget.onEditFile != null && !file.folder)
-          const DeskMenuItem(value: 'edit', child: Text('编辑')),
-        if (widget.onEditFileWithEncoding != null && !file.folder)
-          const DeskMenuItem(value: 'edit-encoding', child: Text('按指定编码编辑…')),
-        if (widget.onEditRawFile != null && !file.folder)
-          const DeskMenuItem(value: 'edit-raw', child: Text('外部编辑大文件…')),
-        // Real cascading submenus: hover opens after the standard intent
-        // delay, moving the pointer into the child keeps it open, and the
-        // framework flips the child left/right by screen space. The parent
-        // menu stays open while the submenu is used (2026-11-06 revision of
-        // the click-only round-5 approach).
-        for (final move in [false, true])
-          DeskMenuItem<String>(
-            enabled: false,
-            child: SubmenuButton(
-              menuChildren: [
-                for (var i = 0; i < targets.length; i++)
-                  MenuItemButton(
-                    onPressed: () => Navigator.pop(
-                      context,
-                      '${move ? 'move' : 'copy'}-target:$i',
-                    ),
-                    child: Text(
-                      '${targets[i].$1.host.name} · ${targets[i].$3}',
-                    ),
-                  ),
-                if (targets.isEmpty)
-                  const MenuItemButton(
-                    onPressed: null,
-                    child: Text('没有其他已连接主机'),
-                  ),
-              ],
-              child: Text(move ? '移动到' : '复制到'),
-            ),
-          ),
-        const DeskMenuItem(value: 'name', child: Text('复制文件/文件夹名')),
-        const DeskMenuItem(value: 'path', child: Text('复制路径')),
-        const DeskMenuItem(value: 'send-name', child: Text('发送文件/文件夹名至终端')),
-        const DeskMenuItem(value: 'send', child: Text('发送路径至终端')),
-        const DeskMenuItem(value: 'properties', child: Text('属性')),
-      ],
+    _openFileMenuAt(position, file);
+  }
+
+  /// Executes one menu action against the live state; every entry re-validates
+  /// freshness exactly like the old post-showMenu guard did.
+  Future<void> menuDispatch(String action, {DemoFile? file}) async {
+    final request = _menuRequest;
+    final origin = p;
+    final generation = origin.connectionGeneration;
+    final directory = origin.path;
+    final frozenSelection = Set<String>.of(selected);
+    final files = origin.files
+        .where((f) => frozenSelection.contains(f.id))
+        .toList(growable: false);
+    final paths = List<String>.unmodifiable(
+      files.map((f) => pathOf(directory, f.name)),
     );
-    final action = raw;
-    if (!mounted || action == null) return;
+    file ??= files.isNotEmpty ? files.first : null;
+    final targets = [
+      for (final target in _remoteCopyTargets())
+        (target.$1, target.$2, target.$3),
+    ];
+    bool current() =>
+        mounted &&
+        !m.isClosing &&
+        request == _menuRequest &&
+        identical(p, origin) &&
+        p.connectionGeneration == generation &&
+        p.path == directory &&
+        selected.length == frozenSelection.length &&
+        selected.every(frozenSelection.contains) &&
+        files.asMap().entries.every(
+          (entry) => pathOf(directory, entry.value.name) == paths[entry.key],
+        );
     if (!current()) {
       notice(context, '目录或会话已切换，请重新打开菜单；未执行文件操作');
       return;
@@ -1004,18 +1079,19 @@ class _FilesPanelState extends State<FilesPanel> {
       }
       return;
     }
+    final row = file;
     switch (action) {
       case 'open':
-        open(file);
+        if (row != null) open(row);
       case 'edit':
         final editor = widget.onEditFile;
-        if (editor != null) run(editor(context, p, file));
+        if (editor != null) run(editor(context, p, row!));
       case 'edit-encoding':
         final editor = widget.onEditFileWithEncoding;
-        if (editor != null) run(editor(context, p, file));
+        if (editor != null) run(editor(context, p, row!));
       case 'edit-raw':
         final editor = widget.onEditRawFile;
-        if (editor != null) run(editor(context, p, file));
+        if (editor != null) run(editor(context, p, row!));
       case 'copy-to':
       case 'move-to':
         final transfer = widget.onTransferTo;
@@ -1067,20 +1143,22 @@ class _FilesPanelState extends State<FilesPanel> {
       case 'terminal-cd':
         sendPaths([paths.first], enterDirectory: true);
       case 'properties':
-        if (m is LiveWorkbenchModel && origin is LiveTerminalSession) {
+        if (row != null &&
+            m is LiveWorkbenchModel &&
+            origin is LiveTerminalSession) {
           await showFileProperties(
             context,
             m as LiveWorkbenchModel,
             origin,
-            file,
+            row,
           );
-        } else {
+        } else if (row != null) {
           await showDialog<void>(
             context: context,
             builder: (c) => AlertDialog(
               title: const Text('模拟文件属性'),
               content: Text(
-                '${file.name}\n${p.path}\n${file.kind} · ${file.folder ? '未计算' : file.size}',
+                '${row.name}\n${p.path}\n${row.kind} · ${row.folder ? '未计算' : row.size}',
               ),
               actions: [
                 TextButton(
@@ -1569,6 +1647,10 @@ class _FilesPanelState extends State<FilesPanel> {
     // scrolling reuse it; the next rebuild observes even in-place Mock edits.
     _visible = null;
     _trimFolderRegistries();
+    // Publish the visible content width so the sidebar grip can cap the
+    // panel at its real columns instead of a hardcoded 660px.
+    m.sftpContentBound =
+        _columns.fold<double>(0, (sum, i) => sum + widths[i]) + 24;
     if (!p.sftpEnabled) {
       return Center(
         child: Padding(
@@ -1940,105 +2022,124 @@ class _FilesPanelState extends State<FilesPanel> {
             Expanded(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onSecondaryTapUp: (event) =>
-                    run(blankMenu(event.globalPosition)),
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: dropTarget(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // The vertical scrollbar wraps the viewport so its thumb
-                            // stays pinned to the visible right edge; the horizontal
-                            // bar is a separate row below and never crosses it.
-                            Expanded(
-                              child: RawScrollbar(
-                                controller: _vertical,
-                                thumbVisibility: true,
-                                scrollbarOrientation:
-                                    ScrollbarOrientation.right,
-                                // Notifications from the vertical list reach
-                                // this scrollbar with depth 1 after bubbling
-                                // through the horizontal scroller; the axis
-                                // filter accepts them (the default depth==0
-                                // predicate rejected every one, so the thumb
-                                // never painted — pixel-verified).
-                                notificationPredicate: (n) =>
-                                    n.metrics.axis == Axis.vertical,
-                                // Keep the bottom 14px clear of the horizontal
-                                // thumb so the tracks never cross.
-                                padding: const EdgeInsets.only(bottom: 14),
+                onSecondaryTapUp: (event) {
+                  final box = _fileMenuAnchor.currentContext
+                      ?.findRenderObject();
+                  if (box is RenderBox) {
+                    _fileMenu.open(
+                      position: box.globalToLocal(event.globalPosition),
+                    );
+                  }
+                },
+                child: MenuAnchor(
+                  key: _fileMenuAnchor,
+                  controller: _fileMenu,
+                  menuChildren: _buildFileMenuChildren(),
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: dropTarget(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // The vertical scrollbar wraps the viewport so its thumb
+                              // stays pinned to the visible right edge; the horizontal
+                              // bar is a separate row below and never crosses it.
+                              Expanded(
                                 child: RawScrollbar(
-                                  controller: _horizontal,
+                                  controller: _vertical,
                                   thumbVisibility: true,
                                   scrollbarOrientation:
-                                      ScrollbarOrientation.bottom,
+                                      ScrollbarOrientation.right,
+                                  // Notifications from the vertical list reach
+                                  // this scrollbar with depth 1 after bubbling
+                                  // through the horizontal scroller; the axis
+                                  // filter accepts them (the default depth==0
+                                  // predicate rejected every one, so the thumb
+                                  // never painted — pixel-verified).
                                   notificationPredicate: (n) =>
-                                      n.metrics.axis == Axis.horizontal,
-                                  child: SingleChildScrollView(
+                                      n.metrics.axis == Axis.vertical,
+                                  // Keep the bottom 14px clear of the horizontal
+                                  // thumb so the tracks never cross.
+                                  padding: const EdgeInsets.only(bottom: 14),
+                                  child: RawScrollbar(
                                     controller: _horizontal,
-                                     scrollBehavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-                                    scrollDirection: Axis.horizontal,
-                                    child: SizedBox(
-                                      width: _columns.fold<double>(
-                                        0,
-                                        (sum, i) => sum + widths[i],
-                                      ),
-                                      child: Column(
-                                        children: [
-                                          SizedBox(
-                                            height: (27 * _fontScale)
-                                                .roundToDouble(),
-                                            child: Row(
-                                              children: [
-                                                for (final i in _columns)
-                                                  SizedBox(
-                                                    width: widths[i],
-                                                    child: Row(
-                                                      children: [
-                                                        Expanded(
-                                                          child: InkWell(
-                                                            onTap: () => setState(() {
-                                                              ascending =
-                                                                  sortColumn ==
-                                                                      i
-                                                                  ? !ascending
-                                                                  : true;
-                                                              sortColumn = i;
-                                                              _newEntryTail =
-                                                                  null;
-                                                              m.rememberSort(
-                                                                p.host.id,
-                                                                i,
-                                                                ascending,
-                                                              );
-                                                            }),
-                                                            child: Padding(
-                                                              padding:
-                                                                  const EdgeInsets.only(
-                                                                    left: 10,
+                                    thumbVisibility: true,
+                                    scrollbarOrientation:
+                                        ScrollbarOrientation.bottom,
+                                    notificationPredicate: (n) =>
+                                        n.metrics.axis == Axis.horizontal,
+                                    child: ScrollConfiguration(
+                                      // Desktop platforms wrap scrollables in
+                                      // their own automatic Scrollbar; that
+                                      // produced the second vertical bar glued
+                                      // to the content. Only the explicit
+                                      // RawScrollbars below may draw.
+                                      behavior: ScrollConfiguration.of(context)
+                                          .copyWith(scrollbars: false),
+                                      child: SingleChildScrollView(
+                                        controller: _horizontal,
+                                        scrollDirection: Axis.horizontal,
+                                        child: SizedBox(
+                                          width: _columns.fold<double>(
+                                            0,
+                                            (sum, i) => sum + widths[i],
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              SizedBox(
+                                                height: (27 * _fontScale)
+                                                    .roundToDouble(),
+                                                child: Row(
+                                                  children: [
+                                                    for (final i in _columns)
+                                                      SizedBox(
+                                                        width: widths[i],
+                                                        child: Row(
+                                                          children: [
+                                                            Expanded(
+                                                              child: InkWell(
+                                                                onTap: () => setState(() {
+                                                                  ascending =
+                                                                      sortColumn ==
+                                                                          i
+                                                                      ? !ascending
+                                                                      : true;
+                                                                  sortColumn =
+                                                                      i;
+                                                                  _newEntryTail =
+                                                                      null;
+                                                                  m.rememberSort(
+                                                                    p.host.id,
+                                                                    i,
+                                                                    ascending,
+                                                                  );
+                                                                }),
+                                                                child: Padding(
+                                                                  padding:
+                                                                      const EdgeInsets.only(
+                                                                        left:
+                                                                            10,
+                                                                      ),
+                                                                  child: Text(
+                                                                    '${_columnNames[i]}${sortColumn == i ? (ascending ? '  ↑' : '  ↓') : ''}',
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          _metaSize,
+                                                                      color: Theme.of(
+                                                                        context,
+                                                                      ).hintColor,
+                                                                    ),
                                                                   ),
-                                                              child: Text(
-                                                                '${_columnNames[i]}${sortColumn == i ? (ascending ? '  ↑' : '  ↓') : ''}',
-                                                                style: TextStyle(
-                                                                  fontSize:
-                                                                      _metaSize,
-                                                                  color: Theme.of(
-                                                                    context,
-                                                                  ).hintColor,
                                                                 ),
                                                               ),
                                                             ),
-                                                          ),
-                                                        ),
-                                                        ResizeGrip(
-                                                          key: ValueKey(
-                                                            'file-column-$i',
-                                                          ),
-                                                          horizontal: true,
-                                                          onDelta: (d) =>
-                                                              setState(
+                                                            ResizeGrip(
+                                                              key: ValueKey(
+                                                                'file-column-$i',
+                                                              ),
+                                                              horizontal: true,
+                                                              onDelta: (d) => setState(
                                                                 () => widths[i] =
                                                                     (widths[i] +
                                                                             d)
@@ -2047,380 +2148,411 @@ class _FilesPanelState extends State<FilesPanel> {
                                                                           500,
                                                                         ),
                                                               ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                              ],
-                                            ),
-                                          ),
-                                          Divider(
-                                            height: 1,
-                                            color: Theme.of(context)
-                                                .dividerColor,
-                                          ),
-                                          Expanded(
-                                            child: ListView.builder(
-                                              controller: _vertical,
-                                               scrollBehavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-                                              itemCount: visible.length + 1,
-                                              itemBuilder: (c, index) {
-                                                if (index == 0) {
-                                                  return InkWell(
-                                                    key: const ValueKey(
-                                                      'sftp-parent-directory',
-                                                    ),
-                                                    onDoubleTap: () {
-                                                      final slash = p.path
-                                                          .lastIndexOf('/');
-                                                      navigate(
-                                                        slash <= 0
-                                                            ? '/'
-                                                            : p.path.substring(
-                                                                0,
-                                                                slash,
-                                                              ),
-                                                      );
-                                                    },
-                                                    child: SizedBox(
-                                                      height: _rowHeight,
-                                                      child: const Row(
-                                                        children: [
-                                                          SizedBox(width: 10),
-                                                          Icon(
-                                                            Icons
-                                                                .drive_folder_upload_outlined,
-                                                            size: 16,
-                                                          ),
-                                                          SizedBox(width: 8),
-                                                          Text('..'),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  );
-                                                }
-                                                final f = visible[index - 1];
-                                                if (f.folder) {
-                                                  _folderObjects[f.id] = f;
-                                                }
-                                                Widget row = SelectionTarget(
-                                                  behavior:
-                                                      HitTestBehavior.opaque,
-                                                  // Taps land on the inline
-                                                  // rename editor itself while
-                                                  // it is open; taking list focus
-                                                  // there would cancel editing.
-                                                  onTapDown: (_) {
-                                                    if (editing != f.id) {
-                                                      select(f);
-                                                    }
-                                                  },
-                                                  onDoubleTap: () => open(f),
-                                                  // Complete the pointer sequence before pushing
-                                                  // a modal menu/editor that can steal input.
-                                                  onSecondaryTapUp: (d) => run(
-                                                    menu(d.globalPosition, f),
-                                                  ),
-                                                  child: Container(
-                                                    key: ValueKey(
-                                                      'file-${f.name}',
-                                                    ),
-                                                    height: editing == f.id && renameError != null
-                                                         ? _rowHeight + 21 : _rowHeight,
-                                                    color:
-                                                        selected.contains(f.id)
-                                                        ? Theme.of(c)
-                                                              .colorScheme
-                                                              .primary
-                                                              .withValues(
-                                                                alpha: .12,
-                                                              )
-                                                        : null,
-                                                    // While renaming, the whole row becomes
-                                                    // one full-width editor; only Enter in the
-                                                    // field applies the change.
-                                                    child: editing == f.id
-                                                        ? Padding(
-                                                            padding:
-                                                                const EdgeInsets.only(
-                                                                  left: 34,
-                                                                  right: 10,
-                                                                ),
-                                                            child: SizedBox.expand(
-                                                              // Tight row-height
-                                                              // constraints: the
-                                                              // editor's border
-                                                              // fills the whole
-                                                              // row like the
-                                                              // Windows Explorer
-                                                              // rename box.
-                                                              child: Focus(
-                                                                onKeyEvent: (_, e) {
-                                                                  if (e
-                                                                          is KeyDownEvent &&
-                                                                      e.logicalKey ==
-                                                                          LogicalKeyboardKey
-                                                                              .escape) {
-                                                                    setState(() {
-                                                                      editing =
-                                                                          null;
-                                                                      renameError =
-                                                                          null;
-                                                                    });
-                                                                    _focus
-                                                                        .requestFocus();
-                                                                    return KeyEventResult
-                                                                        .handled;
-                                                                  }
-                                                                  return KeyEventResult
-                                                                      .ignored;
-                                                                },
-                                                                child: TextField(
-                                                                  key:
-                                                                      const ValueKey(
-                                                                        'inline-rename',
-                                                                      ),
-                                                                  controller:
-                                                                      _rename,
-                                                                  focusNode:
-                                                                      _renameFocus,
-                                                                  autofocus:
-                                                                      true,
-                                                                  // Tight row-height
-                                                                  // constraints make the
-                                                                  // decorator fill the
-                                                                  // row; center the text
-                                                                  // on its midline.
-                                                                  textAlignVertical:
-                                                                      TextAlignVertical
-                                                                          .center,
-                                                                  style: TextStyle(
-                                                                    fontSize:
-                                                                        _nameSize,
-                                                                  ),
-                                                                  decoration: InputDecoration(
-                                                                     errorText: renameError,
-                                                                     isDense: true,
-                                                                     constraints: BoxConstraints.tightFor(height: _rowHeight),
-                                                                     contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                                                     border: const OutlineInputBorder(),
-                                                                   ),
-                                                                  onSubmitted: (
-                                                                    _,
-                                                                  ) => commitRename(),
-                                                                ),
-                                                              ),
                                                             ),
-                                                          )
-                                                        : Row(
-                                                            children: [
-                                                              for (final column
-                                                                  in _columns)
-                                                                if (column == 0)
-                                                                  SizedBox(
-                                                                    width:
-                                                                        widths[0],
-                                                                    child: Row(
-                                                                      children: [
-                                                                        const SizedBox(
-                                                                          width:
-                                                                              10,
+                                                          ],
+                                                        ),
+                                                      ),
+                                                  ],
+                                                ),
+                                              ),
+                                              Divider(
+                                                height: 1,
+                                                color: Theme.of(context)
+                                                    .dividerColor,
+                                              ),
+                                              Expanded(
+                                                child: ScrollConfiguration(
+                                                  behavior:
+                                                      ScrollConfiguration.of(
+                                                        context,
+                                                      ).copyWith(
+                                                        scrollbars: false,
+                                                      ),
+                                                  child: ListView.builder(
+                                                    controller: _vertical,
+                                                    itemCount:
+                                                        visible.length + 1,
+                                                    itemBuilder: (c, index) {
+                                                      if (index == 0) {
+                                                        return InkWell(
+                                                          key: const ValueKey(
+                                                            'sftp-parent-directory',
+                                                          ),
+                                                          onDoubleTap: () {
+                                                            final slash = p.path
+                                                                .lastIndexOf(
+                                                                  '/',
+                                                                );
+                                                            navigate(
+                                                              slash <= 0
+                                                                  ? '/'
+                                                                  : p.path
+                                                                        .substring(
+                                                                          0,
+                                                                          slash,
                                                                         ),
-                                                                        Icon(
-                                                                          f.folder
-                                                                              ? Icons.folder_outlined
-                                                                              : f.kind == 'YAML' || f.kind == 'JSON'
-                                                                              ? Icons.data_object
-                                                                              : Icons.description_outlined,
-                                                                          size:
-                                                                              16,
-                                                                          color:
-                                                                              f.folder
-                                                                              ? Desk.warning
-                                                                              : Theme.of(c).hintColor,
-                                                                        ),
-                                                                        const SizedBox(
-                                                                          width:
-                                                                              8,
-                                                                        ),
-                                                                        Expanded(
-                                                                          child: Text(
-                                                                            f.name,
-                                                                            style: TextStyle(
-                                                                              fontSize: _nameSize,
+                                                            );
+                                                          },
+                                                          child: SizedBox(
+                                                            height: _rowHeight,
+                                                            child: const Row(
+                                                              children: [
+                                                                SizedBox(
+                                                                  width: 10,
+                                                                ),
+                                                                Icon(
+                                                                  Icons
+                                                                      .drive_folder_upload_outlined,
+                                                                  size: 16,
+                                                                ),
+                                                                SizedBox(
+                                                                  width: 8,
+                                                                ),
+                                                                Text('..'),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        );
+                                                      }
+                                                      final f =
+                                                          visible[index - 1];
+                                                      if (f.folder) {
+                                                        _folderObjects[f.id] =
+                                                            f;
+                                                      }
+                                                      Widget
+                                                      row = SelectionTarget(
+                                                        behavior:
+                                                            HitTestBehavior
+                                                                .opaque,
+                                                        // Taps land on the inline
+                                                        // rename editor itself while
+                                                        // it is open; taking list focus
+                                                        // there would cancel editing.
+                                                        onTapDown: (_) {
+                                                          if (editing != f.id) {
+                                                            select(f);
+                                                          }
+                                                        },
+                                                        onDoubleTap: () =>
+                                                            open(f),
+                                                        // Complete the pointer sequence before pushing
+                                                        // a modal menu/editor that can steal input.
+                                                        onSecondaryTapUp: (d) =>
+                                                            _openFileMenu(
+                                                              d.globalPosition,
+                                                              f,
+                                                            ),
+                                                        child: Container(
+                                                          key: ValueKey(
+                                                            'file-${f.name}',
+                                                          ),
+                                                          height:
+                                                              editing == f.id &&
+                                                                  renameError !=
+                                                                      null
+                                                              ? _rowHeight + 21
+                                                              : _rowHeight,
+                                                          color:
+                                                              selected.contains(
+                                                                f.id,
+                                                              )
+                                                              ? Theme.of(c)
+                                                                    .colorScheme
+                                                                    .primary
+                                                                    .withValues(
+                                                                      alpha:
+                                                                          .12,
+                                                                    )
+                                                              : null,
+                                                          // While renaming, the whole row becomes
+                                                          // one full-width editor; only Enter in the
+                                                          // field applies the change.
+                                                          child: editing == f.id
+                                                              ? Padding(
+                                                                  padding:
+                                                                      const EdgeInsets.only(
+                                                                        left:
+                                                                            34,
+                                                                        right:
+                                                                            10,
+                                                                      ),
+                                                                  child: SizedBox.expand(
+                                                                    // Tight row-height
+                                                                    // constraints: the
+                                                                    // editor's border
+                                                                    // fills the whole
+                                                                    // row like the
+                                                                    // Windows Explorer
+                                                                    // rename box.
+                                                                    child: Focus(
+                                                                      onKeyEvent: (_, e) {
+                                                                        if (e is KeyDownEvent &&
+                                                                            e.logicalKey == LogicalKeyboardKey.escape) {
+                                                                          setState(() {
+                                                                            editing =
+                                                                                null;
+                                                                            renameError =
+                                                                                null;
+                                                                          });
+                                                                          _focus
+                                                                              .requestFocus();
+                                                                          return KeyEventResult
+                                                                              .handled;
+                                                                        }
+                                                                        return KeyEventResult
+                                                                            .ignored;
+                                                                      },
+                                                                      child: TextField(
+                                                                        key:
+                                                                            const ValueKey(
+                                                                              'inline-rename',
                                                                             ),
-                                                                            overflow:
-                                                                                TextOverflow.ellipsis,
-                                                                          ),
-                                                                        ),
-                                                                        const SizedBox(
-                                                                          width:
-                                                                              7,
-                                                                        ),
-                                                                      ],
-                                                                    ),
-                                                                  )
-                                                                else
-                                                                  SizedBox(
-                                                                    width:
-                                                                        widths[column],
-                                                                    child: Padding(
-                                                                      padding:
-                                                                          const EdgeInsets.only(
-                                                                            left:
-                                                                                10,
-                                                                          ),
-                                                                      child: Text(
-                                                                        [
-                                                                          '',
-                                                                          f.modified,
-                                                                          f.folder
-                                                                              ? '—'
-                                                                              : f.size,
-                                                                          f.kind,
-                                                                        ][column],
+                                                                        controller:
+                                                                            _rename,
+                                                                        focusNode:
+                                                                            _renameFocus,
+                                                                        autofocus:
+                                                                            true,
+                                                                        // Tight row-height
+                                                                        // constraints make the
+                                                                        // decorator fill the
+                                                                        // row; center the text
+                                                                        // on its midline.
+                                                                        textAlignVertical:
+                                                                            TextAlignVertical.center,
                                                                         style: TextStyle(
                                                                           fontSize:
-                                                                              _metaSize,
-                                                                          color: Theme.of(
-                                                                            c,
-                                                                          ).hintColor,
+                                                                              _nameSize,
                                                                         ),
-                                                                        overflow:
-                                                                            TextOverflow.ellipsis,
+                                                                        decoration: InputDecoration(
+                                                                          errorText:
+                                                                              renameError,
+                                                                          isDense:
+                                                                              true,
+                                                                          constraints: BoxConstraints.tightFor(
+                                                                            height:
+                                                                                _rowHeight,
+                                                                          ),
+                                                                          contentPadding: const EdgeInsets.symmetric(
+                                                                            horizontal:
+                                                                                8,
+                                                                          ),
+                                                                          border:
+                                                                              const OutlineInputBorder(),
+                                                                        ),
+                                                                        onSubmitted: (
+                                                                          _,
+                                                                        ) => commitRename(),
                                                                       ),
                                                                     ),
                                                                   ),
-                                                            ],
-                                                          ),
-                                                  ),
-                                                );
-                                                row = Draggable<RemoteDrag>(
-                                                  // Secondary clicks belong to the file menu;
-                                                  // never enter a drag arena for that button.
-                                                  allowedButtonsFilter: (buttons) =>
-                                                      buttons ==
-                                                          kPrimaryMouseButton &&
-                                                      !explorerExportGesture,
-                                                  data: RemoteDrag(
-                                                    p.id,
-                                                    p.path,
-                                                    selected.contains(f.id)
-                                                        ? visible
-                                                              .where(
-                                                                (f) => selected
-                                                                    .contains(
-                                                                      f.id,
-                                                                    ),
-                                                              )
-                                                              .toList()
-                                                        : [f],
-                                                    generation:
-                                                        p.connectionGeneration,
-                                                  ),
-                                                  feedback:
-                                                      const SizedBox.shrink(),
-                                                  child: row,
-                                                );
-                                                final live = m;
-                                                if (live
-                                                        is LiveWorkbenchModel &&
-                                                    p is LiveTerminalSession) {
-                                                  row = ExplorerExportDrag(
-                                                    model: live,
-                                                    source:
-                                                        p as LiveTerminalSession,
-                                                    selection: () =>
-                                                        selected.contains(f.id)
-                                                        ? visible
-                                                              .where(
-                                                                (
-                                                                  entry,
-                                                                ) => selected
-                                                                    .contains(
-                                                                      entry.id,
-                                                                    ),
-                                                              )
-                                                              .toList()
-                                                        : [f],
-                                                    child: row,
-                                                  );
-                                                }
-                                                return f.folder
-                                                    ? KeyedSubtree(
-                                                        key: _folderBounds
-                                                            .putIfAbsent(
-                                                              f.id,
-                                                              GlobalKey.new,
-                                                            ),
-                                                        child: dropTarget(
-                                                          folder: f,
-                                                          child: row,
+                                                                )
+                                                              : Row(
+                                                                  children: [
+                                                                    for (final column
+                                                                        in _columns)
+                                                                      if (column ==
+                                                                          0)
+                                                                        SizedBox(
+                                                                          width:
+                                                                              widths[0],
+                                                                          child: Row(
+                                                                            children: [
+                                                                              const SizedBox(
+                                                                                width: 10,
+                                                                              ),
+                                                                              Icon(
+                                                                                f.folder
+                                                                                    ? Icons.folder_outlined
+                                                                                    : f.kind == 'YAML' || f.kind == 'JSON'
+                                                                                    ? Icons.data_object
+                                                                                    : Icons.description_outlined,
+                                                                                size: 16,
+                                                                                color: f.folder ? Desk.warning : Theme.of(c).hintColor,
+                                                                              ),
+                                                                              const SizedBox(
+                                                                                width: 8,
+                                                                              ),
+                                                                              Expanded(
+                                                                                child: Text(
+                                                                                  f.name,
+                                                                                  style: TextStyle(fontSize: _nameSize),
+                                                                                  overflow: TextOverflow.ellipsis,
+                                                                                ),
+                                                                              ),
+                                                                              const SizedBox(
+                                                                                width: 7,
+                                                                              ),
+                                                                            ],
+                                                                          ),
+                                                                        )
+                                                                      else
+                                                                        SizedBox(
+                                                                          width:
+                                                                              widths[column],
+                                                                          child: Padding(
+                                                                            padding: const EdgeInsets.only(
+                                                                              left: 10,
+                                                                            ),
+                                                                            child: Text(
+                                                                              [
+                                                                                '',
+                                                                                f.modified,
+                                                                                f.folder ? '—' : f.size,
+                                                                                f.kind,
+                                                                              ][column],
+                                                                              style: TextStyle(
+                                                                                fontSize: _metaSize,
+                                                                                color: Theme.of(c).hintColor,
+                                                                              ),
+                                                                              overflow: TextOverflow.ellipsis,
+                                                                            ),
+                                                                          ),
+                                                                        ),
+                                                                  ],
+                                                                ),
                                                         ),
-                                                      )
-                                                    : row;
-                                              },
-                                            ),
+                                                      );
+                                                      row = Draggable<RemoteDrag>(
+                                                        // Secondary clicks belong to the file menu;
+                                                        // never enter a drag arena for that button.
+                                                        allowedButtonsFilter:
+                                                            (buttons) =>
+                                                                buttons ==
+                                                                    kPrimaryMouseButton &&
+                                                                !explorerExportGesture,
+                                                        data: RemoteDrag(
+                                                          p.id,
+                                                          p.path,
+                                                          selected.contains(
+                                                                f.id,
+                                                              )
+                                                              ? visible
+                                                                    .where(
+                                                                      (
+                                                                        f,
+                                                                      ) => selected
+                                                                          .contains(
+                                                                            f.id,
+                                                                          ),
+                                                                    )
+                                                                    .toList()
+                                                              : [f],
+                                                          generation: p
+                                                              .connectionGeneration,
+                                                        ),
+                                                        feedback:
+                                                            const SizedBox.shrink(),
+                                                        child: row,
+                                                      );
+                                                      final live = m;
+                                                      if (live
+                                                              is LiveWorkbenchModel &&
+                                                          p is LiveTerminalSession) {
+                                                        row = ExplorerExportDrag(
+                                                          model: live,
+                                                          source:
+                                                              p as LiveTerminalSession,
+                                                          selection: () =>
+                                                              selected.contains(
+                                                                f.id,
+                                                              )
+                                                              ? visible
+                                                                    .where(
+                                                                      (
+                                                                        entry,
+                                                                      ) => selected
+                                                                          .contains(
+                                                                            entry.id,
+                                                                          ),
+                                                                    )
+                                                                    .toList()
+                                                              : [f],
+                                                          child: row,
+                                                        );
+                                                      }
+                                                      return f.folder
+                                                          ? KeyedSubtree(
+                                                              key: _folderBounds
+                                                                  .putIfAbsent(
+                                                                    f.id,
+                                                                    GlobalKey
+                                                                        .new,
+                                                                  ),
+                                                              child: dropTarget(
+                                                                folder: f,
+                                                                child: row,
+                                                              ),
+                                                            )
+                                                          : row;
+                                                    },
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                        ],
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                    if (_explorerOver)
-                      IgnorePointer(
-                        child: Stack(
-                          children: [
-                            if (_explorerHotZone)
-                              Positioned(
-                                top: 0,
-                                right: 0,
-                                bottom: 0,
-                                width: _explorerHotZoneWidth,
-                                child: ColoredBox(
-                                  color: Theme.of(context).colorScheme.primary
-                                      .withValues(alpha: .16),
-                                ),
-                              ),
-                            Positioned(
-                              top: 8,
-                              left: 0,
-                              right: 0,
-                              child: Center(
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 5,
-                                  ),
-                                  decoration: BoxDecoration(
+                      if (_explorerOver)
+                        IgnorePointer(
+                          child: Stack(
+                            children: [
+                              if (_explorerHotZone)
+                                Positioned(
+                                  top: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  width: _explorerHotZoneWidth,
+                                  child: ColoredBox(
                                     color: Theme.of(context).colorScheme.primary
-                                        .withValues(alpha: .9),
-                                    borderRadius: BorderRadius.circular(12),
+                                        .withValues(alpha: .16),
                                   ),
-                                  child: Text(
-                                    _explorerHotZone
-                                        ? '松开上传到当前目录（右侧热区）'
-                                        : hoverTarget != null
-                                        ? '松开上传到文件夹「${_folderObjects[hoverTarget]?.name ?? ''}」'
-                                        : '松开上传到当前目录',
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.white,
+                                ),
+                              Positioned(
+                                top: 8,
+                                left: 0,
+                                right: 0,
+                                child: Center(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 5,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary
+                                          .withValues(alpha: .9),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      _explorerHotZone
+                                          ? '松开上传到当前目录（右侧热区）'
+                                          : hoverTarget != null
+                                          ? '松开上传到文件夹「${_folderObjects[hoverTarget]?.name ?? ''}」'
+                                          : '松开上传到当前目录',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.white,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

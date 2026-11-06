@@ -425,6 +425,12 @@ class WorkbenchModel extends ChangeNotifier {
   Future<void> applyTheme(bool value) async => chooseTheme(value);
 
   double sidebarWidth = 380, queueHeight = 238, hostListWidth = 290;
+
+  /// Total visible SFTP column width (+ scrollbar allowance) published by the
+  /// files panel each build; the sidebar grip caps the panel there so the
+  /// pane cannot be stretched far past its content into dead space. Zero
+  /// means "not published yet" and leaves the previous bound in place.
+  double sftpContentBound = 0;
   final settings = <String, Object>{};
   String? requestedHostId, requestedHostCategory;
   void editHostSettings(String id, {String category = '连接'}) {
