@@ -55,6 +55,8 @@ String diagnosticLabel(DiagnosticCode code) => switch (code) {
   DiagnosticCode.downloadQueued => '下载请求已入队',
   DiagnosticCode.transferRequestRejected => '传输入队请求未成功',
   DiagnosticCode.coreWorkerPanicked => '核心工作异常退出（详情已脱敏）',
+  DiagnosticCode.directorySizeRemote => '目录大小：远端扫描',
+  DiagnosticCode.directorySizeFallback => '目录大小：回退本地扫描',
 };
 bool diagnosticIsFailure(DiagnosticCode code) => [
   DiagnosticCode.connectionRejected,

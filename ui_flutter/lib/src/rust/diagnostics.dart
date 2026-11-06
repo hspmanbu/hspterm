@@ -31,6 +31,8 @@ enum DiagnosticCode {
   downloadQueued,
   transferRequestRejected,
   coreWorkerPanicked,
+  directorySizeRemote,
+  directorySizeFallback,
 }
 
 class DiagnosticEvent {
