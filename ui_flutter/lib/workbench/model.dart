@@ -1708,6 +1708,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       ..clear()
       ..addEntries(_draftRecords.values.map((h) => MapEntry(h.id, _host(h))));
     unawaited(_loadRecents(epoch));
+    unawaited(_loadSftpSortPrefs());
     changed();
   }
 
@@ -1923,7 +1924,15 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       // connections never reconnect implicitly.
       final connected = s.controller.connected;
       if (s.wasConnected && !connected && !s.temporaryConnection) {
-        unawaited(_autoReconnectIfEnabled(s));
+        // Brief delay before the single attempt: avoids hammering a
+        // transport that is still retiring (the 2026-11-06 log's rejected
+        // auto attempt was the user's own server restart — failure then is
+        // correct and manual retry stays available).
+        Timer(const Duration(seconds: 3), () {
+          if (!_disposed && _shutdown == null && sessions.contains(s)) {
+            unawaited(_autoReconnectIfEnabled(s));
+          }
+        });
       }
       s.wasConnected = connected;
       if (observedDirectory != s.controller.directoryReportVersion) {
@@ -2018,6 +2027,43 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         generation: generation,
         error: error,
       );
+    }
+  }
+
+  final _sftpSortPrefs = <String, (int, bool)>{};
+  bool _sftpSortLoaded = false;
+
+  @override
+  (int, bool)? rememberedSort(String hostId) => _sftpSortPrefs[hostId];
+
+  @override
+  void rememberSort(String hostId, int column, bool ascending) {
+    if (_disposed || _shutdown != null) return;
+    _sftpSortPrefs[hostId] = (column, ascending);
+    _track(
+      rust.recordSftpSortPref(
+        hostId: hostId,
+        column: column,
+        ascending: ascending,
+      ),
+      reportFailure: () => false,
+    );
+  }
+
+  Future<void> _loadSftpSortPrefs() async {
+    if (_sftpSortLoaded || _disposed || _shutdown != null) return;
+    _sftpSortLoaded = true;
+    try {
+      final entries = await rust.loadSftpSortPrefs();
+      if (_disposed || _shutdown != null) return;
+      _sftpSortPrefs
+        ..clear()
+        ..addEntries(
+          entries.map((e) => MapEntry(e.hostId, (e.column, e.ascending))),
+        );
+      changed();
+    } catch (_) {
+      // Convenience only; the default sort stays.
     }
   }
 

@@ -83,7 +83,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('复制文件/文件夹名'), findsOneWidget);
       expect(find.text('发送文件/文件夹名至终端'), findsOneWidget);
-      await tester.tap(find.text('复制到'));
+      // Copy/Move open their target list on click (hover no longer opens
+      // submenus).
+      await tester.tap(find.text('复制到其他主机…'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('${other.host.name} · ${other.path}'));
       await tester.pumpAndSettle();

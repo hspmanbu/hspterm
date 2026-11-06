@@ -185,7 +185,18 @@ class TerminalPaintCache {
         Rect.fromLTWH(rect.left, 0, cell.width * wide, cell.height),
       );
       final glyph = this.glyph(c.text, fg, c.flags, fontSize);
-      glyph.paint(canvas, Offset(rect.left, (cell.height - glyph.height) / 2));
+      // Center the glyph inside its cell span: CJK fallback glyphs can be
+      // narrower or wider than the strict cell grid, and left-aligned painting
+      // then visibly detaches text from selection boxes (#7). Centering keeps
+      // both on the same midline; ASCII glyphs measure one cell and are
+      // unaffected.
+      glyph.paint(
+        canvas,
+        Offset(
+          rect.left + ((cell.width * wide) - glyph.width) / 2,
+          (cell.height - glyph.height) / 2,
+        ),
+      );
       paint
         ..color = Color(fg)
         ..strokeWidth = 1;

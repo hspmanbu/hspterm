@@ -139,7 +139,12 @@ class TerminalViewState extends State<TerminalView>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _active = state == AppLifecycleState.resumed;
+    // Desktop focus loss reports `inactive`: the window is still on screen,
+    // so the terminal keeps rendering (2026-11-06 feedback — a blank pane on
+    // blur looked broken). Only genuinely hidden states stop painting.
+    _active =
+        state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.inactive;
     _visibility();
   }
 

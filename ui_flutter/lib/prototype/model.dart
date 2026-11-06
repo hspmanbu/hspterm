@@ -516,6 +516,10 @@ class WorkbenchModel extends ChangeNotifier {
     if (g != null) selectTab(g.selectedId);
   }
 
+  /// Device-local per-host listing sort memory; the live model persists it.
+  (int, bool)? rememberedSort(String hostId) => null;
+  void rememberSort(String hostId, int column, bool ascending) {}
+
   Future<void> openTemporaryHost(DemoHost host) =>
       Future.error(UnsupportedError('模拟模式不建立临时SSH连接'));
 

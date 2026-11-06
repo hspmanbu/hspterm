@@ -24,6 +24,7 @@ pub mod recent_hosts;
 mod repository;
 mod revision;
 pub mod secure_unlock;
+pub mod sftp_host_prefs;
 pub mod sftp_last_dirs;
 pub mod ssh_proxy;
 pub mod terminal_preferences;

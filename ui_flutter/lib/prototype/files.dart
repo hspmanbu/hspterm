@@ -120,7 +120,7 @@ class SftpSidebar extends StatelessWidget {
                   key: const ValueKey('queue-grip'),
                   horizontal: false,
                   onDelta: (d) {
-                    model.queueHeight = (height - d).clamp(
+                    model.queueHeight = (model.queueHeight - d).clamp(
                       130,
                       bounds.maxHeight * .75,
                     );
@@ -166,6 +166,11 @@ class FilesPanel extends StatefulWidget {
   final Future<void> Function(BuildContext)? onEditorDrafts;
   @override
   State<FilesPanel> createState() => _FilesPanelState();
+}
+
+int _compareText(String a, String b) {
+  final x = a.toLowerCase().compareTo(b.toLowerCase());
+  return x != 0 ? x : a.compareTo(b);
 }
 
 class _FilesPanelState extends State<FilesPanel> {
@@ -335,6 +340,11 @@ class _FilesPanelState extends State<FilesPanel> {
     foldersFirst = m.fileFoldersFirst;
     hidden = m.fileShowHidden;
     compact = m.fileCompact;
+    final remembered = m.rememberedSort(p.host.id);
+    if (remembered case final pref?) {
+      sortColumn = pref.$1;
+      ascending = pref.$2;
+    }
     _visible = null;
   }
 
@@ -437,8 +447,10 @@ class _FilesPanelState extends State<FilesPanel> {
           a.byteSize != null && b.byteSize != null
               ? a.byteSize!.compareTo(b.byteSize!)
               : a.size.compareTo(b.size),
-        3 => a.kind.compareTo(b.kind),
-        _ => a.name.compareTo(b.name),
+        // Case-insensitive compare with the raw spelling as a stable
+        // tie-breaker: mixed-case listings must not bucket uppercase first.
+        3 => _compareText(a.kind, b.kind),
+        _ => _compareText(a.name, b.name),
       };
       return ascending ? x : -x;
     });
@@ -851,7 +863,7 @@ class _FilesPanelState extends State<FilesPanel> {
         )
         .map((item) => (item, item.connectionGeneration, item.path))
         .toList();
-    final action = await showMenu<String>(
+    final raw = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
         position.dx,
@@ -886,30 +898,11 @@ class _FilesPanelState extends State<FilesPanel> {
           const DeskMenuItem(value: 'edit-encoding', child: Text('按指定编码编辑…')),
         if (widget.onEditRawFile != null && !file.folder)
           const DeskMenuItem(value: 'edit-raw', child: Text('外部编辑大文件…')),
-        for (final move in [false, true])
-          DeskMenuItem<String>(
-            enabled: false,
-            child: SubmenuButton(
-              menuChildren: [
-                for (var i = 0; i < targets.length; i++)
-                  MenuItemButton(
-                    onPressed: () => Navigator.pop(
-                      context,
-                      '${move ? 'move' : 'copy'}-target:$i',
-                    ),
-                    child: Text(
-                      '${targets[i].$1.host.name} · ${targets[i].$3}',
-                    ),
-                  ),
-                if (targets.isEmpty)
-                  const MenuItemButton(
-                    onPressed: null,
-                    child: Text('没有其他已连接主机'),
-                  ),
-              ],
-              child: Text(move ? '移动到' : '复制到'),
-            ),
-          ),
+        // Copy/Move open their target list on click, not on hover: quickly
+        // sliding the pointer across must not flash the submenu over the
+        // other entries (2026-11-06 feedback).
+        const DeskMenuItem(value: 'copy-menu', child: Text('复制到其他主机…')),
+        const DeskMenuItem(value: 'move-menu', child: Text('移动到其他主机…')),
         const DeskMenuItem(value: 'name', child: Text('复制文件/文件夹名')),
         const DeskMenuItem(value: 'path', child: Text('复制路径')),
         const DeskMenuItem(value: 'send-name', child: Text('发送文件/文件夹名至终端')),
@@ -917,7 +910,32 @@ class _FilesPanelState extends State<FilesPanel> {
         const DeskMenuItem(value: 'properties', child: Text('属性')),
       ],
     );
-    if (!mounted || action == null) return;
+    var action = raw ?? '';
+    if (raw == 'copy-menu' || raw == 'move-menu') {
+      if (!mounted || !current()) return;
+      final move = raw == 'move-menu';
+      action =
+          await showMenu<String>(
+            context: context,
+            position: RelativeRect.fromLTRB(
+              position.dx + 24,
+              position.dy + 24,
+              position.dx + 24,
+              position.dy + 24,
+            ),
+            items: [
+              for (var i = 0; i < targets.length; i++)
+                DeskMenuItem(
+                  value: '${move ? 'move' : 'copy'}-target:$i',
+                  child: Text('${targets[i].$1.host.name} · ${targets[i].$3}'),
+                ),
+              if (targets.isEmpty)
+                const DeskMenuItem(enabled: false, child: Text('没有其他已连接主机')),
+            ],
+          ) ??
+          '';
+    }
+    if (!mounted || action.isEmpty) return;
     if (!current()) {
       notice(context, '目录或会话已切换，请重新打开菜单；未执行文件操作');
       return;
@@ -1393,22 +1411,8 @@ class _FilesPanelState extends State<FilesPanel> {
       hoverTarget = folder?.id;
     });
     if (folder == null) return;
-    final source = p,
-        generation = p.connectionGeneration,
-        directory = p.path,
-        files = p.files;
-    _hoverTimer = Timer(const Duration(milliseconds: 750), () {
-      if (mounted &&
-          identical(source, p) &&
-          p.connectionGeneration == generation &&
-          p.path == directory &&
-          identical(p.files, files) &&
-          !p.loadingDirectory &&
-          !p.disconnected &&
-          hoverTarget == folder.id) {
-        navigate(pathOf(directory, folder.name));
-      }
-    });
+    // Hovering during an Explorer upload never opens the folder: drops are
+    // explicit, and an accidental navigate would retarget the upload.
   }
 
   Future<void> _explorerDrop(List<String> paths, Offset point) async {
@@ -1487,17 +1491,8 @@ class _FilesPanelState extends State<FilesPanel> {
           return false;
         }
         if (folder != null) {
-          final origin = p, generation = p.connectionGeneration, path = p.path;
-          _hoverTimer?.cancel();
-          _hoverTimer = Timer(const Duration(milliseconds: 750), () {
-            if (mounted &&
-                identical(p, origin) &&
-                p.connectionGeneration == generation &&
-                p.path == path &&
-                hoverTarget == folder.id) {
-              navigate('${p.path}/${folder.name}');
-            }
-          });
+          // No hover-navigation during drags: dropping onto a folder is the
+          // only way to target it.
           setState(() => hoverTarget = folder.id);
         }
         return true;
@@ -1987,6 +1982,11 @@ class _FilesPanelState extends State<FilesPanel> {
                                                               sortColumn = i;
                                                               _newEntryTail =
                                                                   null;
+                                                              m.rememberSort(
+                                                                p.host.id,
+                                                                i,
+                                                                ascending,
+                                                              );
                                                             },
                                                           ),
                                                           child: Padding(
@@ -2079,7 +2079,15 @@ class _FilesPanelState extends State<FilesPanel> {
                                               Widget row = SelectionTarget(
                                                 behavior:
                                                     HitTestBehavior.opaque,
-                                                onTapDown: (_) => select(f),
+                                                // Taps land on the inline
+                                                // rename editor itself while
+                                                // it is open; taking list focus
+                                                // there would cancel editing.
+                                                onTapDown: (_) {
+                                                  if (editing != f.id) {
+                                                    select(f);
+                                                  }
+                                                },
                                                 onDoubleTap: () => open(f),
                                                 // Complete the pointer sequence before pushing
                                                 // a modal menu/editor that can steal input.
@@ -2115,60 +2123,61 @@ class _FilesPanelState extends State<FilesPanel> {
                                                                 left: 34,
                                                                 right: 10,
                                                               ),
-                                                          child: Center(
-                                                            // Keep the edited name
-                                                            // on the same text
-                                                            // midline as the row.
-                                                            child: Focus(
-                                                              onKeyEvent: (_, e) {
-                                                                if (e
-                                                                        is KeyDownEvent &&
-                                                                    e.logicalKey ==
-                                                                        LogicalKeyboardKey
-                                                                            .escape) {
-                                                                  setState(() {
-                                                                    editing =
-                                                                        null;
-                                                                    renameError =
-                                                                        null;
-                                                                  });
-                                                                  _focus
-                                                                      .requestFocus();
-                                                                  return KeyEventResult
-                                                                      .handled;
-                                                                }
+                                                          child: Focus(
+                                                            onKeyEvent: (_, e) {
+                                                              if (e
+                                                                      is KeyDownEvent &&
+                                                                  e.logicalKey ==
+                                                                      LogicalKeyboardKey
+                                                                          .escape) {
+                                                                setState(() {
+                                                                  editing =
+                                                                      null;
+                                                                  renameError =
+                                                                      null;
+                                                                });
+                                                                _focus
+                                                                    .requestFocus();
                                                                 return KeyEventResult
-                                                                    .ignored;
-                                                              },
-                                                              child: TextField(
-                                                                key:
-                                                                    const ValueKey(
-                                                                      'inline-rename',
-                                                                    ),
-                                                                controller:
-                                                                    _rename,
-                                                                focusNode:
-                                                                    _renameFocus,
-                                                                autofocus: true,
-                                                                style: TextStyle(
-                                                                  fontSize:
-                                                                      _nameSize,
-                                                                ),
-                                                                decoration: InputDecoration(
-                                                                  errorText:
-                                                                      renameError,
-                                                                  contentPadding:
-                                                                      const EdgeInsets.symmetric(
-                                                                        horizontal:
-                                                                            8,
-                                                                        vertical:
-                                                                            6,
-                                                                      ),
-                                                                ),
-                                                                onSubmitted: (
-                                                                  _,
-                                                                ) => commitRename(),
+                                                                    .handled;
+                                                              }
+                                                              return KeyEventResult
+                                                                  .ignored;
+                                                            },
+                                                            child: TextField(
+                                                              key: const ValueKey(
+                                                                'inline-rename',
                                                               ),
+                                                              controller:
+                                                                  _rename,
+                                                              focusNode:
+                                                                  _renameFocus,
+                                                              autofocus: true,
+                                                              // Tight row-height
+                                                              // constraints make the
+                                                              // decorator fill the
+                                                              // row; center the text
+                                                              // on its midline.
+                                                              textAlignVertical:
+                                                                  TextAlignVertical
+                                                                      .center,
+                                                              style: TextStyle(
+                                                                fontSize:
+                                                                    _nameSize,
+                                                              ),
+                                                              decoration: InputDecoration(
+                                                                errorText:
+                                                                    renameError,
+                                                                contentPadding:
+                                                                    const EdgeInsets.symmetric(
+                                                                      horizontal:
+                                                                          8,
+                                                                      vertical:
+                                                                          6,
+                                                                    ),
+                                                              ),
+                                                              onSubmitted: (_) =>
+                                                                  commitRename(),
                                                             ),
                                                           ),
                                                         )

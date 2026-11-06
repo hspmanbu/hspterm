@@ -26,6 +26,9 @@ use zeroize::Zeroizing;
 const SEGMENT_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ROW_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_RAM_HISTORY_ROWS: usize = 256;
+/// Upper bound for the degraded RAM-only history so the fallback can never
+/// grow unbounded when the encrypted cold store is unavailable.
+const DEGRADED_RAM_ROWS: usize = 8192;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HistoryStats {
@@ -117,6 +120,29 @@ impl Drop for Segment {
             .fetch_sub(self.length.load(Ordering::Relaxed), Ordering::Relaxed);
     }
 }
+/// Degraded-mode row backing: keeps paged-out cells in RAM. Used only when
+/// the encrypted cold-history store cannot be created (e.g. a locked-down
+/// temp directory); history stays bounded by the reduced RAM row budget so
+/// memory remains capped instead of failing terminal creation outright.
+struct MemoryRow {
+    columns: usize,
+    cells: Mutex<Vec<Cell>>,
+}
+impl std::fmt::Debug for MemoryRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryRow")
+            .field("columns", &self.columns)
+            .finish_non_exhaustive()
+    }
+}
+impl RowBacking<Cell> for MemoryRow {
+    fn columns(&self) -> usize {
+        self.columns
+    }
+    fn load(&self) -> Vec<Cell> {
+        self.cells.lock().clone()
+    }
+}
 struct DiskRow {
     segment: Arc<Segment>,
     offset: u64,
@@ -199,12 +225,31 @@ impl RowBacking<Cell> for DiskRow {
 }
 
 pub(crate) struct HistoryPager {
-    run: Arc<Run>,
-    current: Arc<Segment>,
+    run: Option<Arc<Run>>,
+    current: Option<Arc<Segment>>,
     ram_rows: usize,
 }
 impl HistoryPager {
     pub fn new(ram_rows: usize) -> io::Result<Self> {
+        match Self::try_new(ram_rows) {
+            Ok(pager) => Ok(pager),
+            Err(_) => {
+                // Degraded RAM-only mode: a terminal without cold history is
+                // strictly better than no terminal at all (2026-11-05 second
+                // connection failures). Bounded so memory stays capped.
+                Ok(Self::ram_only(ram_rows))
+            }
+        }
+    }
+    /// Bounded RAM-only fallback; rows page into memory backings.
+    pub(crate) fn ram_only(ram_rows: usize) -> Self {
+        Self {
+            run: None,
+            current: None,
+            ram_rows: ram_rows.min(DEGRADED_RAM_ROWS),
+        }
+    }
+    fn try_new(ram_rows: usize) -> io::Result<Self> {
         let root = history_root()?;
         // Windows endpoints hit transient create/lock failures under antivirus
         // or indexing scanners; a fresh run directory name dodges them without
@@ -263,20 +308,35 @@ impl HistoryPager {
         });
         let current = Segment::new(run.clone())?;
         Ok(Self {
-            run,
-            current,
+            run: Some(run),
+            current: Some(current),
             ram_rows,
         })
     }
     pub fn check(&self) -> io::Result<()> {
-        self.run.check()
+        match &self.run {
+            Some(run) => run.check(),
+            // RAM-only degraded mode has no fault channel.
+            None => Ok(()),
+        }
     }
     pub fn fault_checker(&self) -> Arc<dyn Fn() -> io::Result<()> + Send + Sync> {
         let run = self.run.clone();
-        Arc::new(move || run.check())
+        Arc::new(move || match &run {
+            Some(run) => run.check(),
+            None => Ok(()),
+        })
     }
     fn store(&mut self, row: &Row<Cell>) -> io::Result<Arc<dyn RowBacking<Cell>>> {
         self.check()?;
+        if self.run.is_none() {
+            // Degraded mode: keep the cells in RAM behind the same bounded
+            // interface; the reduced ram_rows budget caps the total.
+            return Ok(Arc::new(MemoryRow {
+                columns: row.len(),
+                cells: Mutex::new(row[..].to_vec()),
+            }));
+        }
         let plain = Zeroizing::new(postcard::to_allocvec(&row[..]).map_err(io::Error::other)?);
         if plain.len() > MAX_ROW_BYTES {
             return Err(io::Error::new(
@@ -285,11 +345,21 @@ impl HistoryPager {
             ));
         }
         let mut compressed = Zeroizing::new(lz4_flex::compress_prepend_size(&plain));
-        if self.current.length.load(Ordering::Relaxed) > SEGMENT_BYTES {
-            self.current = Segment::new(self.run.clone())?;
+        let run = self.run.as_ref().expect("checked above");
+        if self
+            .current
+            .as_ref()
+            .expect("disk mode")
+            .length
+            .load(Ordering::Relaxed)
+            > SEGMENT_BYTES
+        {
+            let segment = Segment::new(run.clone())?;
+            self.current = Some(segment);
         }
-        let offset = self.current.length.load(Ordering::Relaxed);
-        let cipher = Aes256Gcm::new_from_slice(self.run.key.as_ref())
+        let current = self.current.as_ref().expect("disk mode");
+        let offset = current.length.load(Ordering::Relaxed);
+        let cipher = Aes256Gcm::new_from_slice(run.key.as_ref())
             .map_err(|_| io::Error::other("历史密钥长度无效"))?;
         let mut nonce = [0; 12];
         OsRng.fill_bytes(&mut nonce);
@@ -304,14 +374,12 @@ impl HistoryPager {
         let mut record = Vec::with_capacity(length);
         record.extend_from_slice(&nonce);
         record.extend_from_slice(&compressed);
-        self.current.write(offset, &record)?;
-        self.current
-            .length
-            .fetch_add(length as u64, Ordering::Relaxed);
-        self.run.bytes.fetch_add(length as u64, Ordering::Relaxed);
-        self.run.writes.fetch_add(1, Ordering::Relaxed);
+        current.write(offset, &record)?;
+        current.length.fetch_add(length as u64, Ordering::Relaxed);
+        run.bytes.fetch_add(length as u64, Ordering::Relaxed);
+        run.writes.fetch_add(1, Ordering::Relaxed);
         Ok(Arc::new(DiskRow {
-            segment: self.current.clone(),
+            segment: self.current.clone().expect("disk mode"),
             offset,
             length,
             columns: row.len(),
@@ -326,7 +394,11 @@ impl HistoryPager {
         }
         match self.store(row) {
             Ok(page) => row.page_out(page),
-            Err(error) => self.run.fail(&error),
+            Err(error) => {
+                if let Some(run) = &self.run {
+                    run.fail(&error);
+                }
+            }
         }
     }
     pub fn checkpoint(&mut self, grid: &mut Grid<Cell>, full: bool) -> io::Result<()> {
@@ -346,7 +418,9 @@ impl HistoryPager {
             let page = match self.store(row) {
                 Ok(page) => page,
                 Err(error) => {
-                    self.run.fail(&error);
+                    if let Some(run) = &self.run {
+                        run.fail(&error);
+                    }
                     return Err(error);
                 }
             };
@@ -356,16 +430,29 @@ impl HistoryPager {
     }
     pub fn stats(&self, grid: &Grid<Cell>) -> HistoryStats {
         HistoryStats {
-            disk_bytes: self.run.bytes.load(Ordering::Relaxed),
-            disk_reads: self.run.reads.load(Ordering::Relaxed),
-            disk_writes: self.run.writes.load(Ordering::Relaxed),
+            disk_bytes: self
+                .run
+                .as_ref()
+                .map_or(0, |run| run.bytes.load(Ordering::Relaxed)),
+            disk_reads: self
+                .run
+                .as_ref()
+                .map_or(0, |run| run.reads.load(Ordering::Relaxed)),
+            disk_writes: self
+                .run
+                .as_ref()
+                .map_or(0, |run| run.writes.load(Ordering::Relaxed)),
             resident_history_cells: grid.resident_history_cells(),
             retained_rows: grid.history_size(),
         }
     }
     #[cfg(test)]
     pub fn path(&self) -> &Path {
-        self.run.directory.path()
+        self.run
+            .as_ref()
+            .expect("tests exercise the disk-backed pager")
+            .directory
+            .path()
     }
 }
 fn history_root() -> io::Result<PathBuf> {

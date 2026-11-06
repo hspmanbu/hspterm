@@ -622,7 +622,11 @@ class _WorkbenchBody extends StatelessWidget {
                 key: const ValueKey('sidebar-grip'),
                 horizontal: true,
                 onDelta: (d) {
-                  m.sidebarWidth = (width + d).clamp(
+                  // Accumulate against the live value: a build-time base
+                  // loses pan deltas that arrive between rebuilds (visible
+                  // as the grip lagging behind the pointer at high input
+                  // rates / display scaling).
+                  m.sidebarWidth = (m.sidebarWidth + d).clamp(
                     276,
                     (b.maxWidth - 245).clamp(276, 660),
                   );

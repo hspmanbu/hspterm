@@ -117,9 +117,26 @@ enum Action {
     Sample,
     Processes,
     ServerCopy(String),
+    DirSize(String),
     Terminate { pid: u32, start: u64, boot: String },
 }
 fn command(action: &Action) -> Result<String, InspectionError> {
+    if let Action::DirSize(path) = action {
+        // Fixed script, plain argv: the path is never interpolated into a
+        // shell string, and only an absolute POSIX path is accepted.
+        if !path.starts_with('/')
+            || path.len() > 16384
+            || path.contains('\u{0000}')
+            || path.bytes().any(|b| b < 0x20)
+        {
+            return Err(InspectionError::Identity);
+        }
+        return Ok(format!(
+            "python3 -I -S -c '{}' -- {}",
+            include_str!("inspection/dir_size.py").replace('\'', "'\\''"),
+            path.replace('\'', "'\\''"),
+        ));
+    }
     if let Action::ServerCopy(request) = action {
         if request.len() > 200_000 || !request.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(InspectionError::Identity);
@@ -144,6 +161,14 @@ fn command(action: &Action) -> Result<String, InspectionError> {
 }
 /// Shared one-slot bound across every acquisition from the same Transport.
 /// A timed-out channel-open stays owned until its late ACK or Root closes.
+/// Totals from the fixed server-side size walk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DirectorySize {
+    pub size: u64,
+    pub files: u64,
+    pub directories: u64,
+}
+
 #[derive(Clone)]
 pub struct Inspector {
     handle: Arc<client::Handle<Client>>,
@@ -170,7 +195,7 @@ impl Inspector {
         action: Action,
         cancel: CancellationToken,
     ) -> Result<Vec<u8>, SshError> {
-        let deadline = if matches!(action, Action::ServerCopy(_)) {
+        let deadline = if matches!(action, Action::ServerCopy(_) | Action::DirSize(_)) {
             Duration::from_secs(120)
         } else {
             DEADLINE
@@ -241,6 +266,40 @@ impl Inspector {
     }
     /// Only a fixed server-side file copier, never arbitrary shell commands.
     /// The bridge owns the SFTP namespace marker and validates these fields.
+    /// Server-local directory size for the properties dialog: one fixed
+    /// read-only python walk (same execution model as the server copy), a
+    /// single round trip instead of per-directory SFTP listings.
+    pub async fn directory_size(
+        &self,
+        path: &str,
+        cancel: CancellationToken,
+    ) -> Result<DirectorySize, SshError> {
+        let raw = self
+            .execute(Action::DirSize(path.to_owned()), cancel)
+            .await?;
+        let line = raw
+            .split(|&b| b == b'\n')
+            .rev()
+            .find(|line| line.starts_with(b"{"))
+            .ok_or(InspectionError::Unconfirmed)?;
+        let value: serde_json::Value =
+            serde_json::from_slice(line).map_err(|_| InspectionError::Unconfirmed)?;
+        if value.get("error").is_some() {
+            return Err(InspectionError::Unavailable.into());
+        }
+        let pick = |key: &str| {
+            value
+                .get(key)
+                .and_then(serde_json::Value::as_u64)
+                .ok_or(InspectionError::Unconfirmed)
+        };
+        Ok(DirectorySize {
+            size: pick("size")?,
+            files: pick("files")?,
+            directories: pick("dirs")?,
+        })
+    }
+
     pub async fn copy_file(
         &self,
         request: serde_json::Value,

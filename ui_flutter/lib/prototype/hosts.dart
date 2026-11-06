@@ -2141,7 +2141,7 @@ class HostManagerState extends State<HostManager> {
                       key: const ValueKey('host-list-grip'),
                       horizontal: true,
                       onDelta: (d) {
-                        m.hostListWidth = (listWidth + d).clamp(
+                        m.hostListWidth = (m.hostListWidth + d).clamp(
                           190,
                           bounds.maxWidth * .43,
                         );

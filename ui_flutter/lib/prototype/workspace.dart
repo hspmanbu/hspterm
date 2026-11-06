@@ -134,7 +134,9 @@ class _Tree extends StatelessWidget {
             ),
             horizontal: s.horizontal,
             onDelta: (d) {
-              s.ratio = (ratio + d / length).clamp(low, high);
+              // Live-state accumulation; the build-time `ratio` base drops
+              // deltas that fire between rebuilds.
+              s.ratio = (s.ratio + d / length).clamp(low, high);
               model.changed();
             },
           ),

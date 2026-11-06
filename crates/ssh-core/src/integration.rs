@@ -31,26 +31,26 @@ impl Launch {
     }
 }
 
-/// Read-only capability probe executed on the already-open interactive PTY
-/// channel. Debian/Ubuntu attach PAM/MOTD login banners to the first session
-/// channel that starts a command, so the probe must run where the banner
-/// belongs: every byte the server prints (banner included) is relayed verbatim
-/// into `early` for the terminal stream, and the probe script itself prints
-/// nothing. The decision uses a distinctive exit status; unlike stdout markers,
-/// a fresh process exit code has no replay window. Unsupported syntax/version
-/// or an explicitly denied exec falls back to the normal request_shell;
-/// IO/timeout errors fail startup and retire Root. The channel is spent either
-/// way and the caller must open a fresh one for the real session.
-pub(crate) async fn probe_on_pty(
-    channel: &mut russh::Channel<crate::client::Msg>,
+/// Read-only capability probe on a dedicated exec channel. Verified against a
+/// real Ubuntu sshd (2026-11-06): exec sessions never print the PAM/MOTD
+/// banner — with or without a PTY — so the banner can only come from the
+/// caller's `request_shell` session. The probe therefore runs on a *second*
+/// channel while the user's default shell (and its banner) stays untouched on
+/// the main one. The decision uses a distinctive exit status; unlike stdout
+/// markers, a fresh process exit code has no replay window. Unsupported
+/// syntax/version or an explicitly denied exec reports `Ok(false)`;
+/// IO/timeout errors fail startup and retire Root. Any output the probe
+/// channel produces is discarded: it is not terminal content.
+pub(crate) async fn probe_on_exec_channel(
+    handle: &russh::client::Handle<crate::Client>,
     budget: &mut crate::budget::Budget,
-    early: &mut std::collections::VecDeque<Vec<u8>>,
 ) -> Result<bool, crate::SshError> {
     use crate::{SshError, Stage};
     use russh::ChannelMsg;
     let probe = PROBE_COMMAND;
     budget
         .run(Stage::Shell, async {
+            let mut channel = handle.channel_open_session_flow_controlled().await?;
             channel.exec(true, probe.as_bytes()).await?;
             let mut buffered = 0usize;
             let mut accepted = false;
@@ -65,14 +65,12 @@ pub(crate) async fn probe_on_pty(
                     }
                     Some(ChannelMsg::Data { data })
                     | Some(ChannelMsg::ExtendedData { data, .. }) => {
-                        // Relay the remote login banner verbatim; the probe
-                        // prints nothing itself, so this is exactly what a
-                        // plain interactive login would have shown.
+                        // The probe script prints nothing; stray output is
+                        // probe-channel noise, never terminal content.
                         buffered += data.len();
-                        if buffered > 1_048_576 {
+                        if buffered > 4096 {
                             return Err(SshError::RequestDenied(Stage::Shell));
                         }
-                        early.push_back(data.to_vec());
                     }
                     Some(ChannelMsg::ExitStatus { exit_status }) if status.is_none() => {
                         status = Some(exit_status)

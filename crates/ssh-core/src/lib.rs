@@ -547,10 +547,15 @@ impl SshConnection {
                 deferred_create: None,
             }
         };
-        // The interactive PTY channel is opened before the optional Bash
-        // capability probe: Debian/Ubuntu attach PAM/MOTD login banners to the
-        // first session channel that starts a command, so the probe must run
-        // where the banner belongs instead of on a discarded side channel.
+        // Verified against a real Ubuntu sshd (2026-11-06): only a
+        // `request_shell` session prints the PAM/MOTD banner and last-login
+        // line; exec sessions never do, PTY or not. The main channel therefore
+        // always starts as the user's default shell so the banner lands in the
+        // terminal stream. When the optional Bash integration is enabled, its
+        // capability probe runs on a *separate* exec channel; only when the
+        // probe succeeds is the default shell channel replaced by a fresh
+        // channel running the fixed integration Bash (the banner already
+        // shown is never repeated — PAM opens one session per connection).
         let mut early_output = VecDeque::new();
         let (mut pty, mut creation_agent) = open_interactive_channel(
             &handle,
@@ -578,29 +583,6 @@ impl SshConnection {
             .integration
             .take()
             .filter(|_| startup.command.is_none());
-        if integration.is_some() {
-            // The probe execs on this PTY channel and relays everything the
-            // server prints (the login banner included) into the terminal
-            // stream; the exec consumes the channel whichever way it decides.
-            if !integration::probe_on_pty(&mut pty, &mut budget, &mut early_output).await? {
-                integration = None;
-            }
-            // One banner per connection: the fresh interactive channel runs
-            // only the real session, so PAM/MOTD is not printed a second time.
-            let (next, forwarded) = open_interactive_channel(
-                &handle,
-                &mut budget,
-                config.columns,
-                config.rows,
-                &mut early_output,
-                config.agent_forwarding.then(|| (agent.as_ref(), false)),
-            )
-            .await?;
-            creation_agent = forwarded;
-            pty = next;
-        }
-        let integration_command = integration.as_ref().map(integration::Launch::command);
-        let integration_nonce = integration.map(|launch| Zeroizing::new(launch.nonce().to_owned()));
         let stage = if startup.command.is_some() {
             Stage::Tmux
         } else {
@@ -610,14 +592,83 @@ impl SshConnection {
             .run(stage, async {
                 if let Some(command) = startup.command.as_ref() {
                     pty.exec(true, command.as_bytes()).await?;
-                } else if let Some(command) = &integration_command {
-                    pty.exec(true, command.as_bytes()).await?;
                 } else {
+                    // Default shell first: banner + last-login arrive here and
+                    // are preserved verbatim in `early_output`.
                     pty.request_shell(true).await?;
                 }
                 expect_success(&mut pty, &mut early_output, stage).await
             })
             .await?;
+        if integration.is_some() {
+            // The probe runs beside the (now running) default shell on its own
+            // exec channel; the shell's banner stream stays uninterrupted.
+            if !integration::probe_on_exec_channel(&handle, &mut budget).await? {
+                // Unavailable: keep the default shell channel as-is.
+                integration = None;
+            } else {
+                // Capable: swap channels. The default shell is closed (its
+                // prompt may have shown briefly) and the fixed integration
+                // Bash starts on a fresh interactive channel without a second
+                // banner. The banner/prompt bytes the shell already printed
+                // are drained first: closing the channel earlier would
+                // truncate them.
+                let drain = async {
+                    let mut seen = false;
+                    loop {
+                        // Be patient for the first bytes (update-motd scripts
+                        // can take a second), then stop after a short silent
+                        // window: that is where the banner stream settles.
+                        let patience = if seen { 350 } else { 3000 };
+                        match tokio::time::timeout(
+                            std::time::Duration::from_millis(patience),
+                            pty.wait(),
+                        )
+                        .await
+                        {
+                            Ok(Some(russh::ChannelMsg::Data { data }))
+                            | Ok(Some(russh::ChannelMsg::ExtendedData { data, .. })) => {
+                                seen = true;
+                                early_output.push_back(data.to_vec());
+                            }
+                            Ok(Some(_)) => {}
+                            Ok(None) | Err(_) => break,
+                        }
+                    }
+                };
+                budget
+                    .run(Stage::Shell, async {
+                        drain.await;
+                        Ok::<(), crate::SshError>(())
+                    })
+                    .await?;
+                let _ = pty.close().await;
+                let (next, forwarded) = open_interactive_channel(
+                    &handle,
+                    &mut budget,
+                    config.columns,
+                    config.rows,
+                    &mut early_output,
+                    config.agent_forwarding.then(|| (agent.as_ref(), false)),
+                )
+                .await?;
+                creation_agent = forwarded;
+                pty = next;
+                let command = integration
+                    .as_ref()
+                    .map(integration::Launch::command)
+                    .expect("checked above");
+                budget
+                    .run(Stage::Shell, async {
+                        pty.exec(true, command.as_bytes()).await?;
+                        expect_success(&mut pty, &mut early_output, Stage::Shell).await
+                    })
+                    .await?;
+            }
+        }
+        let integration_nonce = integration
+            .as_ref()
+            .map(|launch| Zeroizing::new(launch.nonce().to_owned()));
         let handle = Arc::new(handle);
         let heartbeat = heartbeat::Heartbeat::start(
             &handle,

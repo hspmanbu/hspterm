@@ -82,15 +82,16 @@ pub(crate) fn summary(error: &anyhow::Error) -> String {
     if let Some(known) = error.downcast_ref::<PublicFailure>() {
         return known.0.clone();
     }
+    // The SshError mapping runs BEFORE the plain-literal allowlist: variants
+    // like Terminal must surface their audited variant summaries instead of
+    // the blanket enum display (which once masked real causes as
+    // "终端尺寸无效").
+    if let Some(known) = error.downcast_ref::<hspterm_ssh_core::SshError>() {
+        return ssh_summary(known);
+    }
     let head = error.to_string();
     if literals::PUBLIC_LITERALS.contains(&head.as_str()) {
         return head;
-    }
-    // Only these audited displays interpolate bounded enum/numeric metadata.
-    // Foreign messages and arbitrary Strings are NEVER accepted by a prefix,
-    // Chinese-character heuristic, redaction regex, or guessed secret syntax.
-    if let Some(known) = error.downcast_ref::<hspterm_ssh_core::SshError>() {
-        return ssh_summary(known);
     }
     if let Some(hspterm_term_core::decorations::DecorationError::Rule(index)) =
         error.downcast_ref::<hspterm_term_core::decorations::DecorationError>()

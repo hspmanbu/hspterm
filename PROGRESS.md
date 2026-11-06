@@ -1,5 +1,24 @@
 # HSPTerm 开发进度
 
+## 2026-11-06 第五轮 Windows 反馈十一项修正（源码+Ubuntu本机构建验证完成，待推送CI）
+
+- #1 横幅根因（实验确证）：在本机真实 Ubuntu sshd 上验证——exec 会话（含 -t PTY）永不打印 PAM/MOTD，只有 request_shell 打印。上一轮"PTY 上 exec 探针"前提错误。现改为 shell-first：主通道 request_shell（横幅+上次登录如实进入终端流），探测走旁路 exec 通道 `probe_on_exec_channel`（输出丢弃、退出码42判定）；探测成功后排干 shell 输出（首字节3s耐心+350ms静默窗）再换新交互通道 exec 集成 Bash（PAM 每连接一次，横幅不重复）；失败零扰动继续默认 shell。探针脚本保持 stderr 静默+括号平衡+bash -n 回归。
+- #6 多标签：日志证实 `api.rs:552/510 create_configured_terminal`→Terminal::new→HistoryPager IO 错误被 SshError::Terminal 字面量白名单短路吞成"终端尺寸无效"。修复一：summary() 的 SshError 分派移到白名单之前（变体摘要区分 InvalidSize/History+io ErrorKind 枚举）；修复二：term-core 历史降级——HistoryPager::new 失败改为有界 RAM-only 模式（MemoryRow backing，上限8192行），终端创建不再因临时目录 IO 失败而失败；Windows 真实 io 类别待下一份日志确认。
+- #2 重命名编辑器：SizedBox.expand 占满行高 + textAlignVertical.center 同中线；`SelectionTarget.onTapDown` 在 editing==f.id 时不再抢焦点（框内点击不退出）；框外失焦/Escape 仍取消，回车应用。修正上一轮 expands:true 与 maxLines:1 的运行时断言冲突（已撤）。
+- #3 拖拽悬停不打开：Explorer hover 与内部拖拽 hover 的 750ms 导航 Timer 全部移除，仅保留高亮；落点为唯一目标。
+- #4 滚动条（组件测试固定几何）：竖向 Scrollbar 包裹横向视口→轨道钉在面板右缘（横向滚动后仍钉住，断言通过）；横向条为底部独立短条（SizedBox 14px + Scrollbar(controller:_horizontal)）；两轨道不相交（≤相切）。新增 test/sftp_scrollbar_layout_test.dart。
+- #5 分割条不跟鼠标：根因是 onDelta 闭包捕获构建期基值（width/ratio/queueHeight/listWidth），重建间的连续 pan 事件相互覆盖；列宽因读实时 `widths[i]` 而正确。四处全部改为实时值累加（sidebar-grip/split-grip/queue-grip/host-list-grip）。
+- #7 中文选区：painter 单字路径字形在 cell.width*wide 跨度内水平居中（CJK 回退字形宽度≠格宽整数倍导致文字与选区框错位）；选区两端 spacer 吸附保持。
+- #8 失焦空白：桌面失焦是 AppLifecycleState.inactive，_active 现把 inactive 视为可见（仅 hidden/paused/detached 停止渲染）。
+- #9a 复制到/移动到：SubmenuButton 悬停弹出改为普通菜单项"复制/移动到其他主机…"，点击后在原位置附近弹二级目标列表（沿用 copy-target/move-target 处理链）；测试同步更新。
+- #9b 远端 du：`inspection/dir_size.py` 固定只读扫描（scandir+lstat、跳链接、1M条目/128深度上限、argv 传参无 shell 拼接）+ Inspector::directory_size（120s 窗口、JSON 末行解析）；`sftp_directory_size_step` 优先远端一次往返（complete 页），失败置 inspector_failed 回退 SFTP 分页扫描。
+- #10 排序：_compareText 大小写不敏感+原拼写稳定次序（名称/类型列）；新增 storage-sync `sftp_host_prefs`（device-sftp-host-prefs-v1，64主机、column≤3）+ `load/record_sftp_sort_pref` FRB API；WorkbenchModel.rememberedSort/rememberSort 钩子（Mock 空实现），面板应用记忆并在表头点击时记录。
+- #11 内存：RAM-only 降级含懒盘历史（不可用即不建临时目录）；Ubuntu debug 真实 GTK 冒烟 RSS 491.5MiB（软件渲染 debug 包口径，上轮483MiB 同量级），失焦 CPU 0%。
+- 自动重连：断开后 3s 延迟单次尝试（用户澄清日志中被拒为自行重启服务器，行为正确；延迟仅防抖）；注释已如实更正。
+- 验证：cargo fmt/严格Clippy(-D warnings)0；ssh-core79/term-core42/storage-sync219 单测过（新增 sftp_host_prefs、探针语法回归保持）；FRB 重生成（+2 API、SftpSortPref DTO）；bridge_contracts 253函数/80DTO/303Dart 0发现；Flutter Analyze0；受影响组件测试86项全过（含新滚动条几何、二级菜单点击、重命名交互）；Ubuntu debug 真实 GTK 构建+启动/失焦CPU0%/正常退出0 冒烟通过（本机编译验证，按用户要求执行）。
+- 本机验证脚本 benchmark/workbench_smoke.py+resize_x11.py 自 git 历史恢复（未跟踪目录重建）；截图辅助未完成（X11 帧缓冲抓取 BadMatch，改用组件测试验证布局几何）。
+- 边界：Windows 真机（横幅 shell-first 流、第二标签 RAM 降级、远端 du、失焦渲染、分割条）待用户实测；codex kitty 尾巴遗留未变。
+
 ## 2026-11-05 第四轮 Windows 反馈十五项修正（已发布：源码de00e3a，Windows CI成功）
 
 - Windows发布：源码de00e3a已推送，run42055723033/job127343453179全部成功（15:30–15:52Z，约21分钟）：正规FRB、MSVC Release、Analyze0、CI固定14文件组件测试（含本轮重写的file_properties_dialog/sftp_feedback_ui）、原生启动/正常退出、正常关闭重开窗口几何恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42055723033/artifacts/13431500392 （HSPTerm-windows-x64，40,087,426字节，2026-11-19到期）。锁库启动工作集120.73/117.56/117.53MiB（artifact13431345518，Server2022口径，与上轮121.59/117.40/117.38持平）。旧run42021544762为e9368f8基线，未重发。

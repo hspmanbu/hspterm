@@ -3026,6 +3026,50 @@ pub struct SftpLastDir {
     pub path: String,
 }
 
+/// Device-local SFTP sort preference per formal host (column, ascending).
+pub async fn load_sftp_sort_prefs() -> Result<Vec<SftpSortPref>> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(|| {
+            with_vault(|v| {
+                Ok(hspterm_storage_sync::sftp_host_prefs::load(v)?
+                    .into_iter()
+                    .map(|(host_id, column, ascending)| SftpSortPref {
+                        host_id,
+                        column,
+                        ascending,
+                    })
+                    .collect())
+            })
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+/// Remembers one host's listing sort for the next connection.
+pub async fn record_sftp_sort_pref(host_id: String, column: u32, ascending: bool) -> Result<()> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(move || {
+            with_vault(|v| {
+                hspterm_storage_sync::sftp_host_prefs::record(v, &host_id, column, ascending)?;
+                Ok(())
+            })
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+pub struct SftpSortPref {
+    pub host_id: String,
+    pub column: u32,
+    pub ascending: bool,
+}
+
 pub async fn load_recent_hosts() -> Result<Vec<String>> {
     /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
     let outcome: Result<_> = crate::public_errors::guard(async move {
@@ -6793,6 +6837,8 @@ pub struct DirectorySizePage {
 #[flutter_rust_bridge::frb(ignore)]
 struct DirSizeJob {
     generation: u64,
+    root: String,
+    inspector_failed: bool,
     pending: Vec<(String, u32)>,
     queued_bytes: usize,
     size: u64,
@@ -6828,6 +6874,8 @@ pub async fn sftp_directory_size_begin(id: u32, generation: u64, path: String) -
             ticket.clone(),
             DirSizeJob {
                 generation,
+                root: path.clone(),
+                inspector_failed: false,
                 queued_bytes: path.len(),
                 pending: vec![(path, 0)],
                 size: 0,
@@ -6867,6 +6915,28 @@ pub async fn sftp_directory_size_step(
             );
             job
         };
+        // Fast path first: the fixed server-side walk (one round trip, local
+        // stat calls — the speed the server's own file manager shows). Falls
+        // back to the paged SFTP walk when the inspector is unavailable.
+        if !job.inspector_failed {
+            match e
+                .session
+                .inspector_for(generation)
+                .await?
+                .directory_size(&job.root, tokio_util::sync::CancellationToken::new())
+                .await
+            {
+                Ok(totals) => {
+                    return Ok(DirectorySizePage {
+                        size: totals.size,
+                        files: totals.files,
+                        directories: totals.directories,
+                        complete: true,
+                    });
+                }
+                Err(_) => job.inspector_failed = true,
+            }
+        }
         let remote = remote_sftp(id, Some(generation)).await?;
         let budget = budget_directories.unwrap_or(16).clamp(1, 256);
         let operation = async {

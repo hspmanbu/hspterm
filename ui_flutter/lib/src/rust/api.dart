@@ -431,6 +431,21 @@ Future<void> recordSftpLastDir({
 }) =>
     RustLib.instance.api.crateApiRecordSftpLastDir(hostId: hostId, path: path);
 
+/// Device-local SFTP sort preference per formal host (column, ascending).
+Future<List<SftpSortPref>> loadSftpSortPrefs() =>
+    RustLib.instance.api.crateApiLoadSftpSortPrefs();
+
+/// Remembers one host's listing sort for the next connection.
+Future<void> recordSftpSortPref({
+  required String hostId,
+  required int column,
+  required bool ascending,
+}) => RustLib.instance.api.crateApiRecordSftpSortPref(
+  hostId: hostId,
+  column: column,
+  ascending: ascending,
+);
+
 Future<List<String>> loadRecentHosts() =>
     RustLib.instance.api.crateApiLoadRecentHosts();
 
@@ -2894,6 +2909,30 @@ class SftpLastDir {
           runtimeType == other.runtimeType &&
           hostId == other.hostId &&
           path == other.path;
+}
+
+class SftpSortPref {
+  final String hostId;
+  final int column;
+  final bool ascending;
+
+  const SftpSortPref({
+    required this.hostId,
+    required this.column,
+    required this.ascending,
+  });
+
+  @override
+  int get hashCode => hostId.hashCode ^ column.hashCode ^ ascending.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SftpSortPref &&
+          runtimeType == other.runtimeType &&
+          hostId == other.hostId &&
+          column == other.column &&
+          ascending == other.ascending;
 }
 
 class TemporaryConnectionOptions {
