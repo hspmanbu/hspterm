@@ -935,8 +935,15 @@ class TerminalController extends ChangeNotifier {
       return p;
     }
 
-    selectionStart = snapStart(start);
-    selectionEnd = snapEnd(end);
+    // Drag direction does not determine which endpoint is the left edge.
+    // Normalize the geometric boundaries first, then preserve direction for
+    // callers that inspect the original anchor/focus order.
+    final reversed = start.y > end.y ||
+        (start.y == end.y && start.x > end.x);
+    final left = snapStart(reversed ? end : start);
+    final right = snapEnd(reversed ? start : end);
+    selectionStart = reversed ? right : left;
+    selectionEnd = reversed ? left : right;
     notifyListeners();
   }
 
