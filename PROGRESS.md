@@ -1,6 +1,8 @@
 # HSPTerm 开发进度
 
-## 2026-11-06 第六轮 Windows 反馈八项修正（源码+Ubuntu本机构建验证完成，待推送CI）
+## 2026-11-06 第六轮 Windows 反馈八项修正（已发布：源码ca7d515，Windows CI成功）
+
+- Windows发布：源码482ee8b首次run42205715999在Build formal workbench失败——Rust端DiagnosticCode新增directorySizeRemote/Fallback后本地未重生成FRB，CI重生成枚举使diagnostics.dart穷举switch编译错误。修复ca7d515：本地正规FRB重生成入库+switch补两个带标签case（diagnostics/run_log 8项过、Analyze0）。run42208860724/job127862228889全部成功（11:15–11:37Z）：正规FRB、MSVC Release、Analyze0、CI固定14文件组件测试、原生启动/正常退出、正常关闭重开窗口几何恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42208860724/artifacts/13498499563 （HSPTerm-windows-x64，40,140,568字节，2026-11-20到期）。锁库启动工作集116.11/112.11/112.09MiB（artifact13498559405，Server2022口径，与上轮114/111持平）。旧run42165775926为d80edad基线，未重发。
 
 - 范围：重命名框高度、滚动条、中文选区、二级菜单、目录大小速度、双击编辑回传、内存、日志。修订已写入V1.4末尾“第六轮”。
 - #1 重命名框：上一轮 SizedBox.expand 在编辑混乱中丢失从未生效。本轮落地（Padding(34,10)>SizedBox.expand>Focus>TextField(textAlignVertical.center)），装饰框贴满 _rowHeight、文字居中；回车/Esc/失焦逻辑不变。
