@@ -1,6 +1,8 @@
 # HSPTerm 开发进度
 
-## 2026-11-06 第五轮 Windows 反馈十一项修正（源码+Ubuntu本机构建验证完成，待推送CI）
+## 2026-11-06 第五轮 Windows 反馈十一项修正（已发布：源码d80edad，Windows CI成功）
+
+- Windows发布：源码d80edad已推送，run42165775926/job127721804998全部成功（05:00–05:23Z）：正规FRB、MSVC Release、Analyze0、CI固定14文件组件测试、原生启动/正常退出、正常关闭重开窗口几何恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42165775926/artifacts/13480081341 （HSPTerm-windows-x64，40,095,322字节，2026-11-20到期）。锁库启动工作集114.10/111.08/111.06MiB（artifact13479786899，Server2022口径，低于上两轮的~117-121MiB）。旧run42055723033为de00e3a基线，未重发。
 
 - #1 横幅根因（实验确证）：在本机真实 Ubuntu sshd 上验证——exec 会话（含 -t PTY）永不打印 PAM/MOTD，只有 request_shell 打印。上一轮"PTY 上 exec 探针"前提错误。现改为 shell-first：主通道 request_shell（横幅+上次登录如实进入终端流），探测走旁路 exec 通道 `probe_on_exec_channel`（输出丢弃、退出码42判定）；探测成功后排干 shell 输出（首字节3s耐心+350ms静默窗）再换新交互通道 exec 集成 Bash（PAM 每连接一次，横幅不重复）；失败零扰动继续默认 shell。探针脚本保持 stderr 静默+括号平衡+bash -n 回归。
 - #6 多标签：日志证实 `api.rs:552/510 create_configured_terminal`→Terminal::new→HistoryPager IO 错误被 SshError::Terminal 字面量白名单短路吞成"终端尺寸无效"。修复一：summary() 的 SshError 分派移到白名单之前（变体摘要区分 InvalidSize/History+io ErrorKind 枚举）；修复二：term-core 历史降级——HistoryPager::new 失败改为有界 RAM-only 模式（MemoryRow backing，上限8192行），终端创建不再因临时目录 IO 失败而失败；Windows 真实 io 类别待下一份日志确认。
