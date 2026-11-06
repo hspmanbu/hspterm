@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../app_notice.dart';
 import '../prototype/model.dart';
@@ -98,7 +99,12 @@ class LocalEditSession {
       generation,
       bytes.length,
     );
-    await session._open();
+    try {
+      await session._open();
+    } catch (_) {
+      await session.dispose();
+      rethrow;
+    }
     AppRunLog.instance.event(
       AppLogEvent.editOpened,
       terminal: native,
@@ -124,13 +130,12 @@ class LocalEditSession {
   }
 
   Future<void> _launchSystemEditor() async {
-    final path = _file.path;
-    if (Platform.isWindows) {
-      await Process.run('cmd', ['/c', 'start', '', '', path]);
-    } else if (Platform.isMacOS) {
-      await Process.run('open', [path]);
-    } else {
-      await Process.run('xdg-open', [path]);
+    // A file URI delegates to the actual OS file association. Calling
+    // "cmd /c start" with empty arguments opened the application directory
+    // on Windows rather than the downloaded file.
+    final uri = Uri.file(_file.absolute.path);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      throw StateError('系统没有成功打开本地文件');
     }
   }
 
@@ -142,14 +147,11 @@ class LocalEditSession {
 
   Future<void> _checkForStableChange() async {
     if (_disposed || _uploading) return;
-    final stat = await _file.stat();
     if (!await _file.exists()) return;
-    if (stat.size == _lastUploadedSize) {
-      final modified = await _file.lastModified();
-      if (!modified.isAfter(_lastModified)) return;
-    }
-    _lastModified = await _file.lastModified();
-    if (await _file.length() == _lastUploadedSize) return;
+    final modified = await _file.lastModified();
+    // A same-byte-length edit is still a real modification.
+    if (!modified.isAfter(_lastModified)) return;
+    _lastModified = modified;
     await _upload();
   }
 
@@ -191,6 +193,16 @@ class LocalEditSession {
       }
       final bytes = await _file.readAsBytes();
       const chunk = 1024 * 1024;
+      // Zero-byte saves must truncate the remote file too.
+      if (bytes.isEmpty) {
+        await rust.sftpWriteChunk(
+          id: _native,
+          path: _remotePath,
+          offset: 0,
+          data: const [],
+          truncate: true,
+        );
+      }
       for (var offset = 0; offset < bytes.length; offset += chunk) {
         final slice = bytes.sublist(
           offset,
