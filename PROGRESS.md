@@ -1,6 +1,8 @@
 # HSPTerm 开发进度
 
-## 2026-11-06 第七轮 Windows 反馈修复（分支fix/round7-windows-feedback；源码+Ubuntu验证完成，待推送CI）
+## 2026-11-06 第七轮 Windows 反馈修复（已构建：源码3481b8d，分支Windows CI成功）
+
+- Windows构建：分支fix/round7-windows-feedback（main仅docs在a8b2bfe后无产品变更，按工作流 branches:[main] 规则经 workflow_dispatch 在分支触发）。run42243135286/job127978317754全部成功（15:27–15:50Z）：正规FRB、MSVC Release、Analyze0、CI固定14文件组件测试、原生启动/正常退出、正常关闭重开窗口几何恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42243135286/artifacts/13519635462 （HSPTerm-windows-x64，40,144,359字节，2026-11-20到期）。锁库启动工作集114.39/111.36/111.35MiB（artifact13519076296，Server2022口径，与近三轮持平）。
 
 - 基线a8b2bfe+选择性吸收静态审查分支fix/static-review-round6-20261106（PR#1）四提交（cherry-pick e1632c1/e315869/1777ffe/b1f08b2），其中PR#1的`scrollBehavior:`参数在SingleChildScrollView/ListView上不存在（PR未编译验证），改为ScrollConfiguration(scrollbars:false)包裹两个滚动体，分析通过。
 - #1 重命名框：PR#1方案落地（isDense+constraints.tightFor(_rowHeight)+显式OutlineInputBorder+去竖向padding，行容器高度统一_rowHeight不再硬编码28/33）。新组件测试直接比较编辑框RenderBox与行容器RenderBox边界（≥rowHeight-2、横向位置在图标槽后），并覆盖紧凑模式。Windows窄框的根因是行高硬编码与装饰约束缺失叠加。
