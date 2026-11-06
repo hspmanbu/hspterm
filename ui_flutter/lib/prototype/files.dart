@@ -1978,6 +1978,7 @@ class _FilesPanelState extends State<FilesPanel> {
                                       n.metrics.axis == Axis.horizontal,
                                   child: SingleChildScrollView(
                                     controller: _horizontal,
+                                     scrollBehavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
                                     scrollDirection: Axis.horizontal,
                                     child: SizedBox(
                                       width: _columns.fold<double>(
@@ -2061,6 +2062,7 @@ class _FilesPanelState extends State<FilesPanel> {
                                           Expanded(
                                             child: ListView.builder(
                                               controller: _vertical,
+                                               scrollBehavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
                                               itemCount: visible.length + 1,
                                               itemBuilder: (c, index) {
                                                 if (index == 0) {
@@ -2123,13 +2125,8 @@ class _FilesPanelState extends State<FilesPanel> {
                                                     key: ValueKey(
                                                       'file-${f.name}',
                                                     ),
-                                                    height:
-                                                        editing == f.id &&
-                                                            renameError != null
-                                                        ? _rowHeight + 21
-                                                        : compact
-                                                        ? 28
-                                                        : 33,
+                                                    height: editing == f.id && renameError != null
+                                                         ? _rowHeight + 21 : _rowHeight,
                                                     color:
                                                         selected.contains(f.id)
                                                         ? Theme.of(c)
@@ -2202,16 +2199,12 @@ class _FilesPanelState extends State<FilesPanel> {
                                                                         _nameSize,
                                                                   ),
                                                                   decoration: InputDecoration(
-                                                                    errorText:
-                                                                        renameError,
-                                                                    contentPadding:
-                                                                        const EdgeInsets.symmetric(
-                                                                          horizontal:
-                                                                              8,
-                                                                          vertical:
-                                                                              6,
-                                                                        ),
-                                                                  ),
+                                                                     errorText: renameError,
+                                                                     isDense: true,
+                                                                     constraints: BoxConstraints.tightFor(height: _rowHeight),
+                                                                     contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                                                                     border: const OutlineInputBorder(),
+                                                                   ),
                                                                   onSubmitted: (
                                                                     _,
                                                                   ) => commitRename(),
