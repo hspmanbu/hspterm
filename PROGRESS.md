@@ -1,5 +1,19 @@
 # HSPTerm 开发进度
 
+## 2026-11-06 第六轮 Windows 反馈八项修正（源码+Ubuntu本机构建验证完成，待推送CI）
+
+- 范围：重命名框高度、滚动条、中文选区、二级菜单、目录大小速度、双击编辑回传、内存、日志。修订已写入V1.4末尾“第六轮”。
+- #1 重命名框：上一轮 SizedBox.expand 在编辑混乱中丢失从未生效。本轮落地（Padding(34,10)>SizedBox.expand>Focus>TextField(textAlignVertical.center)），装饰框贴满 _rowHeight、文字居中；回车/Esc/失焦逻辑不变。
+- #2 滚动条：新像素级测试（toImage+runAsync）证实上一轮结构两个拇指都不画——根因1：竖向条收到的列表通知 depth=1（冒泡穿过横向滚动器）被默认 depth==0 谓词拒绝；根因2：底部横条没有任何可滚动后代，永远收不到通知。修复：嵌套 RawScrollbar，外层竖向 scrollbarOrientation:right + notificationPredicate 按通知轴过滤 + padding bottom:14，内层横向 orientation:bottom 包住横向滚动器。像素测试断言右缘带内确有拇指绘制、横向滚动后轨道不动；几何测试断言外层轨道右缘==面板右缘。旧独立底条删除。
+- #3 中文选区：真正的错位源是终点吸附——终点落在宽字上被吸到整字左缘（排除该字），框比所指字少一格。改为整字边界：起点落宽字后半格→回退整字左缘；终点落宽字（前半或后半）→扩展覆盖整字。新组件测试（宽字 lead/spacer 标志合成行）固定吸附语义；上轮的字形居中绘制保留。
+- #4 二级菜单：恢复 SubmenuButton 级联（悬停意图延迟展开、移入保持、离开关闭、自动左右翻转、一级菜单不消失）；上轮“仅点击”方案废除。测试更新为点击 submenu 再点目标。
+- #5 目录大小：关键 bug——生产命令 `python3 -c '<script>' -- <path>` 里的 `--` 被脚本当 sys.argv[1]，远端快速路径自第五轮起从未成功过、一直退回慢速 SFTP 扫描。删除 `--` 并加本地回归测试（临时树+符号链接，与 du/find 对拍 size/files/dirs）。diagnostics 新增 DirectorySizeRemote/Fallback 记录实际路径。
+- #6 双击编辑回传（新 workbench/local_edit_launch.dart）：下载（≤16MiB，1MiB 分块）→临时副本→系统编辑器打开（cmd start/open/xdg-open）→目录事件+800ms 轮询监测→700ms 写入稳定→与上次上传尺寸去重→整文件分块上传（首块 truncate）→远端大小与下载快照不一致=冲突不覆盖→失败/断开保留副本可重试→dispose 清理。双击路由从 showFilePreview 改为 openLocalEdit。新日志事件 editDownloaded/editOpened/editUploaded/editUploadFailed/editConflict（仅尺寸/耗时）。
+- #7 内存：TerminalPainter 缓存上限 4096/128→2048/96（多窗格布局下保留段落内存减半）；files 面板 _folderBounds/_folderObjects 在每次目录重建时裁剪（此前仅在 Explorer 拖拽时清理）；其余审查项（DirectoryCache 64MiB 上限、run_log 2MiB、行图片缓存按视口）均已有界未动。
+- #8 日志：connectionTiming（Connecting→Connected ms）、sftpDirectoryTiming（加载 ms）、memorySample（每分钟 ProcessInfo.currentRss KiB，WorkbenchApp 定时器）+ 编辑五事件+大小统计路径事件。无路径/正文/凭据。
+- 验证：Flutter Analyze0；受影响组件测试 55 项全过（新增 sftp_scrollbar_pixels/wide_selection_snap；sftp_scrollbar_layout 重写为嵌套结构断言）；Rust fmt/严格Clippy0、ssh-core80（+dir_size 脚本测试）/term-core42、storage-sync 本轮未改存储层（沿用上轮219）；FRB 无新 API（无需重生成）；bridge_contracts 253函数/80DTO/306Dart 0发现；Ubuntu clean 构建需先 cargo build frb-bridge+prepare+pub get（build/native_assets 空目录需预建，本机构建怪癖）后 debug 构建成功，真实 GTK 冒烟启动/失焦CPU0%/正常退出0，RSS 494MiB（Linux debug 口径）。
+- 边界：远端du速度、双击编辑回传（Windows系统编辑器/稳定检测/冲突）、重命名框高度、滚动条、中文选区、二级菜单、内存与日志事件均待用户Windows11实机复测；Linux冒烟不能替代。双击行为已从预览改为本地编辑，预览入口（右键打开）不变。
+
 ## 2026-11-06 第五轮 Windows 反馈十一项修正（已发布：源码d80edad，Windows CI成功）
 
 - Windows发布：源码d80edad已推送，run42165775926/job127721804998全部成功（05:00–05:23Z）：正规FRB、MSVC Release、Analyze0、CI固定14文件组件测试、原生启动/正常退出、正常关闭重开窗口几何恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42165775926/artifacts/13480081341 （HSPTerm-windows-x64，40,095,322字节，2026-11-20到期）。锁库启动工作集114.10/111.08/111.06MiB（artifact13479786899，Server2022口径，低于上两轮的~117-121MiB）。旧run42055723033为de00e3a基线，未重发。

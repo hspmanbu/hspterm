@@ -2419,6 +2419,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     s.loadingDirectory = true;
     s.sftpError = null;
     changed();
+    final timingStart = DateTime.now();
     try {
       final result = await directoryReader.read(
         id: s.controller.id!,
@@ -2450,6 +2451,12 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         terminal: s.controller.id,
         generation: generation,
         count: result.files.length,
+      );
+      AppRunLog.instance.event(
+        AppLogEvent.sftpDirectoryTiming,
+        terminal: s.controller.id,
+        generation: generation,
+        count: DateTime.now().difference(timingStart).inMilliseconds,
       );
     } catch (error) {
       AppRunLog.instance.event(

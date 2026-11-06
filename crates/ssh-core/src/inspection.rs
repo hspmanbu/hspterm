@@ -131,8 +131,13 @@ fn command(action: &Action) -> Result<String, InspectionError> {
         {
             return Err(InspectionError::Identity);
         }
+        // No `--` separator: with -c, python passes the remaining argv to the
+        // script verbatim and a literal "--" would arrive as sys.argv[1],
+        // breaking every invocation (2026-11-06: this exact bug silently
+        // forced the slow SFTP fallback). The path is single-quoted as one
+        // shell word and validated above.
         return Ok(format!(
-            "python3 -I -S -c '{}' -- {}",
+            "python3 -I -S -c '{}' {}",
             include_str!("inspection/dir_size.py").replace('\'', "'\\''"),
             path.replace('\'', "'\\''"),
         ));
@@ -442,6 +447,44 @@ async fn collect(
             }
             _ => return Err(InspectionError::Unavailable.into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod dir_size_tests {
+    // Runs the shipped script exactly as sshd would (`python3 -I -S -c ...`)
+    // against a synthetic tree with a symlink and nested directories.
+    #[test]
+    fn script_matches_du_and_find_on_synthetic_tree() {
+        let dir = std::env::temp_dir().join(format!("hspterm-du-{}", std::process::id(),));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("a/b")).unwrap();
+        std::fs::write(dir.join("f1.txt"), b"12345").unwrap();
+        std::fs::write(dir.join("a/f2.txt"), b"1234567890").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.join("f1.txt"), dir.join("link")).unwrap();
+        // Direct argv here (no shell quoting, unlike the production command).
+        let script = include_str!("inspection/dir_size.py");
+        let output = std::process::Command::new("python3")
+            .arg("-I")
+            .arg("-S")
+            .arg("-c")
+            .arg(script)
+            .arg(&dir)
+            .output()
+            .expect("python3 required for this test");
+        assert!(
+            output.status.success(),
+            "python failed: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let line = stdout.lines().last().unwrap();
+        let value: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(value["size"], 15, "symlink must not count");
+        assert_eq!(value["files"], 2);
+        assert_eq!(value["dirs"], 3, "root + a + b");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

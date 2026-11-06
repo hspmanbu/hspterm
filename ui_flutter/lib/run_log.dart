@@ -42,6 +42,16 @@ enum AppLogEvent {
   explorerDropAccepted,
   autoReconnectTriggered,
   autoReconnectDisabled,
+  // Local editor write-back sessions (sizes/durations only, never content).
+  editDownloaded,
+  editOpened,
+  editUploaded,
+  editUploadFailed,
+  editConflict,
+  // Timings (count = milliseconds) and memory samples (count = KiB).
+  connectionTiming,
+  sftpDirectoryTiming,
+  memorySample,
 }
 
 /// Current launch only. Accept fixed events/numbers and code locations, never

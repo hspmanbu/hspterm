@@ -22,7 +22,7 @@ import 'tmux_restore_settings.dart';
 import 'transfer_settings.dart';
 
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' show ProcessInfo, File, Platform;
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
@@ -37,7 +37,7 @@ import '../src/rust/api.dart' as rust;
 import 'model.dart';
 import 'surface.dart';
 import 'queue.dart';
-import 'file_preview.dart';
+import 'local_edit_launch.dart';
 import 'file_open_settings.dart';
 import 'file_editor.dart';
 import 'file_search.dart';
@@ -94,9 +94,18 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
     tmx.TmuxPrompt,
   )
   _tmuxRequest;
+  Timer? _memorySampler;
+
   @override
   void initState() {
     super.initState();
+    // One bounded sample per minute: current/max RSS only, no payloads.
+    _memorySampler = Timer.periodic(const Duration(minutes: 1), (_) {
+      AppRunLog.instance.event(
+        AppLogEvent.memorySample,
+        count: (ProcessInfo.currentRss / 1024).round(),
+      );
+    });
     _noticeHub = TerminalNoticeHub(
       inline: (notice, activate) {
         final context = _navigator.currentContext;
@@ -376,6 +385,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
 
   @override
   void dispose() {
+    _memorySampler?.cancel();
     m.removeListener(_bindNotices);
     m.removeListener(_paletteChanged);
     // Keep the original shutdown hook until the actual OS worker has ended,
@@ -465,12 +475,11 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
         sidebarBuilder: (_) => SftpSidebar(
           model: m,
           queueBuilder: (_) => LiveTransferQueue(model: m),
-          onOpenFile: (context, source, file) => showFilePreview(
+          onOpenFile: (context, source, file) => openLocalEdit(
             context,
             m,
-            source,
+            source as LiveTerminalSession,
             file,
-            opener: widget.fileOpener,
           ),
           onSearchFiles: showRemoteFileSearch,
           onTransferTo: (context, source, files, move) =>

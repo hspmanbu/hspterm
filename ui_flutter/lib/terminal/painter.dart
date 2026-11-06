@@ -80,7 +80,10 @@ class TerminalPaintCache {
       textDirection: TextDirection.ltr,
     )..layout();
     storage[key] = painter;
-    if (storage.length > (identical(storage, _runs) ? 128 : 4096)) {
+    // Halved glyph budget (2026-11-06 memory pass): 2048 single-cell
+    // painters + 96 run painters per view keep the most recent working set
+    // while bounding retained paragraphs on multi-pane layouts.
+    if (storage.length > (identical(storage, _runs) ? 96 : 2048)) {
       storage.remove(storage.keys.first)?.dispose();
     }
     return painter;

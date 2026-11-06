@@ -30,6 +30,8 @@ pub enum DiagnosticCode {
     DownloadQueued,
     TransferRequestRejected,
     CoreWorkerPanicked,
+    DirectorySizeRemote,
+    DirectorySizeFallback,
 }
 #[derive(Clone, serde::Serialize)]
 pub struct DiagnosticEvent {

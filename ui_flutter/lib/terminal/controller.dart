@@ -99,6 +99,8 @@ class TerminalController extends ChangeNotifier {
   rust.SearchSummary? searchSummary;
   rust.SearchLocation? activeSearch;
   int searchOrdinal = -1;
+  DateTime? _connectingSince;
+
   bool osc52Enabled = true;
   bool rightClickPaste = false;
   bool copyOnSelection = false;
@@ -307,6 +309,16 @@ class TerminalController extends ChangeNotifier {
         final newlyConnected =
             event.text == 'Connected' &&
             (phase != 'Connected' || generation != event.generation);
+        if (newlyConnected && _connectingSince != null) {
+          AppRunLog.instance.event(
+            AppLogEvent.connectionTiming,
+            terminal: value,
+            generation: event.generation,
+            count: DateTime.now().difference(_connectingSince!).inMilliseconds,
+          );
+          _connectingSince = null;
+        }
+        if (event.text == 'Connecting') _connectingSince = DateTime.now();
         if (generation != event.generation ||
             (event.text != 'Connected' && event.text != 'Connecting')) {
           reportedDirectory = null;
@@ -896,9 +908,12 @@ class TerminalController extends ChangeNotifier {
 
   void select(Point<int> start, Point<int> end) {
     if (_disposed) return;
-    // Both ends snap out of a wide character's trailing spacer column so the
-    // highlight box always covers whole CJK glyphs instead of half cells.
-    Point<int> anchor(Point<int> p) {
+    // Selection boundaries snap to whole wide (CJK) glyphs:
+    // - the start never begins inside a wide glyph's trailing half;
+    // - the end always covers the wide glyph it lands on, so the box's
+    //   right edge matches the glyph the pointer is over (2026-11-06
+    //   feedback: dragging over Chinese cut the pointed-at character).
+    Point<int> snapStart(Point<int> p) {
       if (p.y >= 0 &&
           p.y < rows.length &&
           p.x > 0 &&
@@ -909,8 +924,19 @@ class TerminalController extends ChangeNotifier {
       return p;
     }
 
-    selectionStart = anchor(start);
-    selectionEnd = anchor(end);
+    Point<int> snapEnd(Point<int> p) {
+      if (p.y >= 0 && p.y < rows.length && p.x >= 0 && p.x < rows[p.y].length) {
+        final cell = rows[p.y][p.x];
+        // Wide glyph lead cell: extend over its trailing half.
+        if (cell.flags & 32 != 0 && p.x + 1 < rows[p.y].length) {
+          return Point(p.x + 1, p.y);
+        }
+      }
+      return p;
+    }
+
+    selectionStart = snapStart(start);
+    selectionEnd = snapEnd(end);
     notifyListeners();
   }
 

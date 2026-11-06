@@ -6918,6 +6918,7 @@ pub async fn sftp_directory_size_step(
         // Fast path first: the fixed server-side walk (one round trip, local
         // stat calls — the speed the server's own file manager shows). Falls
         // back to the paged SFTP walk when the inspector is unavailable.
+        let started = std::time::Instant::now();
         if !job.inspector_failed {
             match e
                 .session
@@ -6927,6 +6928,11 @@ pub async fn sftp_directory_size_step(
                 .await
             {
                 Ok(totals) => {
+                    diagnostics::record(
+                        diagnostics::DiagnosticCode::DirectorySizeRemote,
+                        Some(id),
+                        Some(generation),
+                    );
                     return Ok(DirectorySizePage {
                         size: totals.size,
                         files: totals.files,
@@ -6934,9 +6940,17 @@ pub async fn sftp_directory_size_step(
                         complete: true,
                     });
                 }
-                Err(_) => job.inspector_failed = true,
+                Err(_) => {
+                    diagnostics::record(
+                        diagnostics::DiagnosticCode::DirectorySizeFallback,
+                        Some(id),
+                        Some(generation),
+                    );
+                    job.inspector_failed = true;
+                }
             }
         }
+        let _ = started;
         let remote = remote_sftp(id, Some(generation)).await?;
         let budget = budget_directories.unwrap_or(16).clamp(1, 256);
         let operation = async {
