@@ -69,10 +69,12 @@ class Gateway implements FilePropertiesGateway {
   }
 }
 
-DemoFile folder() =>
-    DemoFile('/folder', 'folder', folder: true, kind: '文件夹');
+DemoFile folder() => DemoFile('/folder', 'folder', folder: true, kind: '文件夹');
 
-Future<void> pumpDialog(WidgetTester tester, FilePropertiesGateway gateway) async {
+Future<void> pumpDialog(
+  WidgetTester tester,
+  FilePropertiesGateway gateway,
+) async {
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
@@ -84,93 +86,90 @@ Future<void> pumpDialog(WidgetTester tester, FilePropertiesGateway gateway) asyn
 }
 
 void main() {
-  testWidgets(
-    'folder size grows page by page and completes with item counts',
-    (tester) async {
-      final gateway = Gateway(
-        pages: [
-          const rust.DirectorySizePage(
-            size: 4096,
-            files: 2,
-            directories: 1,
-            complete: false,
-          ),
-          const rust.DirectorySizePage(
-            size: 9216,
-            files: 5,
-            directories: 2,
-            complete: true,
-          ),
-        ],
-        gateBeforeIndex: 1,
-      );
-      await pumpDialog(tester, gateway);
-      await tester.pump(const Duration(milliseconds: 100));
-      // First page visible while the second is still in flight.
-      expect(find.textContaining('4096 B'), findsOneWidget);
-      expect(find.textContaining('统计中'), findsOneWidget);
-      gateway.gate!.complete();
-      await tester.pumpAndSettle();
-      expect(find.textContaining('9216 B'), findsOneWidget);
-      expect(find.textContaining('统计中'), findsNothing);
-      expect(find.textContaining('5 个文件 · 2 个目录'), findsOneWidget);
-      expect(gateway.stopCount, greaterThanOrEqualTo(1));
-      expect(tester.takeException(), isNull);
-    },
-  );
-  testWidgets(
-    'stop button halts the walk and keeps the last completed page',
-    (tester) async {
-      final gateway = Gateway(
-        pages: [
-          const rust.DirectorySizePage(
-            size: 1024,
-            files: 1,
-            directories: 1,
-            complete: false,
-          ),
-          const rust.DirectorySizePage(
-            size: 4096,
-            files: 9,
-            directories: 9,
-            complete: false,
-          ),
-        ],
-        gateBeforeIndex: 1,
-      );
-      await pumpDialog(tester, gateway);
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(gateway.beginCount, 1);
-      expect(find.textContaining('1024 B'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('stop-size-calc')));
-      gateway.gate!.complete();
-      await tester.pumpAndSettle();
-      expect(find.textContaining('统计中'), findsNothing);
-      expect(find.textContaining('未计算'), findsNothing);
-      expect(gateway.stopCount, greaterThanOrEqualTo(1));
-      // The gated second page must not surface after the explicit stop.
-      expect(find.textContaining('4096 B'), findsNothing);
-      expect(find.textContaining('9 个文件'), findsNothing);
-      expect(tester.takeException(), isNull);
-    },
-  );
+  testWidgets('folder size grows page by page and completes with item counts', (
+    tester,
+  ) async {
+    final gateway = Gateway(
+      pages: [
+        const rust.DirectorySizePage(
+          size: 4096,
+          files: 2,
+          directories: 1,
+          complete: false,
+        ),
+        const rust.DirectorySizePage(
+          size: 9216,
+          files: 5,
+          directories: 2,
+          complete: true,
+        ),
+      ],
+      gateBeforeIndex: 1,
+    );
+    await pumpDialog(tester, gateway);
+    await tester.pump(const Duration(milliseconds: 100));
+    // First page visible while the second is still in flight.
+    expect(find.textContaining('4096 B'), findsOneWidget);
+    expect(find.textContaining('统计中'), findsOneWidget);
+    gateway.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('9216 B'), findsOneWidget);
+    expect(find.textContaining('统计中'), findsNothing);
+    expect(find.textContaining('5 个文件 · 2 个目录'), findsOneWidget);
+    expect(gateway.stopCount, greaterThanOrEqualTo(1));
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('stop button halts the walk and keeps the last completed page', (
+    tester,
+  ) async {
+    final gateway = Gateway(
+      pages: [
+        const rust.DirectorySizePage(
+          size: 1024,
+          files: 1,
+          directories: 1,
+          complete: false,
+        ),
+        const rust.DirectorySizePage(
+          size: 4096,
+          files: 9,
+          directories: 9,
+          complete: false,
+        ),
+      ],
+      gateBeforeIndex: 1,
+    );
+    await pumpDialog(tester, gateway);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(gateway.beginCount, 1);
+    expect(find.textContaining('1024 B'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('stop-size-calc')));
+    gateway.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('统计中'), findsNothing);
+    expect(find.textContaining('未计算'), findsNothing);
+    expect(gateway.stopCount, greaterThanOrEqualTo(1));
+    // The gated second page must not surface after the explicit stop.
+    expect(find.textContaining('4096 B'), findsNothing);
+    expect(find.textContaining('9 个文件'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets(
     'failed size walk keeps editable metadata and untouched ownership',
     (tester) async {
       final gateway = Gateway();
       await pumpDialog(tester, gateway);
       await tester.pumpAndSettle();
-      expect(
-        find.textContaining('内容大小统计未完成'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('内容大小统计未完成'), findsOneWidget);
       // 0755 baseline: owner keeps rwx, group and other lose write.
-      bool cell(String key) => tester.widget<Checkbox>(
+      bool cell(String key) => tester
+          .widget<Checkbox>(
             find.descendant(
               of: find.byKey(ValueKey(key)),
               matching: find.byType(Checkbox),
             ),
-          ).value!;
+          )
+          .value!;
       expect(cell('permission-owner-write'), isTrue);
       expect(cell('permission-group-write'), isFalse);
       await tester.tap(find.text('保存属性'));
@@ -179,31 +178,30 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
-  testWidgets(
-    'permission grid edits send the changed octal value only',
-    (tester) async {
-      final gateway = Gateway();
-      await pumpDialog(tester, gateway);
-      await tester.pumpAndSettle();
-      expect(find.text('当前权限：0755'), findsOneWidget);
-      await tester.ensureVisible(
-        find.byKey(const ValueKey('permission-owner-exec')),
-      );
-      await tester.tap(find.byKey(const ValueKey('permission-owner-exec')));
-      await tester.pump();
-      expect(find.text('当前权限：0655'), findsOneWidget);
-      await tester.ensureVisible(
-        find.byKey(const ValueKey('permission-owner-write')),
-      );
-      await tester.tap(find.byKey(const ValueKey('permission-owner-write')));
-      await tester.pump();
-      expect(find.text('当前权限：0455'), findsOneWidget);
-      await tester.tap(find.text('保存属性'));
-      await tester.pumpAndSettle();
-      expect(gateway.calls.single, (301, null, null, false));
-      expect(tester.takeException(), isNull);
-    },
-  );
+  testWidgets('permission grid edits send the changed octal value only', (
+    tester,
+  ) async {
+    final gateway = Gateway();
+    await pumpDialog(tester, gateway);
+    await tester.pumpAndSettle();
+    expect(find.text('当前权限：0755'), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('permission-owner-exec')),
+    );
+    await tester.tap(find.byKey(const ValueKey('permission-owner-exec')));
+    await tester.pump();
+    expect(find.text('当前权限：0655'), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('permission-owner-write')),
+    );
+    await tester.tap(find.byKey(const ValueKey('permission-owner-write')));
+    await tester.pump();
+    expect(find.text('当前权限：0455'), findsOneWidget);
+    await tester.tap(find.text('保存属性'));
+    await tester.pumpAndSettle();
+    expect(gateway.calls.single, (301, null, null, false));
+    expect(tester.takeException(), isNull);
+  });
   testWidgets(
     'owner dropdowns list remote accounts and submit changed ownership',
     (tester) async {

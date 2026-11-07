@@ -16,6 +16,10 @@ pub struct DirectoryEntry {
     pub size: Option<u64>,
     pub modified: Option<u32>,
     pub permissions: Option<u32>,
+    /// SFTP v3 owner/group names when the server sends them, otherwise the
+    /// numeric id as a string. Pure listing metadata; no extra requests.
+    pub owner: Option<String>,
+    pub group: Option<String>,
 }
 pub struct DirectoryPage {
     pub entries: Vec<DirectoryEntry>,
@@ -141,6 +145,8 @@ impl DirectoryReader {
                             size: a.size,
                             modified: a.mtime,
                             permissions: a.permissions,
+                            owner: a.user.clone().or_else(|| a.uid.map(|id| id.to_string())),
+                            group: a.group.clone().or_else(|| a.gid.map(|id| id.to_string())),
                         });
                     }
                 }

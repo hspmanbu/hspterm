@@ -446,6 +446,23 @@ Future<void> recordSftpSortPref({
   ascending: ascending,
 );
 
+/// Device-local SFTP column layout per formal host (order, hidden, widths).
+Future<List<SftpColumnPref>> loadSftpColumnPrefs() =>
+    RustLib.instance.api.crateApiLoadSftpColumnPrefs();
+
+/// Replaces one host's saved column layout.
+Future<void> recordSftpColumnPref({
+  required String hostId,
+  required List<String> order,
+  required List<String> hidden,
+  required List<(String, int)> widths,
+}) => RustLib.instance.api.crateApiRecordSftpColumnPref(
+  hostId: hostId,
+  order: order,
+  hidden: hidden,
+  widths: widths,
+);
+
 Future<List<String>> loadRecentHosts() =>
     RustLib.instance.api.crateApiLoadRecentHosts();
 
@@ -2447,6 +2464,11 @@ class RemoteFile {
   final int? modified;
   final int? permissions;
 
+  /// Listing owner/group names (or numeric ids as text) when the server
+  /// reports them; round-9 SFTP columns. No extra network requests.
+  final String? owner;
+  final String? group;
+
   const RemoteFile({
     required this.name,
     required this.path,
@@ -2455,6 +2477,8 @@ class RemoteFile {
     this.size,
     this.modified,
     this.permissions,
+    this.owner,
+    this.group,
   });
 
   @override
@@ -2465,7 +2489,9 @@ class RemoteFile {
       symlink.hashCode ^
       size.hashCode ^
       modified.hashCode ^
-      permissions.hashCode;
+      permissions.hashCode ^
+      owner.hashCode ^
+      group.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -2478,7 +2504,9 @@ class RemoteFile {
           symlink == other.symlink &&
           size == other.size &&
           modified == other.modified &&
-          permissions == other.permissions;
+          permissions == other.permissions &&
+          owner == other.owner &&
+          group == other.group;
 }
 
 class RemoteFileSearchPage {
@@ -2898,6 +2926,35 @@ class SftpBookmark {
           name == other.name &&
           path == other.path &&
           hostId == other.hostId;
+}
+
+/// One host's saved SFTP listing column layout (stable column ids).
+class SftpColumnPref {
+  final String hostId;
+  final List<String> order;
+  final List<String> hidden;
+  final List<(String, int)> widths;
+
+  const SftpColumnPref({
+    required this.hostId,
+    required this.order,
+    required this.hidden,
+    required this.widths,
+  });
+
+  @override
+  int get hashCode =>
+      hostId.hashCode ^ order.hashCode ^ hidden.hashCode ^ widths.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SftpColumnPref &&
+          runtimeType == other.runtimeType &&
+          hostId == other.hostId &&
+          order == other.order &&
+          hidden == other.hidden &&
+          widths == other.widths;
 }
 
 class SftpLastDir {

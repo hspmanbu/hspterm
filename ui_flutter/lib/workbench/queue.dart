@@ -2,15 +2,20 @@ import 'staging_cleanup.dart';
 import 'transfer_connections.dart';
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../prototype/design.dart';
+
+import 'package:url_launcher/url_launcher.dart';
+
 import '../run_log.dart';
 import '../src/rust/api.dart' as rust;
 import '../src/rust/transfers.dart' as jobs;
+import 'local_edit_launch.dart';
 import 'model.dart';
 import 'move_resolution.dart';
 import 'explorer_export.dart';
@@ -28,6 +33,126 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   String? expanded, anchor;
   bool completedOpen = false;
   LiveWorkbenchModel get m => widget.model;
+
+  @override
+  void initState() {
+    super.initState();
+    m.localEdits.addListener(_editsChanged);
+  }
+
+  @override
+  void dispose() {
+    m.localEdits.removeListener(_editsChanged);
+    super.dispose();
+  }
+
+  void _editsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// A local-edit task is NOT a download to a user-chosen directory: it is
+  /// its own lightweight tile with the edit lifecycle, never the Rust
+  /// transfer engine.
+  Widget _editTile(LocalEditSession edit) {
+    final statusText = switch (edit.status) {
+      LocalEditStatus.downloading =>
+        edit.progressTotal > 0
+            ? '下载中 ${edit.progressDone}/${edit.progressTotal} B'
+            : '下载中',
+      LocalEditStatus.editing => '正在本地编辑 · 保存后自动回传',
+      LocalEditStatus.uploading =>
+        edit.progressTotal > 0
+            ? '正在上传 ${edit.progressDone}/${edit.progressTotal} B'
+            : '正在上传',
+      LocalEditStatus.conflicted => '远端已变化 · 未覆盖，请处理后重试',
+      LocalEditStatus.failed => '上传失败 · 修改已保留，可重试',
+      LocalEditStatus.closed => '已关闭',
+    };
+    final failed =
+        edit.status == LocalEditStatus.failed ||
+        edit.status == LocalEditStatus.conflicted;
+    return ListTile(
+      dense: true,
+      leading: const Icon(Icons.edit_document, size: 18),
+      title: Text(
+        edit.displayName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 12),
+      ),
+      subtitle: Text(
+        '${edit.hostLabel} · $statusText · 远端 ${edit.remotePath}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 10),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (failed) Tool(Icons.refresh, '重试上传', () => run(edit.retry())),
+          Tool(
+            Icons.open_in_new,
+            '打开本地文件',
+            () => run(
+              launchUrl(
+                Uri.file(edit.localFile.absolute.path),
+                mode: LaunchMode.externalApplication,
+              ).then((ok) {
+                if (!ok) throw StateError('系统未打开本地文件');
+              }),
+            ),
+          ),
+          Tool(Icons.folder_open, '打开所在文件夹', () => run(_revealFile(edit))),
+          PopupMenuButton<String>(
+            tooltip: '本地编辑任务',
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'open', child: Text('打开本地文件')),
+              PopupMenuItem(value: 'folder', child: Text('打开所在文件夹')),
+              PopupMenuItem(value: 'close', child: Text('结束编辑会话')),
+            ],
+            onSelected: (action) {
+              switch (action) {
+                case 'open':
+                  run(
+                    launchUrl(
+                      Uri.file(edit.localFile.absolute.path),
+                      mode: LaunchMode.externalApplication,
+                    ),
+                  );
+                case 'folder':
+                  run(_revealFile(edit));
+                case 'close':
+                  run(
+                    Future<void>(() async {
+                      await edit.dispose();
+                      m.localEdits.unregister(edit);
+                    }),
+                  );
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Reveals the temp copy in the OS file manager (Explorer with the file
+  /// preselected on Windows; xdg-open of the folder elsewhere).
+  Future<void> _revealFile(LocalEditSession edit) async {
+    final dir = edit.localFile.parent.path;
+    if (Platform.isWindows) {
+      final result = await Process.run('explorer', [
+        '/select,',
+        edit.localFile.absolute.path,
+      ]);
+      if (result.exitCode != 0) {
+        throw StateError('资源管理器未能打开所在文件夹');
+      }
+      return;
+    }
+    await launchUrl(Uri.directory(dir), mode: LaunchMode.externalApplication);
+  }
+
   final _operations = <String>{};
 
   /// Task IDs that already had their conflict dialog auto-opened once; a
@@ -655,7 +780,14 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         .where((t) => ['Partial', 'Failed'].contains(t.state))
         .toList();
     final done = list.where(ended).toList();
+    final edits = m.localEdits.sessions
+        .where((s) => s.status != LocalEditStatus.closed)
+        .toList();
     final rows = <Object>[
+      if (edits.isNotEmpty) ...[
+        SectionHeading('本地编辑 · ${edits.length}'),
+        ...edits,
+      ],
       if (activity.isNotEmpty) ...[
         SectionHeading('活动与等待 · ${activity.length}'),
         ...activity,
@@ -761,7 +893,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
           ),
         ),
         Expanded(
-          child: list.isEmpty
+          child: list.isEmpty && edits.isEmpty
               ? Center(
                   child: Text(
                     m.allTasks ? '暂无传输任务' : '当前会话无任务 · 可切换全部任务',
@@ -772,6 +904,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
                   itemCount: rows.length,
                   itemBuilder: (_, i) {
                     final row = rows[i];
+                    if (row is LocalEditSession) return _editTile(row);
                     return row is jobs.TransferTaskView
                         ? item(row)
                         : row as Widget;

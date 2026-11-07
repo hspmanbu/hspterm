@@ -90,7 +90,9 @@ void main() {
       final totalDistinct = distinctColors((x, y) => true);
 
       // ignore: avoid_print
-      print('totalDistinct=$totalDistinct mid=$midBand right=$rightBand bottom=$bottomBand');
+      print(
+        'totalDistinct=$totalDistinct mid=$midBand right=$rightBand bottom=$bottomBand',
+      );
       for (var bx = 0; bx + 40 <= image.width; bx += 40) {
         final n = distinctColors(
           (x, y) => x >= bx && x < bx + 40 && y > 80 && y < image.height - 60,
@@ -118,10 +120,16 @@ void main() {
         print('row y[$by-${by + 20}) colors=$n');
       }
       expect(midBand, greaterThan(3), reason: 'sanity: list text renders');
-      expect(rightBand, greaterThan(3),
-          reason: 'vertical thumb must paint at the panel right edge');
-      expect(bottomBand, greaterThan(3),
-          reason: 'horizontal thumb must paint at the panel bottom');
+      expect(
+        rightBand,
+        greaterThan(3),
+        reason: 'vertical thumb must paint at the panel right edge',
+      );
+      expect(
+        bottomBand,
+        greaterThan(3),
+        reason: 'horizontal thumb must paint at the panel bottom',
+      );
 
       // Exact-position check: the vertical thumb's painted pixels must touch
       // the last 12px column of the panel (right edge), not stop at the last
@@ -135,8 +143,11 @@ void main() {
           }
         }
       }
-      expect(rightmostPainted, greaterThanOrEqualTo(image.width - 4),
-          reason: 'thumb pixels reach the visible right edge');
+      expect(
+        rightmostPainted,
+        greaterThanOrEqualTo(image.width - 4),
+        reason: 'thumb pixels reach the visible right edge',
+      );
 
       await tester.pumpWidget(const SizedBox());
       m.dispose();

@@ -27,7 +27,7 @@ void main() {
         ),
       );
       await openColumns(tester);
-      await tester.tap(find.byKey(const ValueKey('configure-file-column-1')));
+      await tester.tap(find.byKey(const ValueKey('configure-file-column-modified')));
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
       expect(find.text('修改时间'), findsOneWidget);
@@ -35,17 +35,17 @@ void main() {
       expect(
         tester
             .widget<CheckboxListTile>(
-              find.byKey(const ValueKey('configure-file-column-0')),
+              find.byKey(const ValueKey('configure-file-column-name')),
             )
             .onChanged,
         isNull,
       );
-      await tester.tap(find.byKey(const ValueKey('configure-file-column-1')));
+      await tester.tap(find.byKey(const ValueKey('configure-file-column-modified')));
       await tester.tap(find.text('应用'));
       await tester.pumpAndSettle();
       expect(find.text('修改时间'), findsNothing);
-      expect(find.byKey(const ValueKey('file-column-1')), findsNothing);
-      expect(find.byKey(const ValueKey('file-column-0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('file-column-modified')), findsNothing);
+      expect(find.byKey(const ValueKey('file-column-name')), findsOneWidget);
       expect(source.entered, isEmpty);
       await tester.pumpWidget(const SizedBox());
       model.dispose();
@@ -76,9 +76,9 @@ void main() {
       await tester.tap(find.text('应用'));
       await tester.pumpAndSettle();
       expect(
-        tester.getCenter(find.byKey(const ValueKey('file-column-0'))).dx,
+        tester.getCenter(find.byKey(const ValueKey('file-column-name'))).dx,
         greaterThan(
-          tester.getCenter(find.byKey(const ValueKey('file-column-3'))).dx,
+          tester.getCenter(find.byKey(const ValueKey('file-column-kind'))).dx,
         ),
       );
       expect(source.files.map((f) => f.id).toList(), original);

@@ -32,25 +32,25 @@ void main() {
   }
 
   tearDown(() {
-    TerminalViewState.debugNowMs = () =>
-        DateTime.now().millisecondsSinceEpoch;
+    TerminalViewState.debugNowMs = () => DateTime.now().millisecondsSinceEpoch;
   });
 
   Future<void> mountTerminal(WidgetTester tester) async {
     await tester.pumpWidget(
-      MaterialApp(home: Scaffold(body: TerminalView(controller: c))),
+      MaterialApp(
+        home: Scaffold(body: TerminalView(controller: c)),
+      ),
     );
     await tester.pumpAndSettle();
-    tester
-        .state<TerminalViewState>(find.byType(TerminalView))
-        .focusTerminal();
+    tester.state<TerminalViewState>(find.byType(TerminalView)).focusTerminal();
     await tester.pumpAndSettle();
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'SSH terminal');
   }
 
   /// Press deliveries only (CapsLock toggles and key releases are protocol
   /// events, not typed characters).
-  String delivered() => b.texts.join() +
+  String delivered() =>
+      b.texts.join() +
       b.keys
           .where((k) => k.kind != 2 && k.key.length == 1)
           .map((k) => k.key)

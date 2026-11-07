@@ -27,13 +27,24 @@ const _maxSessionsPerModel = 16;
 
 /// Abstraction over the native calls so tests can simulate every flow.
 abstract interface class LocalEditGateway {
-  Future<List<int>> download(int native, int generation, String path);
+  Future<List<int>> download(
+    int native,
+    int generation,
+    String path, {
+    void Function(int done, int? total)? onProgress,
+  });
   Future<({int size, int? mtime})> stat(
     int native,
     int generation,
     String path,
   );
-  Future<void> upload(int native, int generation, String path, List<int> bytes);
+  Future<void> upload(
+    int native,
+    int generation,
+    String path,
+    List<int> bytes, {
+    void Function(int done, int total)? onProgress,
+  });
   Future<void> renameOver(int native, int generation, String from, String to);
   Future<void> removeFile(int native, int generation, String path);
 }
@@ -41,7 +52,12 @@ abstract interface class LocalEditGateway {
 class NativeLocalEditGateway implements LocalEditGateway {
   const NativeLocalEditGateway();
   @override
-  Future<List<int>> download(int native, int generation, String path) async {
+  Future<List<int>> download(
+    int native,
+    int generation,
+    String path, {
+    void Function(int done, int? total)? onProgress,
+  }) async {
     final out = <int>[];
     final meta = await rust.sftpProperties(
       id: native,
@@ -50,6 +66,7 @@ class NativeLocalEditGateway implements LocalEditGateway {
       includeDirectorySize: false,
     );
     final total = meta.size;
+    onProgress?.call(0, total);
     for (var offset = 0; offset < total;) {
       final chunk = await rust.sftpReadChunk(
         id: native,
@@ -60,6 +77,7 @@ class NativeLocalEditGateway implements LocalEditGateway {
       if (chunk.isEmpty) break;
       out.addAll(chunk);
       offset += chunk.length;
+      onProgress?.call(offset, total);
     }
     return out;
   }
@@ -84,9 +102,11 @@ class NativeLocalEditGateway implements LocalEditGateway {
     int native,
     int generation,
     String path,
-    List<int> bytes,
-  ) async {
+    List<int> bytes, {
+    void Function(int done, int total)? onProgress,
+  }) async {
     const chunk = 1024 * 1024;
+    onProgress?.call(0, bytes.length);
     if (bytes.isEmpty) {
       // An empty save must still create (and truncate) the remote temp
       // file; the chunk loop below would never run.
@@ -97,6 +117,7 @@ class NativeLocalEditGateway implements LocalEditGateway {
         data: const [],
         truncate: true,
       );
+      onProgress?.call(0, 0);
       return;
     }
     for (var offset = 0; offset < bytes.length; offset += chunk) {
@@ -110,6 +131,10 @@ class NativeLocalEditGateway implements LocalEditGateway {
         offset: offset,
         data: slice,
         truncate: offset == 0,
+      );
+      onProgress?.call(
+        (offset + slice.length).clamp(0, bytes.length),
+        bytes.length,
       );
     }
   }
@@ -151,7 +176,17 @@ String sanitizeLocalName(String name) {
   return safeExt.isEmpty ? safeStem : '$safeStem.$safeExt';
 }
 
-class LocalEditSession {
+/// Lifecycle of a local-edit queue task (round-9).
+enum LocalEditStatus {
+  downloading,
+  editing,
+  uploading,
+  conflicted,
+  failed,
+  closed,
+}
+
+class LocalEditSession extends ChangeNotifier {
   // ignore: use_super_parameters
   LocalEditSession._(
     this._session,
@@ -163,17 +198,45 @@ class LocalEditSession {
     this._originMtime,
     this._gateway,
     this._onNotice,
+    this._ownRoot,
   );
 
   final LiveTerminalSession _session;
   final String _remotePath;
   final File _file;
+
+  /// Queue-task surface (round-9): lifecycle state and byte progress for
+  /// the download/upload phases. Purely derived UI metadata.
+  LocalEditStatus status = LocalEditStatus.downloading;
+  int progressDone = 0, progressTotal = 0;
+  String get displayName => _remotePath.split('/').last;
+  String get hostLabel => _session.host.name;
+  String get remotePath => _remotePath;
+  File get localFile => _file;
+  LiveTerminalSession get session => _session;
+
+  void _setStatus(LocalEditStatus next) {
+    if (status == next) return;
+    status = next;
+    notifyListeners();
+  }
+
+  void _setProgress(int done, int total) {
+    progressDone = done;
+    progressTotal = total;
+    notifyListeners();
+  }
+
   final int _native;
   final int _originGeneration;
   int _originSize;
   int? _originMtime;
   final LocalEditGateway _gateway;
   final void Function(String message) _onNotice;
+
+  /// True when this task created its temp root directory itself (tests
+  /// share an explicit root); only then does dispose retire the root.
+  final bool _ownRoot;
 
   StreamSubscription<FileSystemEvent>? _watch;
   Timer? _stability;
@@ -209,26 +272,43 @@ class LocalEditSession {
     if (file.byteSize != null && file.byteSize! > _maxEditBytes) {
       throw StateError('超过16MiB的文件请使用外部大文件编辑');
     }
-    final bytes = await gateway.download(native, generation, file.id);
-    final stat = await gateway.stat(native, generation, file.id);
+    // Each task owns its own temp directory and keeps the ORIGINAL file
+    // name inside it (sanitized only for characters the local OS cannot
+    // represent): correct editor association, and same-name files from
+    // different hosts can never collide. The session exists before the
+    // download so the queue task can stream progress from byte zero.
+    final ownRoot = rootOverride == null;
     final root =
-        rootOverride ??
-        Directory.systemTemp.createTempSync('hspterm-local-edit');
-    final local = File(
-      '${root.path}/edit-${DateTime.now().microsecondsSinceEpoch}-${sanitizeLocalName(file.name)}',
+        rootOverride ?? Directory.systemTemp.createTempSync('hspterm-edit');
+    final taskDir = Directory(
+      '${root.path}/edit-${DateTime.now().microsecondsSinceEpoch}',
     );
-    await local.writeAsBytes(bytes, flush: true);
+    taskDir.createSync(recursive: true);
+    final local = File('${taskDir.path}/${sanitizeLocalName(file.name)}');
     final session = LocalEditSession._(
       source,
       file.id,
       local,
       native,
       generation,
-      stat.size,
-      stat.mtime,
+      file.byteSize ?? 0,
+      null,
       gateway,
       notice,
+      ownRoot,
     );
+    onSession?.call(session);
+    final bytes = await gateway.download(
+      native,
+      generation,
+      file.id,
+      onProgress: (done, total) => session._setProgress(done, total ?? 0),
+    );
+    final stat = await gateway.stat(native, generation, file.id);
+    session
+      .._originSize = stat.size
+      .._originMtime = stat.mtime;
+    await local.writeAsBytes(bytes, flush: true);
     final launch = launchOverride ?? _launchFileUri;
     try {
       await session._open(launch);
@@ -236,7 +316,6 @@ class LocalEditSession {
       await session.dispose();
       rethrow;
     }
-    onSession?.call(session);
   }
 
   static Future<bool> _launchFileUri(Uri uri) {
@@ -256,6 +335,7 @@ class LocalEditSession {
     if (!opened) {
       throw StateError('系统没有成功打开本地文件');
     }
+    _setStatus(LocalEditStatus.editing);
   }
 
   void _scheduleStabilityCheck() {
@@ -296,6 +376,7 @@ class LocalEditSession {
       if (current == null ||
           !_session.controller.connected ||
           current != _originGeneration) {
+        _setStatus(LocalEditStatus.failed);
         _noticeAndLog(
           '本地编辑上传暂停：原 SSH 会话已断开；修改已保留，可稍后重试',
           AppLogEvent.editUploadFailed,
@@ -308,6 +389,7 @@ class LocalEditSession {
               _originMtime != null &&
               remote.mtime != _originMtime)) {
         _conflicted = true;
+        _setStatus(LocalEditStatus.conflicted);
         _noticeAndLog('远端文件已被修改，本地编辑未覆盖；请手动处理后重试', AppLogEvent.editConflict);
         return;
       }
@@ -318,7 +400,14 @@ class LocalEditSession {
       final parent = slash == 0 ? '/' : _remotePath.substring(0, slash);
       final tempName =
           '$parent/.hspterm-edit-${DateTime.now().microsecondsSinceEpoch}';
-      await _gateway.upload(_native, current, tempName, bytes);
+      _setStatus(LocalEditStatus.uploading);
+      await _gateway.upload(
+        _native,
+        current,
+        tempName,
+        bytes,
+        onProgress: _setProgress,
+      );
       try {
         await _gateway.renameOver(_native, current, tempName, _remotePath);
       } catch (error) {
@@ -337,6 +426,7 @@ class LocalEditSession {
       _originMtime = after.mtime;
       _lastUploadedBytes = bytes;
       _conflicted = false;
+      _setStatus(LocalEditStatus.editing);
       AppRunLog.instance.event(
         AppLogEvent.editUploaded,
         terminal: _native,
@@ -344,6 +434,7 @@ class LocalEditSession {
         fields: {'bytes': bytes.length, 'result': 'ok'},
       );
     } catch (error) {
+      _setStatus(LocalEditStatus.failed);
       _noticeAndLog(
         '本地编辑上传失败：修改已保留，可稍后重试',
         AppLogEvent.editUploadFailed,
@@ -372,8 +463,13 @@ class LocalEditSession {
     return true;
   }
 
+  bool _disposeStarted = false;
+  @override
   Future<void> dispose() async {
+    if (_disposeStarted) return;
+    _disposeStarted = true;
     _disposed = true;
+    _setStatus(LocalEditStatus.closed);
     await _watch?.cancel();
     _stability?.cancel();
     _poll?.cancel();
@@ -382,37 +478,54 @@ class LocalEditSession {
       if (await _home.exists() && await _home.list().isEmpty) {
         await _home.delete();
       }
+      final root = _home.parent;
+      if (_ownRoot && await root.exists() && await root.list().isEmpty) {
+        await root.delete();
+      }
     } catch (_) {
       // Best-effort cleanup; the OS temp cleaner owns the rest.
     }
+    super.dispose();
   }
 }
 
 /// Registry owned by the workbench model: bounded, disposed with the model.
-class LocalEditRegistry {
+/// Also the change source for the transfer queue's local-edit section.
+class LocalEditRegistry extends ChangeNotifier {
   final _sessions = <LocalEditSession>[];
   bool _closed = false;
 
   bool get isFull => _sessions.length >= _maxSessionsPerModel;
   int get length => _sessions.length;
+  List<LocalEditSession> get sessions => List.unmodifiable(_sessions);
 
   void register(LocalEditSession session) {
     if (_closed || isFull) {
       session.dispose();
+      notifyListeners();
       return;
     }
     _sessions.add(session);
+    session.addListener(notifyListeners);
+    notifyListeners();
   }
 
   void unregister(LocalEditSession session) {
-    _sessions.remove(session);
+    if (_sessions.remove(session)) {
+      session.removeListener(notifyListeners);
+      notifyListeners();
+    }
   }
 
   Future<void> disposeAll() async {
     _closed = true;
     final pending = List.of(_sessions);
+    for (final session in pending) {
+      session.removeListener(notifyListeners);
+    }
     _sessions.clear();
     await Future.wait(pending.map((s) => s.dispose()));
+    notifyListeners();
   }
 }
 

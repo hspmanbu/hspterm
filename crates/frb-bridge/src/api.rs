@@ -3070,6 +3070,72 @@ pub struct SftpSortPref {
     pub ascending: bool,
 }
 
+/// One host's saved SFTP listing column layout (stable column ids).
+pub struct SftpColumnPref {
+    pub host_id: String,
+    pub order: Vec<String>,
+    pub hidden: Vec<String>,
+    pub widths: Vec<(String, u32)>,
+}
+
+/// Device-local SFTP column layout per formal host (order, hidden, widths).
+pub async fn load_sftp_column_prefs() -> Result<Vec<SftpColumnPref>> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(|| {
+            with_vault(|v| {
+                Ok(hspterm_storage_sync::sftp_host_prefs::load_columns(v)?
+                    .into_iter()
+                    .map(|entry| SftpColumnPref {
+                        host_id: entry.host,
+                        order: entry.order,
+                        hidden: entry.hidden,
+                        widths: entry
+                            .widths
+                            .into_iter()
+                            .map(|(id, w)| (id, u32::from(w)))
+                            .collect(),
+                    })
+                    .collect())
+            })
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+/// Replaces one host's saved column layout.
+pub async fn record_sftp_column_pref(
+    host_id: String,
+    order: Vec<String>,
+    hidden: Vec<String>,
+    widths: Vec<(String, u32)>,
+) -> Result<()> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(move || {
+            let widths_bounded: Vec<(String, u16)> = widths
+                .into_iter()
+                .filter_map(|(id, w)| u16::try_from(w).ok().map(|w| (id, w)))
+                .collect();
+            let entry = hspterm_storage_sync::sftp_host_prefs::HostColumns {
+                host: host_id,
+                order,
+                hidden,
+                widths: widths_bounded,
+            };
+            with_vault(|v| {
+                hspterm_storage_sync::sftp_host_prefs::record_columns(v, &entry)?;
+                Ok(())
+            })
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
 pub async fn load_recent_hosts() -> Result<Vec<String>> {
     /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
     let outcome: Result<_> = crate::public_errors::guard(async move {
@@ -4294,6 +4360,10 @@ pub struct RemoteFile {
     pub size: Option<u64>,
     pub modified: Option<u32>,
     pub permissions: Option<u32>,
+    /// Listing owner/group names (or numeric ids as text) when the server
+    /// reports them; round-9 SFTP columns. No extra network requests.
+    pub owner: Option<String>,
+    pub group: Option<String>,
 }
 pub struct RemoteDirectory {
     pub path: String,
@@ -4383,6 +4453,8 @@ pub async fn sftp_list_directory(id: u32, path: String) -> Result<RemoteDirector
                 size: a.size,
                 modified: a.mtime,
                 permissions: a.permissions,
+                owner: a.user.clone().or_else(|| a.uid.map(|id| id.to_string())),
+                group: a.group.clone().or_else(|| a.gid.map(|id| id.to_string())),
             });
         }
         Ok(RemoteDirectory { path, files })
@@ -4457,6 +4529,8 @@ pub async fn sftp_directory_page(
                     size: f.size,
                     modified: f.modified,
                     permissions: f.permissions,
+                    owner: f.owner,
+                    group: f.group,
                 })
                 .collect(),
         })
@@ -4538,6 +4612,8 @@ pub async fn sftp_file_search_page(
                     size: f.size,
                     modified: f.modified,
                     permissions: f.permissions,
+                    owner: f.owner,
+                    group: f.group,
                 })
                 .collect(),
             scanned: page.scanned,
@@ -4615,6 +4691,14 @@ pub async fn sftp_resolve_entry(id: u32, generation: u64, path: String) -> Resul
             size: attributes.size,
             modified: attributes.mtime,
             permissions: attributes.permissions,
+            owner: attributes
+                .user
+                .clone()
+                .or_else(|| attributes.uid.map(|id| id.to_string())),
+            group: attributes
+                .group
+                .clone()
+                .or_else(|| attributes.gid.map(|id| id.to_string())),
         })
     })
     .await;
@@ -4672,6 +4756,14 @@ pub async fn sftp_locate_terminal_path(
             size: attributes.size,
             modified: attributes.mtime,
             permissions: attributes.permissions,
+            owner: attributes
+                .user
+                .clone()
+                .or_else(|| attributes.uid.map(|id| id.to_string())),
+            group: attributes
+                .group
+                .clone()
+                .or_else(|| attributes.gid.map(|id| id.to_string())),
         })
     })
     .await;

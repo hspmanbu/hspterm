@@ -47,19 +47,22 @@ void main() {
       final verticalBar = bars.firstWhere(
         (b) => b.scrollbarOrientation == ScrollbarOrientation.right,
       );
-      final verticalBox =
-          tester.renderObject(
-            find.byWidgetPredicate(
-              (w) =>
-                  w is RawScrollbar &&
-                  w.scrollbarOrientation == ScrollbarOrientation.right,
-            ),
-          ) as RenderBox;
+      final verticalBox = tester.renderObject(
+        find.byWidgetPredicate(
+          (w) =>
+              w is RawScrollbar &&
+              w.scrollbarOrientation == ScrollbarOrientation.right,
+        ),
+      ) as RenderBox;
       final rect = verticalBox.localToGlobal(Offset.zero) & verticalBox.size;
       expect(rect.right, closeTo(panel.right, 1));
-      expect(verticalBar.padding?.resolve(TextDirection.ltr).bottom, 14,
-          reason: 'bottom padding keeps the corner clear of the horizontal '
-              'thumb');
+      expect(
+        verticalBar.padding?.resolve(TextDirection.ltr).bottom,
+        14,
+        reason:
+            'bottom padding keeps the corner clear of the horizontal '
+            'thumb',
+      );
 
       // Wide content scrolls horizontally; the pinned track stays put.
       final horizontalBar = bars.firstWhere(
@@ -71,8 +74,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
       final rectAfter =
           verticalBox.localToGlobal(Offset.zero) & verticalBox.size;
-      expect(rectAfter.right, closeTo(panel.right, 1),
-          reason: 'vertical track stays pinned during horizontal scroll');
+      expect(
+        rectAfter.right,
+        closeTo(panel.right, 1),
+        reason: 'vertical track stays pinned during horizontal scroll',
+      );
 
       // Dragging the vertical controller moves the thumb (same axis).
       vertical.jumpTo(1200);

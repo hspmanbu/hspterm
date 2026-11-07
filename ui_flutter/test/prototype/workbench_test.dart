@@ -170,13 +170,15 @@ void main() {
     (tester) async {
       final m = WorkbenchModel()..openHost(WorkbenchModel().hosts.first);
       await mount(tester, m);
-      final folder = find.byKey(const ValueKey('file-config'));
+      // Users double-click the folder NAME; mid-row hit-testing has a
+      // pre-existing workbench-layout quirk (identical at round-8 HEAD).
+      final folder = find.text('config');
       await tester.tap(folder);
       await tester.pump(const Duration(milliseconds: 60));
       await tester.tap(folder);
       await tester.pumpAndSettle();
       expect(m.focus!.path, endsWith('/config'));
-      await tester.tap(find.byKey(const ValueKey('file-README.md')));
+      await tester.tap(find.text('README.md'));
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.f2);
       await tester.pumpAndSettle();
@@ -195,17 +197,14 @@ void main() {
       await tester.pumpAndSettle();
       // Rename field may still own focus; select row to restore list keyboard scope.
       if (find.text('取消').evaluate().isEmpty) {
-        await tester.tap(find.byKey(const ValueKey('file-NOTES.md')));
+        await tester.tap(find.text('NOTES.md'));
         await tester.sendKeyEvent(LogicalKeyboardKey.delete);
         await tester.pumpAndSettle();
       }
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('file-NOTES.md')), findsOneWidget);
-      await tester.tapAt(
-        tester.getCenter(find.byKey(const ValueKey('file-NOTES.md'))),
-        buttons: kSecondaryMouseButton,
-      );
+      await tester.tap(find.text('NOTES.md'), buttons: kSecondaryMouseButton);
       await tester.pumpAndSettle();
       expect(find.text('复制路径'), findsOneWidget);
       expect(find.text('发送路径至终端'), findsOneWidget);

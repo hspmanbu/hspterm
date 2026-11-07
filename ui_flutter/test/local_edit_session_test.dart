@@ -26,8 +26,17 @@ class FakeGateway implements LocalEditGateway {
   }
 
   @override
-  Future<List<int>> download(int native, int generation, String path) async =>
-      List.of(remoteFiles[path] ?? utf8Bytes('hello'));
+  Future<List<int>> download(
+    int native,
+    int generation,
+    String path, {
+    void Function(int done, int? total)? onProgress,
+  }) async {
+    final bytes = List.of(remoteFiles[path] ?? utf8Bytes('hello'));
+    onProgress?.call(0, bytes.length);
+    onProgress?.call(bytes.length, bytes.length);
+    return bytes;
+  }
 
   @override
   Future<({int size, int? mtime})> stat(
@@ -44,11 +53,13 @@ class FakeGateway implements LocalEditGateway {
     int native,
     int generation,
     String path,
-    List<int> bytes,
-  ) async {
+    List<int> bytes, {
+    void Function(int done, int total)? onProgress,
+  }) async {
     if (refuseUpload) throw const SocketException('offline');
     if (uploadError != null) throw uploadError!;
     uploads.add((path, bytes));
+    onProgress?.call(bytes.length, bytes.length);
   }
 
   @override
@@ -143,6 +154,13 @@ void main() {
     return created.last;
   }
 
+  /// Each task owns a subdirectory under [root] holding the original
+  /// (sanitized) file name — round-9 layout.
+  File singleTaskFile(Directory root) {
+    final taskDir = root.listSync().single as Directory;
+    return taskDir.listSync().single as File;
+  }
+
   test('sanitizeLocalName keeps extension and blocks traversal', () {
     expect(sanitizeLocalName('report.txt'), 'report.txt');
     expect(sanitizeLocalName('..'), isNot('..'));
@@ -155,7 +173,7 @@ void main() {
   test('same-length content change uploads; identical bytes do not', () async {
     final s = await connectedSession();
     final session = await launchFor(s, 'a.txt');
-    final file = root.listSync().single as File;
+    final file = singleTaskFile(root);
     final original = await file.readAsString();
     // Same length, different content.
     expect(original.length, 5);
@@ -174,7 +192,7 @@ void main() {
   test('zero-byte save uploads and truncates remote', () async {
     final s = await connectedSession();
     final session = await launchFor(s, 'b.txt');
-    final file = root.listSync().single as File;
+    final file = singleTaskFile(root);
     await file.writeAsString('');
     await session.testStableCheck();
     expect(gateway.uploads.single.$2, isEmpty);
@@ -186,7 +204,7 @@ void main() {
     final s = await connectedSession();
     final session = await launchFor(s, 'c.txt');
     gateway.statMtimeOverride = 2000; // remote changed after download
-    final file = root.listSync().single as File;
+    final file = singleTaskFile(root);
     await file.writeAsString('changed');
     await session.testStableCheck();
     expect(session.conflicted, isTrue);
@@ -199,7 +217,7 @@ void main() {
     final s = await connectedSession();
     final session = await launchFor(s, 'd.txt');
     gateway.refuseUpload = true;
-    final file = root.listSync().single as File;
+    final file = singleTaskFile(root);
     await file.writeAsString('new content');
     await session.testStableCheck();
     expect(file.existsSync(), isTrue);
@@ -217,7 +235,7 @@ void main() {
   test('atomic upload: bytes go to a temp sibling then rename over', () async {
     final s = await connectedSession();
     final session = await launchFor(s, 'e.txt');
-    final file = root.listSync().single as File;
+    final file = singleTaskFile(root);
     await file.writeAsString('atomic');
     await session.testStableCheck();
     expect(gateway.uploads.single.$1, contains('.hspterm-edit-'));
@@ -234,11 +252,11 @@ void main() {
     await launchFor(s, 'f1.txt');
     await launchFor(s, 'f2.txt');
     expect(created.length, 2);
-    expect(root.listSync().length, 2);
-    final files = root.listSync().toList()
+    final dirs = root.listSync().toList()
       ..sort((a, b) => a.path.compareTo(b.path));
-    final f1 = files.first as File;
-    final f2 = files.last as File;
+    expect(dirs.length, 2);
+    final f1 = (dirs.first as Directory).listSync().single as File;
+    final f2 = (dirs.last as Directory).listSync().single as File;
     await f1.writeAsString('one');
     await created[0].testStableCheck();
     await Future<void>.delayed(const Duration(milliseconds: 5));
@@ -252,10 +270,13 @@ void main() {
     final s = await connectedSession();
     final session = await launchFor(s, 'g.txt');
     expect(root.listSync(), isNotEmpty);
+    // The session owns its task directory: disposal removes the file and
+    // the (now empty) task directory. The shared test root (rootOverride)
+    // stays because the session did not create it.
+    final taskDir = root.listSync().single as Directory;
     await session.dispose();
-    // The session owns the temp home: disposal removes the file and the
-    // (now empty) home directory itself.
-    expect(root.existsSync(), isFalse);
+    expect(taskDir.existsSync(), isFalse, reason: 'task dir removed');
+    expect(root.existsSync(), isTrue, reason: 'shared test root survives');
     expect(session.isDisposed, isTrue);
     s.controller.dispose();
   });
@@ -281,7 +302,7 @@ void main() {
     gateway.seed('/dir/tmpfail.txt', utf8Bytes('hello'));
     final session = await launchFor(s, 'tmpfail.txt');
     gateway.renameError = StateError('rename denied');
-    final file = root.listSync().single as File;
+    final file = singleTaskFile(root);
     await file.writeAsString('v2');
     await session.testStableCheck();
     expect(gateway.uploads, isNotEmpty, reason: 'bytes reached the temp file');
@@ -305,7 +326,7 @@ void main() {
       final s = await connectedSession();
       gateway.seed('/dir/empty.txt', utf8Bytes('data'));
       final session = await launchFor(s, 'empty.txt');
-      final file = root.listSync().single as File;
+      final file = singleTaskFile(root);
       await file.writeAsString('');
       await session.testStableCheck();
       // The upload call happened (not skipped by an empty loop).

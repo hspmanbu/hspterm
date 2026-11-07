@@ -1,4 +1,5 @@
 import '../prototype/model.dart';
+import 'file_kinds.dart';
 import '../src/rust/api.dart' as rust;
 import 'file_size.dart';
 
@@ -78,12 +79,10 @@ class PagedDirectoryReader {
             symlink: f.symlink,
             byteSize: f.size,
             modifiedEpoch: f.modified,
+            permissions: f.permissions,
+            owner: f.owner,
             size: f.directory ? '—' : remoteFileSize(f.size),
-            kind: f.symlink
-                ? '符号链接'
-                : f.directory
-                ? '文件夹'
-                : '文件',
+            kind: sftpFileKind(f.name, folder: f.directory, symlink: f.symlink),
             modified: f.modified == null
                 ? '—'
                 : DateTime.fromMillisecondsSinceEpoch(f.modified! * 1000)

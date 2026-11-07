@@ -55,27 +55,26 @@ void main() {
       m.dispose();
     },
   );
-  testWidgets(
-    'escape cancels the inline rename editor as well',
-    (tester) async {
-      final m = WorkbenchModel()..demo();
-      final source = m.focus!;
-      final target = source.files.first;
-      final original = target.name;
-      await mount(tester, m);
-      await tester.tap(find.text(original));
-      await tester.pumpAndSettle();
-      await tester.sendKeyEvent(LogicalKeyboardKey.f2);
-      await tester.pumpAndSettle();
-      final editor = find.byKey(const ValueKey('inline-rename'));
-      await tester.enterText(editor, 'discarded.txt');
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-      expect(editor, findsNothing);
-      expect(target.name, original);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-      m.dispose();
-    },
-  );
+  testWidgets('escape cancels the inline rename editor as well', (
+    tester,
+  ) async {
+    final m = WorkbenchModel()..demo();
+    final source = m.focus!;
+    final target = source.files.first;
+    final original = target.name;
+    await mount(tester, m);
+    await tester.tap(find.text(original));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.f2);
+    await tester.pumpAndSettle();
+    final editor = find.byKey(const ValueKey('inline-rename'));
+    await tester.enterText(editor, 'discarded.txt');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(editor, findsNothing);
+    expect(target.name, original);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    m.dispose();
+  });
 }

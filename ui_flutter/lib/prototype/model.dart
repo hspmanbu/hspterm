@@ -129,6 +129,8 @@ class DemoFile {
     this.byteSize,
     this.modifiedEpoch,
     this.symlink = false,
+    this.permissions,
+    this.owner,
   });
   final String id;
   String name;
@@ -136,6 +138,11 @@ class DemoFile {
   final String size, kind, modified;
   final int? byteSize, modifiedEpoch;
   final bool symlink;
+
+  /// Raw Unix mode bits and the listing owner (name or numeric id) when the
+  /// server reports them; round-9 permission/owner columns.
+  final int? permissions;
+  final String? owner;
 }
 
 class PathBookmark {
@@ -200,6 +207,18 @@ class LocalTransferSubmissionFailure implements Exception {
 class LocalTransferRequest {
   const LocalTransferRequest(this.local, this.remote);
   final String local, remote;
+}
+
+/// Stable-id SFTP listing column layout remembered per host (round-9).
+class SftpColumnLayout {
+  SftpColumnLayout({
+    required this.order,
+    required this.hidden,
+    required this.widths,
+  });
+  final List<String> order;
+  final Set<String> hidden;
+  final Map<String, double> widths;
 }
 
 class TerminalSession {
@@ -525,6 +544,8 @@ class WorkbenchModel extends ChangeNotifier {
   /// Device-local per-host listing sort memory; the live model persists it.
   (int, bool)? rememberedSort(String hostId) => null;
   void rememberSort(String hostId, int column, bool ascending) {}
+  SftpColumnLayout? rememberedColumns(String hostId) => null;
+  void rememberColumns(String hostId, SftpColumnLayout layout) {}
 
   Future<void> openTemporaryHost(DemoHost host) =>
       Future.error(UnsupportedError('模拟模式不建立临时SSH连接'));

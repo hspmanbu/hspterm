@@ -311,6 +311,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Profile> dco_decode_list_profile(dynamic raw);
 
   @protected
+  List<(String, int)> dco_decode_list_record_string_u_32(dynamic raw);
+
+  @protected
   List<RemoteFile> dco_decode_list_remote_file(dynamic raw);
 
   @protected
@@ -336,6 +339,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<SftpBookmark> dco_decode_list_sftp_bookmark(dynamic raw);
+
+  @protected
+  List<SftpColumnPref> dco_decode_list_sftp_column_pref(dynamic raw);
 
   @protected
   List<SftpLastDir> dco_decode_list_sftp_last_dir(dynamic raw);
@@ -439,6 +445,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ProxyAuthenticationInput dco_decode_proxy_authentication_input(dynamic raw);
 
   @protected
+  (String, int) dco_decode_record_string_u_32(dynamic raw);
+
+  @protected
   RelativeTerminalPaths dco_decode_relative_terminal_paths(dynamic raw);
 
   @protected
@@ -500,6 +509,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SftpBookmark dco_decode_sftp_bookmark(dynamic raw);
+
+  @protected
+  SftpColumnPref dco_decode_sftp_column_pref(dynamic raw);
 
   @protected
   SftpLastDir dco_decode_sftp_last_dir(dynamic raw);
@@ -904,6 +916,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Profile> sse_decode_list_profile(SseDeserializer deserializer);
 
   @protected
+  List<(String, int)> sse_decode_list_record_string_u_32(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<RemoteFile> sse_decode_list_remote_file(SseDeserializer deserializer);
 
   @protected
@@ -933,6 +950,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<SftpBookmark> sse_decode_list_sftp_bookmark(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<SftpColumnPref> sse_decode_list_sftp_column_pref(
     SseDeserializer deserializer,
   );
 
@@ -1076,6 +1098,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  (String, int) sse_decode_record_string_u_32(SseDeserializer deserializer);
+
+  @protected
   RelativeTerminalPaths sse_decode_relative_terminal_paths(
     SseDeserializer deserializer,
   );
@@ -1149,6 +1174,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SftpBookmark sse_decode_sftp_bookmark(SseDeserializer deserializer);
+
+  @protected
+  SftpColumnPref sse_decode_sftp_column_pref(SseDeserializer deserializer);
 
   @protected
   SftpLastDir sse_decode_sftp_last_dir(SseDeserializer deserializer);
@@ -1662,6 +1690,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_profile(List<Profile> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_record_string_u_32(
+    List<(String, int)> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_remote_file(
     List<RemoteFile> self,
     SseSerializer serializer,
@@ -1712,6 +1746,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_sftp_bookmark(
     List<SftpBookmark> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_sftp_column_pref(
+    List<SftpColumnPref> self,
     SseSerializer serializer,
   );
 
@@ -1881,6 +1921,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_record_string_u_32(
+    (String, int) self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_relative_terminal_paths(
     RelativeTerminalPaths self,
     SseSerializer serializer,
@@ -1972,6 +2018,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_sftp_bookmark(SftpBookmark self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_sftp_column_pref(
+    SftpColumnPref self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_sftp_last_dir(SftpLastDir self, SseSerializer serializer);

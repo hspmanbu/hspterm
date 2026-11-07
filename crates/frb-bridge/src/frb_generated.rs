@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1315973749;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1167429212;
 
 // Section: executor
 
@@ -4202,6 +4202,41 @@ fn wire__crate__api__load_recent_hosts_impl(
         },
     )
 }
+fn wire__crate__api__load_sftp_column_prefs_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "load_sftp_column_prefs",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::load_sftp_column_prefs().await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__load_sftp_last_dirs_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -5293,6 +5328,51 @@ fn wire__crate__api__record_recent_host_impl(
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || async move {
                         let output_ok = crate::api::record_recent_host(api_host_id).await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__record_sftp_column_pref_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "record_sftp_column_pref",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_host_id = <String>::sse_decode(&mut deserializer);
+            let api_order = <Vec<String>>::sse_decode(&mut deserializer);
+            let api_hidden = <Vec<String>>::sse_decode(&mut deserializer);
+            let api_widths = <Vec<(String, u32)>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::record_sftp_column_pref(
+                            api_host_id,
+                            api_order,
+                            api_hidden,
+                            api_widths,
+                        )
+                        .await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -10946,6 +11026,18 @@ impl SseDecode for Vec<crate::api::Profile> {
     }
 }
 
+impl SseDecode for Vec<(String, u32)> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<(String, u32)>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::RemoteFile> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -11051,6 +11143,18 @@ impl SseDecode for Vec<crate::api::SftpBookmark> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<crate::api::SftpBookmark>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::SftpColumnPref> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::SftpColumnPref>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -11491,6 +11595,15 @@ impl SseDecode for crate::api::ProxyAuthenticationInput {
     }
 }
 
+impl SseDecode for (String, u32) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_field0 = <String>::sse_decode(deserializer);
+        let mut var_field1 = <u32>::sse_decode(deserializer);
+        return (var_field0, var_field1);
+    }
+}
+
 impl SseDecode for crate::api::RelativeTerminalPaths {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -11549,6 +11662,8 @@ impl SseDecode for crate::api::RemoteFile {
         let mut var_size = <Option<u64>>::sse_decode(deserializer);
         let mut var_modified = <Option<u32>>::sse_decode(deserializer);
         let mut var_permissions = <Option<u32>>::sse_decode(deserializer);
+        let mut var_owner = <Option<String>>::sse_decode(deserializer);
+        let mut var_group = <Option<String>>::sse_decode(deserializer);
         return crate::api::RemoteFile {
             name: var_name,
             path: var_path,
@@ -11557,6 +11672,8 @@ impl SseDecode for crate::api::RemoteFile {
             size: var_size,
             modified: var_modified,
             permissions: var_permissions,
+            owner: var_owner,
+            group: var_group,
         };
     }
 }
@@ -11896,6 +12013,22 @@ impl SseDecode for crate::api::SftpBookmark {
             name: var_name,
             path: var_path,
             host_id: var_hostId,
+        };
+    }
+}
+
+impl SseDecode for crate::api::SftpColumnPref {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_hostId = <String>::sse_decode(deserializer);
+        let mut var_order = <Vec<String>>::sse_decode(deserializer);
+        let mut var_hidden = <Vec<String>>::sse_decode(deserializer);
+        let mut var_widths = <Vec<(String, u32)>>::sse_decode(deserializer);
+        return crate::api::SftpColumnPref {
+            host_id: var_hostId,
+            order: var_order,
+            hidden: var_hidden,
+            widths: var_widths,
         };
     }
 }
@@ -12396,221 +12529,223 @@ fn pde_ffi_dispatcher_primary_impl(
         105 => wire__crate__api__load_host_bulk_impl(port, ptr, rust_vec_len, data_len),
         106 => wire__crate__api__load_host_ordering_impl(port, ptr, rust_vec_len, data_len),
         107 => wire__crate__api__load_recent_hosts_impl(port, ptr, rust_vec_len, data_len),
-        108 => wire__crate__api__load_sftp_last_dirs_impl(port, ptr, rust_vec_len, data_len),
-        109 => wire__crate__api__load_sftp_sort_prefs_impl(port, ptr, rust_vec_len, data_len),
-        110 => wire__crate__api__load_sftp_view_settings_impl(port, ptr, rust_vec_len, data_len),
-        111 => wire__crate__api__load_terminal_preferences_impl(port, ptr, rust_vec_len, data_len),
-        112 => wire__crate__api__load_terminal_typography_impl(port, ptr, rust_vec_len, data_len),
-        113 => wire__crate__api__lock_terminal_size_impl(port, ptr, rust_vec_len, data_len),
-        114 => wire__crate__api__navigate_search_impl(port, ptr, rust_vec_len, data_len),
-        115 => wire__crate__api__navigate_terminal_command_impl(port, ptr, rust_vec_len, data_len),
-        117 => wire__crate__api__open_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
-        118 => wire__crate__api__open_external_editor_impl(port, ptr, rust_vec_len, data_len),
-        119 => wire__crate__api__paste_text_impl(port, ptr, rust_vec_len, data_len),
-        120 => {
+        108 => wire__crate__api__load_sftp_column_prefs_impl(port, ptr, rust_vec_len, data_len),
+        109 => wire__crate__api__load_sftp_last_dirs_impl(port, ptr, rust_vec_len, data_len),
+        110 => wire__crate__api__load_sftp_sort_prefs_impl(port, ptr, rust_vec_len, data_len),
+        111 => wire__crate__api__load_sftp_view_settings_impl(port, ptr, rust_vec_len, data_len),
+        112 => wire__crate__api__load_terminal_preferences_impl(port, ptr, rust_vec_len, data_len),
+        113 => wire__crate__api__load_terminal_typography_impl(port, ptr, rust_vec_len, data_len),
+        114 => wire__crate__api__lock_terminal_size_impl(port, ptr, rust_vec_len, data_len),
+        115 => wire__crate__api__navigate_search_impl(port, ptr, rust_vec_len, data_len),
+        116 => wire__crate__api__navigate_terminal_command_impl(port, ptr, rust_vec_len, data_len),
+        118 => wire__crate__api__open_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
+        119 => wire__crate__api__open_external_editor_impl(port, ptr, rust_vec_len, data_len),
+        120 => wire__crate__api__paste_text_impl(port, ptr, rust_vec_len, data_len),
+        121 => {
             wire__crate__api__pending_google_drive_creation_impl(port, ptr, rust_vec_len, data_len)
         }
-        121 => {
+        122 => {
             wire__crate__api__prepare_agent_authorisation_impl(port, ptr, rust_vec_len, data_len)
         }
-        122 => {
+        123 => {
             wire__crate__api__prepare_configuration_restore_impl(port, ptr, rust_vec_len, data_len)
         }
-        123 => wire__crate__api__prepare_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
-        124 => wire__crate__api__prepare_editor_impl(port, ptr, rust_vec_len, data_len),
-        125 => {
+        124 => wire__crate__api__prepare_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
+        125 => wire__crate__api__prepare_editor_impl(port, ptr, rust_vec_len, data_len),
+        126 => {
             wire__crate__api__prepare_explorer_cache_cleanup_impl(port, ptr, rust_vec_len, data_len)
         }
-        126 => {
+        127 => {
             wire__crate__api__prepare_explorer_export_file_impl(port, ptr, rust_vec_len, data_len)
         }
-        127 => wire__crate__api__prepare_file_preview_impl(port, ptr, rust_vec_len, data_len),
-        128 => wire__crate__api__prepare_google_drive_authorization_impl(
+        128 => wire__crate__api__prepare_file_preview_impl(port, ptr, rust_vec_len, data_len),
+        129 => wire__crate__api__prepare_google_drive_authorization_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        129 => {
+        130 => {
             wire__crate__api__prepare_google_drive_creation_impl(port, ptr, rust_vec_len, data_len)
         }
-        130 => wire__crate__api__prepare_remote_move_end_impl(port, ptr, rust_vec_len, data_len),
-        131 => {
+        131 => wire__crate__api__prepare_remote_move_end_impl(port, ptr, rust_vec_len, data_len),
+        132 => {
             wire__crate__api__prepare_remote_staging_cleanup_impl(port, ptr, rust_vec_len, data_len)
         }
-        132 => wire__crate__api__prepare_remote_staging_end_impl(port, ptr, rust_vec_len, data_len),
-        133 => {
+        133 => wire__crate__api__prepare_remote_staging_end_impl(port, ptr, rust_vec_len, data_len),
+        134 => {
             wire__crate__api__prepare_source_retirement_end_impl(port, ptr, rust_vec_len, data_len)
         }
-        134 => {
+        135 => {
             wire__crate__api__preview_configuration_restore_impl(port, ptr, rust_vec_len, data_len)
         }
-        135 => wire__crate__api__preview_openssh_import_impl(port, ptr, rust_vec_len, data_len),
-        136 => wire__crate__api__record_recent_host_impl(port, ptr, rust_vec_len, data_len),
-        137 => wire__crate__api__record_sftp_last_dir_impl(port, ptr, rust_vec_len, data_len),
-        138 => wire__crate__api__record_sftp_sort_pref_impl(port, ptr, rust_vec_len, data_len),
-        139 => {
+        136 => wire__crate__api__preview_openssh_import_impl(port, ptr, rust_vec_len, data_len),
+        137 => wire__crate__api__record_recent_host_impl(port, ptr, rust_vec_len, data_len),
+        138 => wire__crate__api__record_sftp_column_pref_impl(port, ptr, rust_vec_len, data_len),
+        139 => wire__crate__api__record_sftp_last_dir_impl(port, ptr, rust_vec_len, data_len),
+        140 => wire__crate__api__record_sftp_sort_pref_impl(port, ptr, rust_vec_len, data_len),
+        141 => {
             wire__crate__api__release_explorer_cache_cleanup_impl(port, ptr, rust_vec_len, data_len)
         }
-        140 => wire__crate__api__release_explorer_export_impl(port, ptr, rust_vec_len, data_len),
-        141 => {
+        142 => wire__crate__api__release_explorer_export_impl(port, ptr, rust_vec_len, data_len),
+        143 => {
             wire__crate__api__release_explorer_export_file_impl(port, ptr, rust_vec_len, data_len)
         }
-        142 => wire__crate__api__release_external_editor_impl(port, ptr, rust_vec_len, data_len),
-        143 => wire__crate__api__remote_copy_failures_impl(port, ptr, rust_vec_len, data_len),
-        144 => wire__crate__api__remote_staging_inventory_impl(port, ptr, rust_vec_len, data_len),
-        145 => wire__crate__api__remote_staging_tasks_impl(port, ptr, rust_vec_len, data_len),
-        146 => wire__crate__api__remove_configuration_sync_archives_impl(
+        144 => wire__crate__api__release_external_editor_impl(port, ptr, rust_vec_len, data_len),
+        145 => wire__crate__api__remote_copy_failures_impl(port, ptr, rust_vec_len, data_len),
+        146 => wire__crate__api__remote_staging_inventory_impl(port, ptr, rust_vec_len, data_len),
+        147 => wire__crate__api__remote_staging_tasks_impl(port, ptr, rust_vec_len, data_len),
+        148 => wire__crate__api__remove_configuration_sync_archives_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        147 => {
+        149 => {
             wire__crate__api__remove_google_drive_account_impl(port, ptr, rust_vec_len, data_len)
         }
-        148 => wire__crate__api__remove_terminal_font_impl(port, ptr, rust_vec_len, data_len),
-        149 => wire__crate__api__rename_host_group_impl(port, ptr, rust_vec_len, data_len),
-        150 => wire__crate__api__reserve_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
-        154 => wire__crate__api__reserve_google_drive_account_removal_impl(
+        150 => wire__crate__api__remove_terminal_font_impl(port, ptr, rust_vec_len, data_len),
+        151 => wire__crate__api__rename_host_group_impl(port, ptr, rust_vec_len, data_len),
+        152 => wire__crate__api__reserve_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
+        156 => wire__crate__api__reserve_google_drive_account_removal_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        155 => wire__crate__api__reserve_google_drive_authorization_impl(
+        157 => wire__crate__api__reserve_google_drive_authorization_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        156 => {
+        158 => {
             wire__crate__api__reserve_google_drive_creation_impl(port, ptr, rust_vec_len, data_len)
         }
-        157 => wire__crate__api__reserve_google_drive_object_discovery_impl(
+        159 => wire__crate__api__reserve_google_drive_object_discovery_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        160 => wire__crate__api__resize_terminal_impl(port, ptr, rust_vec_len, data_len),
-        161 => wire__crate__api__resolve_configuration_sync_references_impl(
+        162 => wire__crate__api__resize_terminal_impl(port, ptr, rust_vec_len, data_len),
+        163 => wire__crate__api__resolve_configuration_sync_references_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        162 => wire__crate__api__resolve_terminal_path_impl(port, ptr, rust_vec_len, data_len),
-        163 => wire__crate__api__resume_remote_copy_impl(port, ptr, rust_vec_len, data_len),
-        164 => wire__crate__api__resume_transfer_impl(port, ptr, rust_vec_len, data_len),
-        165 => wire__crate__api__revoke_terminal_agent_impl(port, ptr, rust_vec_len, data_len),
-        166 => wire__crate__api__sample_remote_resources_impl(port, ptr, rust_vec_len, data_len),
-        167 => wire__crate__api__save_appearance_impl(port, ptr, rust_vec_len, data_len),
-        168 => {
+        164 => wire__crate__api__resolve_terminal_path_impl(port, ptr, rust_vec_len, data_len),
+        165 => wire__crate__api__resume_remote_copy_impl(port, ptr, rust_vec_len, data_len),
+        166 => wire__crate__api__resume_transfer_impl(port, ptr, rust_vec_len, data_len),
+        167 => wire__crate__api__revoke_terminal_agent_impl(port, ptr, rust_vec_len, data_len),
+        168 => wire__crate__api__sample_remote_resources_impl(port, ptr, rust_vec_len, data_len),
+        169 => wire__crate__api__save_appearance_impl(port, ptr, rust_vec_len, data_len),
+        170 => {
             wire__crate__api__save_command_palette_shortcut_impl(port, ptr, rust_vec_len, data_len)
         }
-        169 => wire__crate__api__save_configuration_sync_settings_impl(
+        171 => wire__crate__api__save_configuration_sync_settings_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        170 => wire__crate__api__save_editor_impl(port, ptr, rust_vec_len, data_len),
-        171 => wire__crate__api__save_file_open_preferences_impl(port, ptr, rust_vec_len, data_len),
-        172 => wire__crate__api__save_forwarding_rule_draft_impl(port, ptr, rust_vec_len, data_len),
-        173 => wire__crate__api__save_forwarding_rules_impl(port, ptr, rust_vec_len, data_len),
-        174 => wire__crate__api__save_host_impl(port, ptr, rust_vec_len, data_len),
-        175 => wire__crate__api__save_host_draft_impl(port, ptr, rust_vec_len, data_len),
-        176 => {
+        172 => wire__crate__api__save_editor_impl(port, ptr, rust_vec_len, data_len),
+        173 => wire__crate__api__save_file_open_preferences_impl(port, ptr, rust_vec_len, data_len),
+        174 => wire__crate__api__save_forwarding_rule_draft_impl(port, ptr, rust_vec_len, data_len),
+        175 => wire__crate__api__save_forwarding_rules_impl(port, ptr, rust_vec_len, data_len),
+        176 => wire__crate__api__save_host_impl(port, ptr, rust_vec_len, data_len),
+        177 => wire__crate__api__save_host_draft_impl(port, ptr, rust_vec_len, data_len),
+        178 => {
             wire__crate__api__save_host_terminal_typography_impl(port, ptr, rust_vec_len, data_len)
         }
-        177 => wire__crate__api__save_profile_impl(port, ptr, rust_vec_len, data_len),
-        178 => wire__crate__api__save_sftp_bookmark_impl(port, ptr, rust_vec_len, data_len),
-        179 => wire__crate__api__save_sftp_view_settings_impl(port, ptr, rust_vec_len, data_len),
-        180 => wire__crate__api__save_ssh_network_defaults_impl(port, ptr, rust_vec_len, data_len),
-        181 => {
+        179 => wire__crate__api__save_profile_impl(port, ptr, rust_vec_len, data_len),
+        180 => wire__crate__api__save_sftp_bookmark_impl(port, ptr, rust_vec_len, data_len),
+        181 => wire__crate__api__save_sftp_view_settings_impl(port, ptr, rust_vec_len, data_len),
+        182 => wire__crate__api__save_ssh_network_defaults_impl(port, ptr, rust_vec_len, data_len),
+        183 => {
             wire__crate__api__save_terminal_display_settings_impl(port, ptr, rust_vec_len, data_len)
         }
-        182 => wire__crate__api__save_terminal_preferences_impl(port, ptr, rust_vec_len, data_len),
-        183 => wire__crate__api__save_terminal_typography_impl(port, ptr, rust_vec_len, data_len),
-        184 => wire__crate__api__save_transfer_preferences_impl(port, ptr, rust_vec_len, data_len),
-        185 => wire__crate__api__scroll_terminal_impl(port, ptr, rust_vec_len, data_len),
-        186 => wire__crate__api__search_terminal_impl(port, ptr, rust_vec_len, data_len),
-        187 => wire__crate__api__secure_unlock_source_impl(port, ptr, rust_vec_len, data_len),
-        188 => wire__crate__api__seek_terminal_impl(port, ptr, rust_vec_len, data_len),
-        189 => wire__crate__api__select_google_drive_object_impl(port, ptr, rust_vec_len, data_len),
-        190 => wire__crate__api__send_focus_impl(port, ptr, rust_vec_len, data_len),
-        191 => wire__crate__api__send_key_impl(port, ptr, rust_vec_len, data_len),
-        192 => wire__crate__api__send_mouse_impl(port, ptr, rust_vec_len, data_len),
-        193 => wire__crate__api__send_text_impl(port, ptr, rust_vec_len, data_len),
-        194 => wire__crate__api__set_clipboard_enabled_impl(port, ptr, rust_vec_len, data_len),
-        195 => {
+        184 => wire__crate__api__save_terminal_preferences_impl(port, ptr, rust_vec_len, data_len),
+        185 => wire__crate__api__save_terminal_typography_impl(port, ptr, rust_vec_len, data_len),
+        186 => wire__crate__api__save_transfer_preferences_impl(port, ptr, rust_vec_len, data_len),
+        187 => wire__crate__api__scroll_terminal_impl(port, ptr, rust_vec_len, data_len),
+        188 => wire__crate__api__search_terminal_impl(port, ptr, rust_vec_len, data_len),
+        189 => wire__crate__api__secure_unlock_source_impl(port, ptr, rust_vec_len, data_len),
+        190 => wire__crate__api__seek_terminal_impl(port, ptr, rust_vec_len, data_len),
+        191 => wire__crate__api__select_google_drive_object_impl(port, ptr, rust_vec_len, data_len),
+        192 => wire__crate__api__send_focus_impl(port, ptr, rust_vec_len, data_len),
+        193 => wire__crate__api__send_key_impl(port, ptr, rust_vec_len, data_len),
+        194 => wire__crate__api__send_mouse_impl(port, ptr, rust_vec_len, data_len),
+        195 => wire__crate__api__send_text_impl(port, ptr, rust_vec_len, data_len),
+        196 => wire__crate__api__set_clipboard_enabled_impl(port, ptr, rust_vec_len, data_len),
+        197 => {
             wire__crate__api__set_command_history_enabled_impl(port, ptr, rust_vec_len, data_len)
         }
-        196 => wire__crate__api__set_visible_impl(port, ptr, rust_vec_len, data_len),
-        197 => wire__crate__api__sftp_account_options_impl(port, ptr, rust_vec_len, data_len),
-        198 => wire__crate__api__sftp_close_directory_impl(port, ptr, rust_vec_len, data_len),
-        199 => wire__crate__api__sftp_close_file_search_impl(port, ptr, rust_vec_len, data_len),
-        200 => wire__crate__api__sftp_copy_on_server_impl(port, ptr, rust_vec_len, data_len),
-        201 => wire__crate__api__sftp_create_directory_impl(port, ptr, rust_vec_len, data_len),
-        202 => wire__crate__api__sftp_create_file_impl(port, ptr, rust_vec_len, data_len),
-        203 => wire__crate__api__sftp_directory_page_impl(port, ptr, rust_vec_len, data_len),
-        204 => wire__crate__api__sftp_directory_size_begin_impl(port, ptr, rust_vec_len, data_len),
-        205 => wire__crate__api__sftp_directory_size_step_impl(port, ptr, rust_vec_len, data_len),
-        206 => wire__crate__api__sftp_directory_size_stop_impl(port, ptr, rust_vec_len, data_len),
-        207 => wire__crate__api__sftp_file_search_page_impl(port, ptr, rust_vec_len, data_len),
-        208 => wire__crate__api__sftp_list_directory_impl(port, ptr, rust_vec_len, data_len),
-        209 => wire__crate__api__sftp_locate_terminal_path_impl(port, ptr, rust_vec_len, data_len),
-        210 => wire__crate__api__sftp_open_directory_impl(port, ptr, rust_vec_len, data_len),
-        211 => wire__crate__api__sftp_open_file_search_impl(port, ptr, rust_vec_len, data_len),
-        212 => wire__crate__api__sftp_properties_impl(port, ptr, rust_vec_len, data_len),
-        213 => wire__crate__api__sftp_read_chunk_impl(port, ptr, rust_vec_len, data_len),
-        214 => wire__crate__api__sftp_remove_impl(port, ptr, rust_vec_len, data_len),
-        215 => wire__crate__api__sftp_rename_impl(port, ptr, rust_vec_len, data_len),
-        216 => wire__crate__api__sftp_resolve_entry_impl(port, ptr, rust_vec_len, data_len),
-        217 => wire__crate__api__sftp_set_properties_impl(port, ptr, rust_vec_len, data_len),
-        218 => wire__crate__api__sftp_write_chunk_impl(port, ptr, rust_vec_len, data_len),
-        219 => wire__crate__api__shutdown_editors_impl(port, ptr, rust_vec_len, data_len),
-        220 => wire__crate__api__shutdown_file_previews_impl(port, ptr, rust_vec_len, data_len),
-        221 => wire__crate__api__ssh_network_defaults_impl(port, ptr, rust_vec_len, data_len),
-        222 => wire__crate__api__start_forwarding_impl(port, ptr, rust_vec_len, data_len),
-        223 => wire__crate__api__start_temporary_forwarding_impl(port, ptr, rust_vec_len, data_len),
-        224 => wire__crate__api__stop_forwarding_impl(port, ptr, rust_vec_len, data_len),
-        225 => wire__crate__api__stop_remote_copy_impl(port, ptr, rust_vec_len, data_len),
-        226 => wire__crate__api__stop_transfer_impl(port, ptr, rust_vec_len, data_len),
-        227 => wire__crate__api__take_frame_impl(port, ptr, rust_vec_len, data_len),
-        228 => {
+        198 => wire__crate__api__set_visible_impl(port, ptr, rust_vec_len, data_len),
+        199 => wire__crate__api__sftp_account_options_impl(port, ptr, rust_vec_len, data_len),
+        200 => wire__crate__api__sftp_close_directory_impl(port, ptr, rust_vec_len, data_len),
+        201 => wire__crate__api__sftp_close_file_search_impl(port, ptr, rust_vec_len, data_len),
+        202 => wire__crate__api__sftp_copy_on_server_impl(port, ptr, rust_vec_len, data_len),
+        203 => wire__crate__api__sftp_create_directory_impl(port, ptr, rust_vec_len, data_len),
+        204 => wire__crate__api__sftp_create_file_impl(port, ptr, rust_vec_len, data_len),
+        205 => wire__crate__api__sftp_directory_page_impl(port, ptr, rust_vec_len, data_len),
+        206 => wire__crate__api__sftp_directory_size_begin_impl(port, ptr, rust_vec_len, data_len),
+        207 => wire__crate__api__sftp_directory_size_step_impl(port, ptr, rust_vec_len, data_len),
+        208 => wire__crate__api__sftp_directory_size_stop_impl(port, ptr, rust_vec_len, data_len),
+        209 => wire__crate__api__sftp_file_search_page_impl(port, ptr, rust_vec_len, data_len),
+        210 => wire__crate__api__sftp_list_directory_impl(port, ptr, rust_vec_len, data_len),
+        211 => wire__crate__api__sftp_locate_terminal_path_impl(port, ptr, rust_vec_len, data_len),
+        212 => wire__crate__api__sftp_open_directory_impl(port, ptr, rust_vec_len, data_len),
+        213 => wire__crate__api__sftp_open_file_search_impl(port, ptr, rust_vec_len, data_len),
+        214 => wire__crate__api__sftp_properties_impl(port, ptr, rust_vec_len, data_len),
+        215 => wire__crate__api__sftp_read_chunk_impl(port, ptr, rust_vec_len, data_len),
+        216 => wire__crate__api__sftp_remove_impl(port, ptr, rust_vec_len, data_len),
+        217 => wire__crate__api__sftp_rename_impl(port, ptr, rust_vec_len, data_len),
+        218 => wire__crate__api__sftp_resolve_entry_impl(port, ptr, rust_vec_len, data_len),
+        219 => wire__crate__api__sftp_set_properties_impl(port, ptr, rust_vec_len, data_len),
+        220 => wire__crate__api__sftp_write_chunk_impl(port, ptr, rust_vec_len, data_len),
+        221 => wire__crate__api__shutdown_editors_impl(port, ptr, rust_vec_len, data_len),
+        222 => wire__crate__api__shutdown_file_previews_impl(port, ptr, rust_vec_len, data_len),
+        223 => wire__crate__api__ssh_network_defaults_impl(port, ptr, rust_vec_len, data_len),
+        224 => wire__crate__api__start_forwarding_impl(port, ptr, rust_vec_len, data_len),
+        225 => wire__crate__api__start_temporary_forwarding_impl(port, ptr, rust_vec_len, data_len),
+        226 => wire__crate__api__stop_forwarding_impl(port, ptr, rust_vec_len, data_len),
+        227 => wire__crate__api__stop_remote_copy_impl(port, ptr, rust_vec_len, data_len),
+        228 => wire__crate__api__stop_transfer_impl(port, ptr, rust_vec_len, data_len),
+        229 => wire__crate__api__take_frame_impl(port, ptr, rust_vec_len, data_len),
+        230 => {
             wire__crate__api__temporary_connection_source_impl(port, ptr, rust_vec_len, data_len)
         }
-        229 => wire__crate__api__terminal_agent_state_impl(port, ptr, rust_vec_len, data_len),
-        230 => wire__crate__api__terminal_command_ranges_impl(port, ptr, rust_vec_len, data_len),
-        231 => wire__crate__api__terminal_display_settings_impl(port, ptr, rust_vec_len, data_len),
-        232 => wire__crate__api__terminal_font_bytes_impl(port, ptr, rust_vec_len, data_len),
-        233 => wire__crate__api__terminal_forwardings_impl(port, ptr, rust_vec_len, data_len),
-        234 => {
+        231 => wire__crate__api__terminal_agent_state_impl(port, ptr, rust_vec_len, data_len),
+        232 => wire__crate__api__terminal_command_ranges_impl(port, ptr, rust_vec_len, data_len),
+        233 => wire__crate__api__terminal_display_settings_impl(port, ptr, rust_vec_len, data_len),
+        234 => wire__crate__api__terminal_font_bytes_impl(port, ptr, rust_vec_len, data_len),
+        235 => wire__crate__api__terminal_forwardings_impl(port, ptr, rust_vec_len, data_len),
+        236 => {
             wire__crate__api__terminal_integration_status_impl(port, ptr, rust_vec_len, data_len)
         }
-        235 => wire__crate__api__terminal_metrics_impl(port, ptr, rust_vec_len, data_len),
-        236 => wire__crate__api__terminal_relative_paths_impl(port, ptr, rust_vec_len, data_len),
-        237 => wire__crate__api__terminal_suggestions_impl(port, ptr, rust_vec_len, data_len),
-        238 => wire__crate__api__terminal_tmux_prompt_impl(port, ptr, rust_vec_len, data_len),
-        239 => {
+        237 => wire__crate__api__terminal_metrics_impl(port, ptr, rust_vec_len, data_len),
+        238 => wire__crate__api__terminal_relative_paths_impl(port, ptr, rust_vec_len, data_len),
+        239 => wire__crate__api__terminal_suggestions_impl(port, ptr, rust_vec_len, data_len),
+        240 => wire__crate__api__terminal_tmux_prompt_impl(port, ptr, rust_vec_len, data_len),
+        241 => {
             wire__crate__api__terminal_tmux_restore_enabled_impl(port, ptr, rust_vec_len, data_len)
         }
-        240 => wire__crate__api__terminal_working_directory_impl(port, ptr, rust_vec_len, data_len),
-        241 => wire__crate__api__terminate_remote_process_impl(port, ptr, rust_vec_len, data_len),
-        242 => wire__crate__api__test_display_rules_impl(port, ptr, rust_vec_len, data_len),
-        243 => wire__crate__api__test_host_connection_impl(port, ptr, rust_vec_len, data_len),
-        244 => wire__crate__api__transfer_failures_impl(port, ptr, rust_vec_len, data_len),
-        245 => wire__crate__api__transfer_preferences_impl(port, ptr, rust_vec_len, data_len),
-        246 => wire__crate__api__transfer_reconnect_notice_impl(port, ptr, rust_vec_len, data_len),
-        247 => wire__crate__api__unlock_existing_vault_impl(port, ptr, rust_vec_len, data_len),
-        248 => wire__crate__api__unlock_vault_impl(port, ptr, rust_vec_len, data_len),
-        249 => wire__crate__api__update_editor_impl(port, ptr, rust_vec_len, data_len),
-        250 => wire__crate__api__vault_unlock_hint_impl(port, ptr, rust_vec_len, data_len),
-        251 => wire__crate__api__verify_secure_unlock_impl(port, ptr, rust_vec_len, data_len),
-        252 => wire__crate__api__watch_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
-        253 => wire__crate__api__watch_events_impl(port, ptr, rust_vec_len, data_len),
+        242 => wire__crate__api__terminal_working_directory_impl(port, ptr, rust_vec_len, data_len),
+        243 => wire__crate__api__terminate_remote_process_impl(port, ptr, rust_vec_len, data_len),
+        244 => wire__crate__api__test_display_rules_impl(port, ptr, rust_vec_len, data_len),
+        245 => wire__crate__api__test_host_connection_impl(port, ptr, rust_vec_len, data_len),
+        246 => wire__crate__api__transfer_failures_impl(port, ptr, rust_vec_len, data_len),
+        247 => wire__crate__api__transfer_preferences_impl(port, ptr, rust_vec_len, data_len),
+        248 => wire__crate__api__transfer_reconnect_notice_impl(port, ptr, rust_vec_len, data_len),
+        249 => wire__crate__api__unlock_existing_vault_impl(port, ptr, rust_vec_len, data_len),
+        250 => wire__crate__api__unlock_vault_impl(port, ptr, rust_vec_len, data_len),
+        251 => wire__crate__api__update_editor_impl(port, ptr, rust_vec_len, data_len),
+        252 => wire__crate__api__vault_unlock_hint_impl(port, ptr, rust_vec_len, data_len),
+        253 => wire__crate__api__verify_secure_unlock_impl(port, ptr, rust_vec_len, data_len),
+        254 => wire__crate__api__watch_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
+        255 => wire__crate__api__watch_events_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -12626,12 +12761,12 @@ fn pde_ffi_dispatcher_sync_impl(
         14 => wire__crate__api__begin_editor_operation_impl(ptr, rust_vec_len, data_len),
         62 => wire__crate__api__editor_progress_impl(ptr, rust_vec_len, data_len),
         75 => wire__crate__api__file_preview_progress_impl(ptr, rust_vec_len, data_len),
-        116 => wire__crate__api__new_host_id_impl(ptr, rust_vec_len, data_len),
-        151 => wire__crate__api__reserve_editor_impl(ptr, rust_vec_len, data_len),
-        152 => wire__crate__api__reserve_explorer_file_export_impl(ptr, rust_vec_len, data_len),
-        153 => wire__crate__api__reserve_file_preview_impl(ptr, rust_vec_len, data_len),
-        158 => wire__crate__api__reserve_raw_editor_impl(ptr, rust_vec_len, data_len),
-        159 => wire__crate__api__reserve_saved_editor_impl(ptr, rust_vec_len, data_len),
+        117 => wire__crate__api__new_host_id_impl(ptr, rust_vec_len, data_len),
+        153 => wire__crate__api__reserve_editor_impl(ptr, rust_vec_len, data_len),
+        154 => wire__crate__api__reserve_explorer_file_export_impl(ptr, rust_vec_len, data_len),
+        155 => wire__crate__api__reserve_file_preview_impl(ptr, rust_vec_len, data_len),
+        160 => wire__crate__api__reserve_raw_editor_impl(ptr, rust_vec_len, data_len),
+        161 => wire__crate__api__reserve_saved_editor_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -13792,6 +13927,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::RemoteFile {
             self.size.into_into_dart().into_dart(),
             self.modified.into_into_dart().into_dart(),
             self.permissions.into_into_dart().into_dart(),
+            self.owner.into_into_dart().into_dart(),
+            self.group.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -14159,6 +14296,24 @@ impl flutter_rust_bridge::IntoDart for crate::api::SftpBookmark {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::SftpBookmark {}
 impl flutter_rust_bridge::IntoIntoDart<crate::api::SftpBookmark> for crate::api::SftpBookmark {
     fn into_into_dart(self) -> crate::api::SftpBookmark {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::SftpColumnPref {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.host_id.into_into_dart().into_dart(),
+            self.order.into_into_dart().into_dart(),
+            self.hidden.into_into_dart().into_dart(),
+            self.widths.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::SftpColumnPref {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::SftpColumnPref> for crate::api::SftpColumnPref {
+    fn into_into_dart(self) -> crate::api::SftpColumnPref {
         self
     }
 }
@@ -15162,6 +15317,16 @@ impl SseEncode for Vec<crate::api::Profile> {
     }
 }
 
+impl SseEncode for Vec<(String, u32)> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <(String, u32)>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::RemoteFile> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -15248,6 +15413,16 @@ impl SseEncode for Vec<crate::api::SftpBookmark> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::SftpBookmark>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::SftpColumnPref> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::SftpColumnPref>::sse_encode(item, serializer);
         }
     }
 }
@@ -15579,6 +15754,14 @@ impl SseEncode for crate::api::ProxyAuthenticationInput {
     }
 }
 
+impl SseEncode for (String, u32) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.0, serializer);
+        <u32>::sse_encode(self.1, serializer);
+    }
+}
+
 impl SseEncode for crate::api::RelativeTerminalPaths {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -15621,6 +15804,8 @@ impl SseEncode for crate::api::RemoteFile {
         <Option<u64>>::sse_encode(self.size, serializer);
         <Option<u32>>::sse_encode(self.modified, serializer);
         <Option<u32>>::sse_encode(self.permissions, serializer);
+        <Option<String>>::sse_encode(self.owner, serializer);
+        <Option<String>>::sse_encode(self.group, serializer);
     }
 }
 
@@ -15822,6 +16007,16 @@ impl SseEncode for crate::api::SftpBookmark {
         <String>::sse_encode(self.name, serializer);
         <String>::sse_encode(self.path, serializer);
         <Option<String>>::sse_encode(self.host_id, serializer);
+    }
+}
+
+impl SseEncode for crate::api::SftpColumnPref {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.host_id, serializer);
+        <Vec<String>>::sse_encode(self.order, serializer);
+        <Vec<String>>::sse_encode(self.hidden, serializer);
+        <Vec<(String, u32)>>::sse_encode(self.widths, serializer);
     }
 }
 

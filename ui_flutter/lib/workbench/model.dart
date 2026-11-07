@@ -2053,9 +2053,56 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     );
   }
 
+  final _sftpColumnPrefs = <String, SftpColumnLayout>{};
+
+  @override
+  SftpColumnLayout? rememberedColumns(String hostId) =>
+      _sftpColumnPrefs[hostId];
+
+  @override
+  void rememberColumns(String hostId, SftpColumnLayout layout) {
+    if (_disposed || _shutdown != null) return;
+    _sftpColumnPrefs[hostId] = layout;
+    _track(
+      rust.recordSftpColumnPref(
+        hostId: hostId,
+        order: layout.order,
+        hidden: layout.hidden.toList(),
+        widths: [
+          for (final entry in layout.widths.entries)
+            if (entry.value.isFinite) (entry.key, entry.value.round()),
+        ],
+      ),
+      reportFailure: () => false,
+    );
+  }
+
+  Future<void> _loadSftpColumnPrefs() async {
+    if (_sftpSortLoaded || _disposed || _shutdown != null) return;
+    try {
+      final entries = await rust.loadSftpColumnPrefs();
+      if (_disposed || _shutdown != null) return;
+      for (final e in entries) {
+        if (!_sftpColumnPrefs.containsKey(e.hostId)) {
+          _sftpColumnPrefs[e.hostId] = SftpColumnLayout(
+            order: e.order,
+            hidden: e.hidden.toSet(),
+            widths: {
+              for (final (id, w) in e.widths)
+                if (w > 0) id: w.toDouble(),
+            },
+          );
+        }
+      }
+    } catch (_) {
+      // Preference loading is best-effort; defaults apply on any failure.
+    }
+  }
+
   Future<void> _loadSftpSortPrefs() async {
     if (_sftpSortLoaded || _disposed || _shutdown != null) return;
     _sftpSortLoaded = true;
+    unawaited(_loadSftpColumnPrefs());
     try {
       final entries = await rust.loadSftpSortPrefs();
       if (_disposed || _shutdown != null) return;
