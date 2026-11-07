@@ -1,6 +1,18 @@
 # HSPTerm 开发进度
 
-## 2026-11-07 第八轮 Windows 反馈修复（已构建：源码0ac681e，分支Windows CI成功）
+## 2026-11-07 第九轮 Windows 反馈修复（已提交：源码6674a7b；Windows CI构建中）
+
+- 分支fix/round7-windows-feedback续作（第八轮CI已成功run42341647948）。本轮六项：SFTP重命名编辑框彻底重构、右键菜单样式与点击外部关闭、默认调色板适度提亮、权限/所有者列+列配置按主机持久化、双击编辑队列任务化+临时目录保留原名、文件类型识别与图标。
+- #1 重命名编辑框：放弃整行替换——编辑时行保持原列布局，仅名称单元格切换为编辑器（其他列/横向滚动偏移不动，边框不再被视口裁剪）。容器=固定高度DecoratedBox(边框+表面色)，内部TextField expands:true+textAlignVertical.center（行内真居中，任何_fontScale/DPI一致），isCollapsed+横8padding+无边框；选区改为DefaultSelectionStyle半透明主色（旧不透明默认即"深色矩形"根因）；框内任意点击续编；Enter/Esc/失焦取消保留；错误行外渲染不变。像素验证：capture PNG实测边框四边完整(左68/右405/上644/下709)、高≈整行33、右缘在名称列内；新增测试断言编辑框在名称单元格内+kind列同行渲染+选区alpha<1。
+- #2 菜单：根因=MenuAnchor child包裹整个列表，列表内点击属"锚区内"永不关闭。改为Stack内(0,0)零尺寸锚标记+consumeOutsideTap:true（关闭并消费，同Windows shell，不误触打开/拖拽；原始Listener选择照常）；空点闭合实测无命中路径时外部关闭仍生效（工作台测试修正800x600表面外点击假象）。样式：_panelMenuStyle（surface背景/outline边框/elevation8/纵向padding4/minWidth264）+_menuItemStyle（34px行/悬停主色10%/禁用暗淡），级联子菜单经MenuTheme同风格；图标行h10 padding。3项新测试：行点击关闭+选择、空白点击关闭、菜单内点击不关闭。
+- #3 调色板：Rust default_color默认绿0xc3e88d→0xb6ec92、黄0xffcb6b→0xffd37f、蓝0x82aaff→0x8fbaff、暗灰0x616e88→0x6d7c9b（红/青/紫/前景/背景不变）；Dart深色预设同步；用户已存配色不覆盖；浅色主题未动。
+- #4 权限/所有者列：SFTP v3 attrs user/group（无名字时uid/gid数字文本）经ssh-core DirectoryEntry→frb-bridge RemoteFile（FRB已重生成）→directory_reader→DemoFile(owner/permissions)；权限列permissionString渲染rwxr-xr-x（类型前缀d/l/-）。列系统改稳定ID（name/modified/size/kind/permissions/owner）替换int索引：表头拖动重排（Draggable/DragTarget，与ResizeGrip分离不冲突）、列对话框、列宽调整全兼容；持久化=device-sftp-host-prefs-v1新增columns字段（serde默认，旧记录兼容；ID白名单/去重/宽度40-600/名称列不可隐藏校验；宽度写800ms去抖合并）；排序列索引扩至0-5。storage-sync 2项测试含往返+旧格式拒绝+非法布局拒绝。
+- #5 本地编辑队列任务：LocalEditSession改ChangeNotifier（downloading/editing/uploading/conflicted/failed/closed+字节进度），gateway download/upload加onProgress；每个任务独立临时目录edit-<micros>/保留原文件名（仅消毒本机非法字符，同名不同主机不冲突；回传始终用原远端路径，不从本地名反推）；根目录仅自建时退出清理，测试共享根保留；上传失败/断线/冲突状态保留修改可重试（代次校验/远端临时文件/失败保护机制全部保留）。传输队列新增"本地编辑"专区（绝不混入普通下载）：文件名+主机+状态/进度+远端路径，操作=打开本地文件/打开所在文件夹(Windows explorer /select,预选文件)/失败重试/结束会话。2项队列组件测试+12项会话测试。
+- #6 文件类型：sftpFileKind扩展名+元数据本地分类（folder/symlink优先，40+扩展名→Markdown/日志/文本/JSON/YAML/XML/CSV/配置/Python/Shell/JS/TS/Rust/Go/Java/C/C++/图片/音频/视频/PDF/Office/压缩包/可执行/动态库/磁盘映像/数据库/密钥等），类型列显示具体类别；_kindIcon按类别映射图标。无远端读取、无逐行Shell API。
+- 验证：Flutter Analyze 0；全套件575+/13失败（11项为第八轮已记录预存：workbench_lifecycle5/桥接native类/上下文1项；2项file_columns旧int断言已随稳定ID迁移修复并全过）。R9新增30项测试全过（分类/权限串/列显示/表头拖排/按主机记忆/编辑器边界+错误外置+紧凑/菜单关闭3项/编辑会话12/队列2/视觉捕获）。Rust fmt/Clippy 0；term-core45/storage-sync220/ssh-core80全过；FRB正规重生成（RemoteFile+列配置API）；真实sshd SFTP传输层抽测沿用第八轮通过记录（posix/预算/PTY共享，本机OpenSSH 9.6）。Ubuntu debug构建+dbus冒烟25s零异常；重命名/菜单PNG视觉验证（/tmp/hspterm-r9-shots，四边框完整像素级确认）。
+- 待Win11实机：重命名框视觉/输入体验、菜单深浅主题观感与边缘翻转子菜单、权限/所有者列真实服务器显示（uid回退名）、列配置重启恢复、本地编辑队列Explorer打开文件夹/重试、新调色板观感（ANSI16色+MOTD）、图标类别覆盖度。系统关联图标（Windows shell图标缓存）未实现，当前全部内置类别图标——列为后续增强。Android继续暂停。
+
+
 
 - 分支fix/round7-windows-feedback续作；不合并旧main/草稿PR#1。本轮八项：SFTP双击代次错误(P0)、CapsLock首字符丢失(P0)、偶发无响应诊断(P0)、重命名框高度(P1)、右键图标工具栏(P1)、直接粘贴路径选项(P1)、Agent CLI闪烁(P2)。
 - #3 SFTP双击“原SFTP操作绑定的SSH代次已改变”（P0）：根因=NativeLocalEditGateway.download在sftpProperties硬编码generation:0。LocalEditGateway全部方法(download/stat/upload/renameOver/新增removeFile)改为显式传generation；launch()用会话代次下载；上传/rename绑定_upload()时复核的当前代次；rename失败先尽力删除远端临时兄弟文件再rethrow（原文件不动，不再残留.hspterm-edit-*）；零字节保存显式truncate分支（空循环从未建临时文件）。Rust端代次校验不变。12项测试全过（新增：代次传播每调用==7、rename失败清理、零字节truncate）。
