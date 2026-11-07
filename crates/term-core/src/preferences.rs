@@ -91,12 +91,20 @@ pub struct Settings {
     /// nothing. Purely local clipboard behavior, never remote content edits.
     #[serde(default)]
     pub copy_on_selection: bool,
+    /// Allow pasting quoted paths straight into the interactive program when
+    /// the exact shell-integration insert is unavailable. Default on
+    /// (round-8); old records without the key keep the default.
+    #[serde(default = "default_paste_paths_direct")]
+    pub paste_paths_direct: bool,
     pub colors: Colors,
     #[serde(default)]
     pub notifications: crate::notifications::Settings,
     /// Portable layout and bundled preset. No system/imported font name/path/bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub typography: Option<Typography>,
+}
+fn default_paste_paths_direct() -> bool {
+    true
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -108,6 +116,7 @@ impl Default for Settings {
             osc52: true,
             right_click_paste: false,
             copy_on_selection: false,
+            paste_paths_direct: true,
             colors: Colors::default(),
             notifications: crate::notifications::Settings::default(),
             typography: None,
@@ -158,6 +167,28 @@ impl Settings {
 mod tests {
     use super::*;
     use crate::{Size, Terminal};
+    #[test]
+    fn paste_paths_direct_defaults_on_and_reads_old_records() {
+        // Old v1 records (round-7 and earlier) carry no key: the direct path
+        // paste fallback stays enabled by default, and explicit false
+        // round-trips.
+        let mut value = Settings::default();
+        assert!(value.paste_paths_direct);
+        let mut old = serde_json::to_value(&value).unwrap();
+        value.paste_paths_direct = false;
+        let disabled = serde_json::to_value(&value).unwrap();
+        assert_eq!(disabled["paste_paths_direct"], false);
+        old.as_object_mut().unwrap().remove("paste_paths_direct");
+        let parsed: Settings = serde_json::from_value(old).unwrap();
+        assert!(parsed.paste_paths_direct);
+        // A future unknown field still fails closed instead of being dropped.
+        let mut unknown = serde_json::to_value(Settings::default()).unwrap();
+        unknown
+            .as_object_mut()
+            .unwrap()
+            .insert("future_field".into(), serde_json::Value::Bool(true));
+        assert!(serde_json::from_value::<Settings>(unknown).is_err());
+    }
     #[test]
     fn portable_geometry_is_finite_bounded_and_validated_with_shared_preferences() {
         let geometry = Typography {

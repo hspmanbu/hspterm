@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -43,7 +44,8 @@ void main() {
       final editorBox = tester.renderObject(editor) as RenderBox;
       final rowBox = tester.renderObject(
         find.byWidgetPredicate(
-          (w) => w is Container && w.key == ValueKey('file-${m.focus!.files.first.name}'),
+          (w) =>
+              w is Container && w.key == ValueKey('file-${m.focus!.files.first.name}'),
         ),
       ) as RenderBox;
 
@@ -61,8 +63,67 @@ void main() {
       expect(editorTop.dx + editorBox.size.width,
           lessThanOrEqualTo(rowTop.dx + rowBox.size.width + 1));
 
+      // The borderless field itself renders fully inside the bordered box.
+      final fieldBox = tester.renderObject(
+        find.byKey(const ValueKey('inline-rename-field')),
+      ) as RenderBox;
+      expect(fieldBox.size.height, lessThanOrEqualTo(editorBox.size.height));
+      expect(fieldBox.size.width, lessThanOrEqualTo(editorBox.size.width));
+
       await tester.pumpWidget(const SizedBox());
       m.dispose();
+    },
+  );
+
+  testWidgets(
+    'validation error renders below the row without changing its height',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      final m = WorkbenchModel()..demo();
+      await mount(tester, m);
+      await beginRename(tester, m);
+      final rowKey = ValueKey('file-${m.focus!.files.first.name}');
+      final rowHeightBefore =
+          (tester.renderObject(
+            find.byWidgetPredicate((w) => w is Container && w.key == rowKey),
+          ) as RenderBox).size.height;
+
+      // Clear the field and submit: the name is invalid.
+      await tester.enterText(
+        find.byKey(const ValueKey('inline-rename-field')),
+        '',
+      );
+      // On Windows, done keeps field focus (no unfocus-cancel race like
+      // the mobile behavior).
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('inline-rename-error')), findsOneWidget);
+      final rowHeightAfter =
+          (tester.renderObject(
+            find.byWidgetPredicate((w) => w is Container && w.key == rowKey),
+          ) as RenderBox).size.height;
+      expect(rowHeightAfter, rowHeightBefore,
+          reason: 'the editor row never grows for the error line');
+      // The error line sits below the row, not inside the editor box.
+      final errorTop = tester.getTopLeft(
+        find.byKey(const ValueKey('inline-rename-error')),
+      );
+      final rowBottom = tester.getBottomLeft(
+        find.byWidgetPredicate((w) => w is Container && w.key == rowKey),
+      );
+      expect(errorTop.dy, greaterThan(rowBottom.dy - 1));
+
+      // Editing continues after the error: typing still reaches the field.
+      await tester.enterText(
+        find.byKey(const ValueKey('inline-rename-field')),
+        'renamed.txt',
+      );
+      expect(find.widgetWithText(TextField, 'renamed.txt'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      m.dispose();
+      debugDefaultTargetPlatformOverride = null;
     },
   );
 

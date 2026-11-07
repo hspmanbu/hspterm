@@ -836,30 +836,24 @@ class _FilesPanelState extends State<FilesPanel> {
   }
 
   List<Widget> _buildFileMenuChildren() => [
-    MenuItemButton(
-      leadingIcon: const Icon(Icons.copy, size: 16),
-      onPressed: () => _dispatchFileAction('copy'),
-      child: const Text('复制'),
-    ),
-    MenuItemButton(
-      leadingIcon: const Icon(Icons.content_cut, size: 16),
-      onPressed: () => _dispatchFileAction('cut'),
-      child: const Text('剪切'),
-    ),
-    MenuItemButton(
-      leadingIcon: const Icon(Icons.content_paste, size: 16),
-      onPressed: () => _dispatchFileAction('paste'),
-      child: const Text('粘贴'),
-    ),
-    MenuItemButton(
-      leadingIcon: const Icon(Icons.drive_file_rename_outline, size: 16),
-      onPressed: () => _dispatchFileAction('rename'),
-      child: const Text('重命名'),
-    ),
-    MenuItemButton(
-      leadingIcon: const Icon(Icons.delete_outline, size: 16),
-      onPressed: () => _dispatchFileAction('delete'),
-      child: const Text('删除'),
+    // Compact icon toolbar (the pre-round-7 layout): copy/cut/paste/rename/
+    // delete as one horizontal row, restored on top of the MenuAnchor menu.
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Tool(Icons.copy, '复制', () => _dispatchFileAction('copy')),
+          Tool(Icons.content_cut, '剪切', () => _dispatchFileAction('cut')),
+          Tool(Icons.content_paste, '粘贴', () => _dispatchFileAction('paste')),
+          Tool(
+            Icons.drive_file_rename_outline,
+            '重命名',
+            () => _dispatchFileAction('rename'),
+          ),
+          Tool(Icons.delete_outline, '删除', () => _dispatchFileAction('delete')),
+        ],
+      ),
     ),
     const Divider(height: 8),
     MenuItemButton(
@@ -2247,12 +2241,11 @@ class _FilesPanelState extends State<FilesPanel> {
                                                           key: ValueKey(
                                                             'file-${f.name}',
                                                           ),
-                                                          height:
-                                                              editing == f.id &&
-                                                                  renameError !=
-                                                                      null
-                                                              ? _rowHeight + 21
-                                                              : _rowHeight,
+                                                          // The editor row
+                                                          // never grows: an
+                                                          // invalid name shows
+                                                          // below the row.
+                                                          height: _rowHeight,
                                                           color:
                                                               selected.contains(
                                                                 f.id,
@@ -2277,73 +2270,105 @@ class _FilesPanelState extends State<FilesPanel> {
                                                                         right:
                                                                             10,
                                                                       ),
-                                                                  child: SizedBox.expand(
-                                                                    // Tight row-height
-                                                                    // constraints: the
-                                                                    // editor's border
-                                                                    // fills the whole
-                                                                    // row like the
-                                                                    // Windows Explorer
-                                                                    // rename box.
-                                                                    child: Focus(
-                                                                      onKeyEvent: (_, e) {
-                                                                        if (e is KeyDownEvent &&
-                                                                            e.logicalKey == LogicalKeyboardKey.escape) {
-                                                                          setState(() {
-                                                                            editing =
-                                                                                null;
-                                                                            renameError =
-                                                                                null;
-                                                                          });
-                                                                          _focus
-                                                                              .requestFocus();
-                                                                          return KeyEventResult
-                                                                              .handled;
-                                                                        }
+                                                                  // The outer bordered
+                                                                  // container owns the
+                                                                  // full row height
+                                                                  // (Windows Explorer
+                                                                  // style); the field
+                                                                  // inside is borderless
+                                                                  // and vertically
+                                                                  // centered, so the
+                                                                  // decorator can no
+                                                                  // longer squeeze or
+                                                                  // expand the row.
+                                                                  child: Focus(
+                                                                    onKeyEvent: (_, e) {
+                                                                      if (e
+                                                                              is KeyDownEvent &&
+                                                                          e.logicalKey ==
+                                                                              LogicalKeyboardKey.escape) {
+                                                                        setState(() {
+                                                                          editing =
+                                                                              null;
+                                                                          renameError =
+                                                                              null;
+                                                                        });
+                                                                        _focus
+                                                                            .requestFocus();
                                                                         return KeyEventResult
-                                                                            .ignored;
-                                                                      },
-                                                                      child: TextField(
+                                                                            .handled;
+                                                                      }
+                                                                      return KeyEventResult
+                                                                          .ignored;
+                                                                    },
+                                                                    child: GestureDetector(
+                                                                      behavior:
+                                                                          HitTestBehavior
+                                                                              .opaque,
+                                                                      // Clicking anywhere
+                                                                      // inside the box
+                                                                      // keeps editing
+                                                                      // instead of
+                                                                      // committing.
+                                                                      onTap: () =>
+                                                                          _renameFocus
+                                                                              .requestFocus(),
+                                                                      child: DecoratedBox(
                                                                         key:
                                                                             const ValueKey(
                                                                               'inline-rename',
                                                                             ),
-                                                                        controller:
-                                                                            _rename,
-                                                                        focusNode:
-                                                                            _renameFocus,
-                                                                        autofocus:
-                                                                            true,
-                                                                        // Tight row-height
-                                                                        // constraints make the
-                                                                        // decorator fill the
-                                                                        // row; center the text
-                                                                        // on its midline.
-                                                                        textAlignVertical:
-                                                                            TextAlignVertical.center,
-                                                                        style: TextStyle(
-                                                                          fontSize:
-                                                                              _nameSize,
-                                                                        ),
-                                                                        decoration: InputDecoration(
-                                                                          errorText:
-                                                                              renameError,
-                                                                          isDense:
-                                                                              true,
-                                                                          constraints: BoxConstraints.tightFor(
-                                                                            height:
-                                                                                _rowHeight,
+                                                                        decoration: BoxDecoration(
+                                                                          border: Border.all(
+                                                                            color: Theme.of(
+                                                                              c,
+                                                                            ).colorScheme.primary,
                                                                           ),
-                                                                          contentPadding: const EdgeInsets.symmetric(
-                                                                            horizontal:
-                                                                                8,
-                                                                          ),
-                                                                          border:
-                                                                              const OutlineInputBorder(),
+                                                                          borderRadius:
+                                                                              BorderRadius.circular(
+                                                                                4,
+                                                                              ),
                                                                         ),
-                                                                        onSubmitted: (
-                                                                          _,
-                                                                        ) => commitRename(),
+                                                                        child: Center(
+                                                                          child: TextField(
+                                                                            key: const ValueKey(
+                                                                              'inline-rename-field',
+                                                                            ),
+                                                                            controller:
+                                                                                _rename,
+                                                                            focusNode:
+                                                                                _renameFocus,
+                                                                            autofocus:
+                                                                                true,
+                                                                            textAlignVertical:
+                                                                                TextAlignVertical.center,
+                                                                            style: TextStyle(
+                                                                              fontSize: _nameSize,
+                                                                            ),
+                                                                            decoration: const InputDecoration(
+                                                                              isDense: true,
+                                                                              contentPadding: EdgeInsets.symmetric(
+                                                                                horizontal: 8,
+                                                                              ),
+                                                                              border: InputBorder.none,
+                                                                              focusedBorder: InputBorder.none,
+                                                                              enabledBorder: InputBorder.none,
+                                                                            ),
+                                                                            // Enter must submit
+                                                                            // without unfocusing:
+                                                                            // the framework's
+                                                                            // default unfocus-
+                                                                            // then-submit would
+                                                                            // cancel the editor
+                                                                            // and swallow the
+                                                                            // validation error.
+                                                                            onEditingComplete:
+                                                                                () {},
+                                                                            onSubmitted: (
+                                                                              _,
+                                                                            ) => commitRename(),
+                                                                          ),
+                                                                        ),
                                                                       ),
                                                                     ),
                                                                   ),
@@ -2472,7 +2497,7 @@ class _FilesPanelState extends State<FilesPanel> {
                                                           child: row,
                                                         );
                                                       }
-                                                      return f.folder
+                                                      Widget item = f.folder
                                                           ? KeyedSubtree(
                                                               key: _folderBounds
                                                                   .putIfAbsent(
@@ -2486,6 +2511,45 @@ class _FilesPanelState extends State<FilesPanel> {
                                                               ),
                                                             )
                                                           : row;
+                                                      // Validation errors render
+                                                      // below the row so the
+                                                      // editor box height is
+                                                      // independent of the
+                                                      // error text.
+                                                      if (editing == f.id &&
+                                                          renameError != null) {
+                                                        item = Column(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .stretch,
+                                                          children: [
+                                                            item,
+                                                            Padding(
+                                                              padding:
+                                                                  const EdgeInsets.only(
+                                                                    left: 34,
+                                                                    top: 2,
+                                                                  ),
+                                                              child: Text(
+                                                                key:
+                                                                    const ValueKey(
+                                                                      'inline-rename-error',
+                                                                    ),
+                                                                renameError!,
+                                                                style: TextStyle(
+                                                                  fontSize: 11,
+                                                                  color: Theme.of(c)
+                                                                      .colorScheme
+                                                                      .error,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        );
+                                                      }
+                                                      return item;
                                                     },
                                                   ),
                                                 ),

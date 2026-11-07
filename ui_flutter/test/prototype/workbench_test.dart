@@ -180,7 +180,7 @@ void main() {
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.f2);
       await tester.pumpAndSettle();
-      final rename = find.byKey(const ValueKey('inline-rename'));
+      final rename = find.byKey(const ValueKey('inline-rename-field'));
       expect(rename, findsOneWidget);
       final edit = tester.widget<TextField>(rename);
       expect(

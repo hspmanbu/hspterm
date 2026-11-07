@@ -52,6 +52,14 @@ enum AppLogEvent {
   connectionTiming,
   sftpDirectoryTiming,
   memorySample,
+  // Opt-in terminal input pipeline diagnostics: phases, modifier bits and
+  // sequence numbers only (HSPTERM_INPUT_TRACE=1). Never key characters.
+  inputTrace,
+  // Round-8 stall diagnostics: threshold-gated heartbeat drift, janky frame
+  // build/raster times and resource counts (numbers only).
+  uiStall,
+  frameJank,
+  resourceCount,
 }
 
 /// Current launch only. Accept fixed events/numbers and code locations, never
@@ -76,6 +84,12 @@ class AppRunLog {
     'errorCode',
     'kind',
     'count',
+    'driftMs',
+    'buildMs',
+    'rasterMs',
+    'terminals',
+    'edits',
+    'transfers',
   };
 
   void event(

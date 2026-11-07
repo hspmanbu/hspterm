@@ -35,6 +35,7 @@ import '../prototype/design.dart';
 import '../prototype/files.dart';
 import '../src/rust/api.dart' as rust;
 import 'model.dart';
+import 'runtime_diagnostics.dart';
 import 'surface.dart';
 import 'queue.dart';
 import 'local_edit_launch.dart';
@@ -95,6 +96,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
   )
   _tmuxRequest;
   Timer? _memorySampler;
+  late final RuntimeDiagnostics _diagnostics = RuntimeDiagnostics(() => m);
 
   @override
   void initState() {
@@ -107,6 +109,8 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
         fields: {'bytes': ProcessInfo.currentRss, 'kind': 'rssKiB'},
       );
     });
+    // Threshold-gated stall/jank/counts instrumentation (round-8 feedback).
+    _diagnostics.start();
     _noticeHub = TerminalNoticeHub(
       inline: (notice, activate) {
         final context = _navigator.currentContext;
@@ -387,6 +391,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
   @override
   void dispose() {
     _memorySampler?.cancel();
+    _diagnostics.stop();
     m.removeListener(_bindNotices);
     m.removeListener(_paletteChanged);
     // Keep the original shutdown hook until the actual OS worker has ended,

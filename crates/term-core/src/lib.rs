@@ -1071,6 +1071,46 @@ mod tests {
     }
 
     #[test]
+    fn full_redraw_in_one_batch_publishes_one_final_state() {
+        // Agent CLIs redraw with CSI 2J + rewrite. When the clear and the
+        // rewrite arrive in one SSH batch there must be exactly one revision
+        // bump and no intermediate cleared snapshot (round-8 flicker guard).
+        let mut t = term();
+        t.feed(b"old header\r\nold line\r\n").unwrap();
+        let before = t.content_revision();
+        t.feed(b"\x1b[2J\x1b[Hnew header\r\nnew line\r\n").unwrap();
+        let text = t.snapshot().text();
+        assert!(text.contains("new header"));
+        assert!(text.contains("new line"));
+        assert!(
+            !text.contains("old header"),
+            "cleared content must not leak"
+        );
+        assert!(!text.contains("old line"));
+        assert_eq!(t.content_revision(), before + 1);
+    }
+
+    #[test]
+    fn split_redraw_without_sync_reports_each_true_state() {
+        // Without DECSET 2026, a clear followed by the rewrite in a later
+        // batch is two genuine remote states: the cleared frame is
+        // protocol-true and each revision maps to the exact grid content.
+        let mut t = term();
+        t.feed(b"stable\r\n").unwrap();
+        let cleared_revision;
+        {
+            t.feed(b"\x1b[2J\x1b[H").unwrap();
+            let cleared = t.snapshot();
+            cleared_revision = t.content_revision();
+            assert!(!cleared.text().contains("stable"));
+        }
+        t.feed(b"rebuilt").unwrap();
+        let rebuilt = t.snapshot();
+        assert!(rebuilt.text().contains("rebuilt"));
+        assert_eq!(t.content_revision(), cleared_revision + 1);
+    }
+
+    #[test]
     fn synchronized_output_flushes_on_end_or_timeout() {
         let mut t = term();
         t.feed(b"\x1b[?2026hbatched").unwrap();

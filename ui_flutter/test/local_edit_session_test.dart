@@ -26,7 +26,7 @@ class FakeGateway implements LocalEditGateway {
   }
 
   @override
-  Future<List<int>> download(int native, String path) async =>
+  Future<List<int>> download(int native, int generation, String path) async =>
       List.of(remoteFiles[path] ?? utf8Bytes('hello'));
 
   @override
@@ -35,22 +35,42 @@ class FakeGateway implements LocalEditGateway {
     int generation,
     String path,
   ) async => (
-        size: statSizeOverride ?? (remoteFiles[path] ?? utf8Bytes('hello')).length,
-        mtime: statMtimeOverride ?? mtimes[path] ?? 1000,
-      );
+    size: statSizeOverride ?? (remoteFiles[path] ?? utf8Bytes('hello')).length,
+    mtime: statMtimeOverride ?? mtimes[path] ?? 1000,
+  );
 
   @override
-  Future<void> upload(int native, String path, List<int> bytes) async {
+  Future<void> upload(
+    int native,
+    int generation,
+    String path,
+    List<int> bytes,
+  ) async {
     if (refuseUpload) throw const SocketException('offline');
     if (uploadError != null) throw uploadError!;
     uploads.add((path, bytes));
   }
 
   @override
-  Future<void> renameOver(int native, String from, String to) async {
+  Future<void> renameOver(
+    int native,
+    int generation,
+    String from,
+    String to,
+  ) async {
+    if (renameError != null) throw renameError!;
     renames.add((from, to));
     remoteFiles[to] = uploads.lastWhere((u) => u.$1 == from).$2;
     mtimes[to] = (mtimes[to] ?? 0) + 1;
+  }
+
+  final removals = <String>[];
+  Object? renameError;
+  final generationsSeen = <int>[];
+  void Function(int)? statHook;
+  @override
+  Future<void> removeFile(int native, int generation, String path) async {
+    removals.add(path);
   }
 }
 
@@ -187,7 +207,10 @@ void main() {
     gateway.refuseUpload = false;
     await session.retry();
     expect(gateway.uploads.length, 1);
-    expect(String.fromCharCodes(gateway.remoteFiles['/dir/d.txt']!), 'new content');
+    expect(
+      String.fromCharCodes(gateway.remoteFiles['/dir/d.txt']!),
+      'new content',
+    );
     s.controller.dispose();
   });
 
@@ -212,8 +235,8 @@ void main() {
     await launchFor(s, 'f2.txt');
     expect(created.length, 2);
     expect(root.listSync().length, 2);
-    final files =
-        root.listSync().toList()..sort((a, b) => a.path.compareTo(b.path));
+    final files = root.listSync().toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
     final f1 = files.first as File;
     final f2 = files.last as File;
     await f1.writeAsString('one');
@@ -236,6 +259,61 @@ void main() {
     expect(session.isDisposed, isTrue);
     s.controller.dispose();
   });
+
+  test('download and rename carry the live generation, never 0', () async {
+    final s = await connectedSession();
+    // controller.generation is 7 (see sessionWith); any hardcoded 0 in the
+    // gateway would diverge from the captured value here.
+    final seen = <int>[];
+    gateway.statHook = seen.add;
+    await launchFor(s, 'gen.txt');
+    gateway.seed('/dir/gen.txt', utf8Bytes('hello'));
+    expect(
+      gateway.generationsSeen,
+      everyElement(7),
+      reason: 'every gateway call must use the session generation',
+    );
+    s.controller.dispose();
+  });
+
+  test('rename failure after upload removes the remote temp file', () async {
+    final s = await connectedSession();
+    gateway.seed('/dir/tmpfail.txt', utf8Bytes('hello'));
+    final session = await launchFor(s, 'tmpfail.txt');
+    gateway.renameError = StateError('rename denied');
+    final file = root.listSync().single as File;
+    await file.writeAsString('v2');
+    await session.testStableCheck();
+    expect(gateway.uploads, isNotEmpty, reason: 'bytes reached the temp file');
+    expect(
+      gateway.removals,
+      isNotEmpty,
+      reason: 'failed rename must clean the temp sibling',
+    );
+    expect(
+      gateway.remoteFiles['/dir/tmpfail.txt']?.length,
+      5,
+      reason: 'original untouched',
+    );
+    expect(notices.any((m) => m.contains('上传失败')), isTrue);
+    s.controller.dispose();
+  });
+
+  test(
+    'zero-byte save creates a remote temp file via explicit truncate',
+    () async {
+      final s = await connectedSession();
+      gateway.seed('/dir/empty.txt', utf8Bytes('data'));
+      final session = await launchFor(s, 'empty.txt');
+      final file = root.listSync().single as File;
+      await file.writeAsString('');
+      await session.testStableCheck();
+      // The upload call happened (not skipped by an empty loop).
+      expect(gateway.uploads.single.$2, isEmpty);
+      expect(gateway.remoteFiles['/dir/empty.txt'], isEmpty);
+      s.controller.dispose();
+    },
+  );
 
   test('registry bounds sessions and disposes all', () async {
     final registry = LocalEditRegistry();

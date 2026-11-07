@@ -300,7 +300,19 @@ class TerminalController extends ChangeNotifier {
         _frameTail = _frameTail
             .then((_) async {
               if (_disposed) return;
+              final started = DateTime.now();
               final frame = await backend.frame(value);
+              final pullMs = DateTime.now().difference(started).inMilliseconds;
+              // Slow frame pulls signal FRB/Rust backlog long before the UI
+              // visibly stalls; numbers only, never frame content.
+              if (pullMs > 200) {
+                AppRunLog.instance.event(
+                  AppLogEvent.frameJank,
+                  terminal: value,
+                  count: pullMs,
+                  fields: {'kind': 'pull', 'durationMs': pullMs},
+                );
+              }
               if (!_disposed && frame != null) applyFrame(frame);
             })
             .catchError(report);

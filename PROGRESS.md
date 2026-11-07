@@ -1,6 +1,19 @@
 # HSPTerm 开发进度
 
-## 2026-11-06 第七轮 Windows 反馈修复（已构建：源码3481b8d，分支Windows CI成功）
+## 2026-11-07 第八轮 Windows 反馈修复（源码待提交；Ubuntu验证进行中）
+
+- 分支fix/round7-windows-feedback续作；不合并旧main/草稿PR#1。本轮八项：SFTP双击代次错误(P0)、CapsLock首字符丢失(P0)、偶发无响应诊断(P0)、重命名框高度(P1)、右键图标工具栏(P1)、直接粘贴路径选项(P1)、Agent CLI闪烁(P2)。
+- #3 SFTP双击“原SFTP操作绑定的SSH代次已改变”（P0）：根因=NativeLocalEditGateway.download在sftpProperties硬编码generation:0。LocalEditGateway全部方法(download/stat/upload/renameOver/新增removeFile)改为显式传generation；launch()用会话代次下载；上传/rename绑定_upload()时复核的当前代次；rename失败先尽力删除远端临时兄弟文件再rethrow（原文件不动，不再残留.hspterm-edit-*）；零字节保存显式truncate分支（空循环从未建临时文件）。Rust端代次校验不变。12项测试全过（新增：代次传播每调用==7、rename失败清理、零字节truncate）。
+- #5 CapsLock首字符丢失（P0）：审查确认Dart侧无门控依赖caps位（mods&14不含64）、Rust input.rs对caps_lock仅置位bits6/7且修饰参数&0x3f屏蔽、text优先——丢失点在平台文本链路：updateEditingValue未到时_pendingTextKey被下一键覆盖。修复=精确一次回退：150ms定时器或下一KeyDown（≥30ms龄、非合成中）直接发送pending；一次性strip标记在400ms窗口内剥离平台迟到重复（含捆绑'ab'前缀剥离）；失焦/换控制器/卸载取消pending不盲发；Rust/TextInputClient不同时双发。新增HSPTERM_INPUT_TRACE=1元数据诊断（inputTrace事件：阶段/修饰位/序号，无字符内容）。7项测试：静默平台150ms恢复、正常路径单次、迟到重复剥离、快打捆绑顺序、IME合成不直发、失焦丢弃、混合大小写各一次。
+- #7 偶发无响应（P0诊断）：RuntimeDiagnostics（workbench/app.dart挂载）：UI isolate心跳5s漂移>250ms记uiStall；FrameTiming totalSpan>100ms记frameJank(buildMs/rasterMs)；30s资源计数resourceCount(连接终端/编辑会话/传输队列)；TerminalController.backend.frame拉取>200ms记frameJank kind=pull（FRB积压先行指标）。run_log白名单新增driftMs/buildMs/rasterMs/terminals/edits/transfers。全部阈值触发才记录，2MiB预算内。压测与真实无响应复现待Windows实机日志。
+- #1 重命名框（P1）：重构为外层DecoratedBox(边框,行高由行容器_rowHeight统一)+Center+无边框TextField(isDense/contentPadding横8/InputBorder.none)；错误改行外渲染（item包Column，行高永不因错误增长）；框内任意点击继续编辑(GestureDetector opaque requestFocus)。附带真bug修复：TextField默认onEditingComplete先unfocus再onSubmitted，unfocus监听先取消编辑器并清空renameError——校验错误从未显示且有效提交竞态取消；现onEditingComplete:(){}由commitRename决定收场。3项测试：边框贴行高+字段在框内、错误行外不增行高+继续编辑、紧凑模式。
+- #2 右键图标工具栏（P1）：_buildFileMenuChildren顶部恢复横向Tool图标行（复制/剪切/粘贴/重命名/删除，tooltip还原），保留MenuAnchor机制、下方文本项与复制到/移动到级联。测试：5图标齐全、位于文本项上方、toolbar复制仅装载剪贴板；顺带恢复file_context_menu_test两项旧断言（3失败→1预存）。
+- #4 直接粘贴路径选项（P1）：新增“允许向交互式程序直接粘贴路径”默认开启。Rust term-core Settings新增paste_paths_direct(serde default true，旧记录兼容+deny_unknown_fields未来字段仍拒)；Dart TerminalPreferencesValue.pastePaths同键往返（String边界无FRB重生成）；设置页开关+摘要。sendSessionPaths在insert不可用(!enterDirectory)且开关开且会话仍连接同代次时回退controller.paste（带引号、无回车、走原Rust粘贴链路含括号粘贴模式；失败不重试，剪贴板兜底）；cd变体永不直贴。4项新测试：允许时直贴引号字面量/关闭时仅剪贴板/断开不贴/cd仅剪贴板。
+- #6 Agent CLI闪烁（P2，诊断+固定不变量）：新增term-core差异测试：同批清屏+重绘=单次revision+终态完整无旧内容泄漏；无2026拆批=两真状态各自revision精确映射（协议真实中间帧不算bug）；既有2026延迟测试保留。帧诊断见#7（frameJank build/raster/pull）。完整闪烁复现与修复待Windows实机日志定位（不降刷新率）。
+- 验证：Flutter Analyze 0；全套件565+过、13失败经git stash对照全部为分支预存（workbench_lifecycle 5/桥接类需已构建native lib、其余各1），其中prototype/workbench_test因重命名键迁移已修复、file_context_menu 3→1；Rust fmt/Clippy 0警告；term-core 43+5(lib)+2(redraw)+1(serde兼容)过；storage-sync terminal_preferences 3过；真实sshd SFTP传输层抽测（posix_names/real_sftp预算/PTY+SFTP共享）在本机OpenSSH 9.6过。
+- 待办：Ubuntu debug构建+GTK冒烟进行中；真实OpenSSH SFTP本地编辑回传GUI实测、Windows CI构建、Win11实机复测清单见下。
+
+
 
 - Windows构建：分支fix/round7-windows-feedback（main仅docs在a8b2bfe后无产品变更，按工作流 branches:[main] 规则经 workflow_dispatch 在分支触发）。run42243135286/job127978317754全部成功（15:27–15:50Z）：正规FRB、MSVC Release、Analyze0、CI固定14文件组件测试、原生启动/正常退出、正常关闭重开窗口几何恢复均过。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42243135286/artifacts/13519635462 （HSPTerm-windows-x64，40,144,359字节，2026-11-20到期）。锁库启动工作集114.39/111.36/111.35MiB（artifact13519076296，Server2022口径，与近三轮持平）。
 

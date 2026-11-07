@@ -6,6 +6,7 @@ import 'package:hspterm/prototype/model.dart';
 import 'package:hspterm/workbench/model.dart';
 import 'package:hspterm/workbench/terminal_paths.dart';
 
+import 'support/fake_backend.dart';
 import 'transfer_connection_selection_test.dart' show session;
 
 class PathSessions extends LiveWorkbenchModel {
@@ -157,5 +158,172 @@ void main() {
     file.name = 'renamed';
     expect(drag.files.single.name, 'original');
     expect(() => drag.files.clear(), throwsUnsupportedError);
+  });
+
+  testWidgets('unavailable insert direct-pastes quoted paths when allowed', (
+    tester,
+  ) async {
+    final original = session('Original', 1, 4);
+    final model = PathSessions([original]);
+    final clipboard = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboard.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              child: const Text('send'),
+              onPressed: () => sendSessionPaths(
+                context,
+                model,
+                original,
+                ["/tmp/a b'.txt"],
+                expectedGeneration: 4,
+                request: (id, generation, paths, cd) async => 'Unavailable',
+                directPasteAllowed: () async => true,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('send'));
+    await tester.pumpAndSettle();
+    final backend = original.controller.backend as FakeBackend;
+    expect(
+      backend.pastes.single.$1,
+      "'/tmp/a b'\\''.txt'",
+      reason: 'quoted literal, no Enter, no newline',
+    );
+    expect(backend.pastes.single.$2, isFalse);
+    expect(clipboard, isEmpty, reason: 'no clipboard fallback when pasted');
+    expect(find.textContaining('普通终端粘贴'), findsOneWidget);
+  });
+
+  testWidgets('direct paste disabled keeps the clipboard-only fallback', (
+    tester,
+  ) async {
+    final original = session('Original', 1, 4);
+    final model = PathSessions([original]);
+    final clipboard = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboard.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              child: const Text('send'),
+              onPressed: () => sendSessionPaths(
+                context,
+                model,
+                original,
+                ['/tmp/x'],
+                request: (id, generation, paths, cd) async => 'Unavailable',
+                directPasteAllowed: () async => false,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('send'));
+    await tester.pumpAndSettle();
+    expect(
+      (original.controller.backend as FakeBackend).pastes,
+      isEmpty,
+      reason: 'never pastes when the preference is off',
+    );
+    expect(clipboard, ["'/tmp/x'"]);
+  });
+
+  testWidgets('disconnected session never direct-pastes', (tester) async {
+    final original = session('Original', 1, 4);
+    final model = PathSessions([original]);
+    original.controller.phase = 'Disconnected';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              child: const Text('send'),
+              onPressed: () => sendSessionPaths(
+                context,
+                model,
+                original,
+                ['/tmp/x'],
+                request: (id, generation, paths, cd) async => 'Unavailable',
+                directPasteAllowed: () async => true,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('send'));
+    await tester.pumpAndSettle();
+    expect(
+      (original.controller.backend as FakeBackend).pastes,
+      isEmpty,
+      reason: 'a dead session must not receive pasted paths',
+    );
+  });
+
+  testWidgets('cd variant never direct-pastes', (tester) async {
+    final original = session('Original', 1, 4);
+    final model = PathSessions([original]);
+    final clipboard = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboard.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              child: const Text('send'),
+              onPressed: () => sendSessionPaths(
+                context,
+                model,
+                original,
+                ['/tmp/dir'],
+                enterDirectory: true,
+                request: (id, generation, paths, cd) async => 'Unavailable',
+                directPasteAllowed: () async => true,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('send'));
+    await tester.pumpAndSettle();
+    expect(
+      (original.controller.backend as FakeBackend).pastes,
+      isEmpty,
+      reason: 'cd stays clipboard-only; Enter must stay manual',
+    );
+    expect(clipboard, ["cd '/tmp/dir'"]);
   });
 }

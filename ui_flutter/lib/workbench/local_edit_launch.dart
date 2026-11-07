@@ -27,24 +27,25 @@ const _maxSessionsPerModel = 16;
 
 /// Abstraction over the native calls so tests can simulate every flow.
 abstract interface class LocalEditGateway {
-  Future<List<int>> download(int native, String path);
+  Future<List<int>> download(int native, int generation, String path);
   Future<({int size, int? mtime})> stat(
     int native,
     int generation,
     String path,
   );
-  Future<void> upload(int native, String path, List<int> bytes);
-  Future<void> renameOver(int native, String from, String to);
+  Future<void> upload(int native, int generation, String path, List<int> bytes);
+  Future<void> renameOver(int native, int generation, String from, String to);
+  Future<void> removeFile(int native, int generation, String path);
 }
 
 class NativeLocalEditGateway implements LocalEditGateway {
   const NativeLocalEditGateway();
   @override
-  Future<List<int>> download(int native, String path) async {
+  Future<List<int>> download(int native, int generation, String path) async {
     final out = <int>[];
     final meta = await rust.sftpProperties(
       id: native,
-      generation: 0,
+      generation: generation,
       path: path,
       includeDirectorySize: false,
     );
@@ -79,8 +80,25 @@ class NativeLocalEditGateway implements LocalEditGateway {
   }
 
   @override
-  Future<void> upload(int native, String path, List<int> bytes) async {
+  Future<void> upload(
+    int native,
+    int generation,
+    String path,
+    List<int> bytes,
+  ) async {
     const chunk = 1024 * 1024;
+    if (bytes.isEmpty) {
+      // An empty save must still create (and truncate) the remote temp
+      // file; the chunk loop below would never run.
+      await rust.sftpWriteChunk(
+        id: native,
+        path: path,
+        offset: 0,
+        data: const [],
+        truncate: true,
+      );
+      return;
+    }
     for (var offset = 0; offset < bytes.length; offset += chunk) {
       final slice = bytes.sublist(
         offset,
@@ -97,8 +115,23 @@ class NativeLocalEditGateway implements LocalEditGateway {
   }
 
   @override
-  Future<void> renameOver(int native, String from, String to) {
-    return rust.sftpRename(id: native, source: from, destination: to);
+  Future<void> renameOver(int native, int generation, String from, String to) {
+    return rust.sftpRename(
+      id: native,
+      source: from,
+      destination: to,
+      expectedGeneration: generation,
+    );
+  }
+
+  @override
+  Future<void> removeFile(int native, int generation, String path) {
+    return rust.sftpRemove(
+      id: native,
+      path: path,
+      recursive: false,
+      expectedGeneration: generation,
+    );
   }
 }
 
@@ -176,7 +209,7 @@ class LocalEditSession {
     if (file.byteSize != null && file.byteSize! > _maxEditBytes) {
       throw StateError('超过16MiB的文件请使用外部大文件编辑');
     }
-    final bytes = await gateway.download(native, file.id);
+    final bytes = await gateway.download(native, generation, file.id);
     final stat = await gateway.stat(native, generation, file.id);
     final root =
         rootOverride ??
@@ -285,8 +318,20 @@ class LocalEditSession {
       final parent = slash == 0 ? '/' : _remotePath.substring(0, slash);
       final tempName =
           '$parent/.hspterm-edit-${DateTime.now().microsecondsSinceEpoch}';
-      await _gateway.upload(_native, tempName, bytes);
-      await _gateway.renameOver(_native, tempName, _remotePath);
+      await _gateway.upload(_native, current, tempName, bytes);
+      try {
+        await _gateway.renameOver(_native, current, tempName, _remotePath);
+      } catch (error) {
+        // The original remote file is untouched, but the temp sibling would
+        // otherwise linger forever; remove it best-effort before rethrowing.
+        try {
+          await _gateway.removeFile(_native, current, tempName);
+        } catch (_) {
+          // Cleanup itself failed; the upload error below still reports the
+          // original failure so the user can retry.
+        }
+        rethrow;
+      }
       _originSize = bytes.length;
       final after = await _gateway.stat(_native, current, _remotePath);
       _originMtime = after.mtime;

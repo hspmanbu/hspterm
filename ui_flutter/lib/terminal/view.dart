@@ -4,6 +4,7 @@ import '../app_notice.dart';
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:flutter/gestures.dart';
@@ -11,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../src/rust/api.dart' as rust;
+import '../run_log.dart';
 import 'controller.dart';
 import 'suggestions.dart';
 import 'suggestions_overlay.dart';
@@ -70,7 +72,77 @@ class TerminalViewState extends State<TerminalView>
 
   String? _shownOperationError;
   rust.KeyboardInput? _pendingTextKey;
+  // Recovery for characters the platform text path dropped (Windows TSF can
+  // skip updateEditingValue for the first key after toggling Caps Lock):
+  // without a fallback the pending key would be silently overwritten by the
+  // next press. The late-update strip keeps delivery exactly-once.
+  Timer? _pendingTextTimer;
+  int _pendingTextSetMs = 0;
+  String? _flushedDirectText;
+  int _flushedDirectMs = 0;
+  int _inputSeq = 0;
+  static const _flushStripWindowMs = 400;
+  @visibleForTesting
+  static Duration pendingFlushDelay = const Duration(milliseconds: 150);
+
+  /// Metadata-only input diagnostics gate (HSPTERM_INPUT_TRACE=1). Never
+  /// records characters, only phases/modifier bits/sequence numbers.
+  @visibleForTesting
+  static bool traceInput = Platform.environment['HSPTERM_INPUT_TRACE'] == '1';
+  @visibleForTesting
+  static int Function() debugNowMs = () =>
+      DateTime.now().millisecondsSinceEpoch;
   TerminalController get c => widget.controller;
+
+  void _traceInput(String phase, {int? kind}) {
+    if (!traceInput) return;
+    AppRunLog.instance.event(
+      AppLogEvent.inputTrace,
+      terminal: c.id,
+      count: ++_inputSeq,
+      fields: {'result': phase, 'kind': ?kind},
+    );
+  }
+
+  /// Sends a still-pending printable key straight to the terminal because the
+  /// platform text path never delivered it. Arms a one-shot strip marker so a
+  /// late updateEditingValue for the same character is deduplicated.
+  void _deliverPendingDirect(rust.KeyboardInput input, String reason) {
+    _pendingTextKey = null;
+    _pendingTextTimer?.cancel();
+    _pendingTextTimer = null;
+    _flushedDirectText = input.text;
+    _flushedDirectMs = debugNowMs();
+    _traceInput('direct-$reason');
+    _run(c.key(input));
+  }
+
+  /// Flushes a stale pending key before a new one replaces it. The minimum
+  /// age keeps IME composition starts (which arrive within a frame) the owner
+  /// of their key; a dropped WM_CHAR never arrives at any age.
+  void _flushStalePendingTextKey() {
+    final stale = _pendingTextKey;
+    if (stale == null || _ime.composing) return;
+    if (debugNowMs() - _pendingTextSetMs < 30) return;
+    _deliverPendingDirect(stale, 'stale');
+  }
+
+  void _onPendingTextTimer() {
+    _pendingTextTimer = null;
+    final pending = _pendingTextKey;
+    if (pending == null) return;
+    _deliverPendingDirect(pending, 'timer');
+    _syncSuggestions();
+  }
+
+  void _cancelPendingTextKey() {
+    if (_pendingTextKey != null) _traceInput('reset');
+    _pendingTextKey = null;
+    _pendingTextTimer?.cancel();
+    _pendingTextTimer = null;
+    _flushedDirectText = null;
+  }
+
   TerminalTypography get _typography =>
       (widget.typography ?? TerminalTypography(size: widget.fontSize)).copyWith(
         size: ((widget.typography?.size ?? widget.fontSize) + _zoom).clamp(
@@ -128,7 +200,7 @@ class TerminalViewState extends State<TerminalView>
       _suggestions = TerminalSuggestionsController(c);
       c.addListener(_changed);
       _cache.clear();
-      _pendingTextKey = null;
+      _cancelPendingTextKey();
       _ime.reset();
       c.composing = false;
       _preedit.value = '';
@@ -297,6 +369,9 @@ class TerminalViewState extends State<TerminalView>
       _connection = null;
       c.composing = false;
       _preedit.value = '';
+      // A keystroke pending only its platform delivery is stale once focus
+      // leaves; recovering it later would type into an unfocused terminal.
+      _cancelPendingTextKey();
     }
     final id = c.id;
     if (id != null && c.connected) _run(c.focus(_focus.hasFocus));
@@ -371,6 +446,9 @@ class TerminalViewState extends State<TerminalView>
   }.contains(key);
   KeyEventResult _key(FocusNode node, KeyEvent event) {
     final mods = _mods, down = event is! KeyUpEvent, key = event.logicalKey;
+    // Any fresh press first recovers a character the platform dropped, so a
+    // following Enter/Backspace cannot overtake it.
+    if (event is KeyDownEvent) _flushStalePendingTextKey();
     final composing =
         _editing.composing.isValid && !_editing.composing.isCollapsed;
     final local = ApplicationKeyScope.terminal(
@@ -472,6 +550,10 @@ class TerminalViewState extends State<TerminalView>
         shifted: event.character,
         base: label,
       );
+      _pendingTextSetMs = debugNowMs();
+      _pendingTextTimer?.cancel();
+      _pendingTextTimer = Timer(pendingFlushDelay, _onPendingTextTimer);
+      _traceInput('set', kind: mods);
       _syncSuggestions();
       return KeyEventResult.ignored;
     }
@@ -1045,19 +1127,34 @@ class TerminalViewState extends State<TerminalView>
     c.composing = _ime.composing;
     _suggestions.inputChanged();
     _preedit.value = change.preedit;
+    var text = change.text;
+    final flushed = _flushedDirectText;
+    _flushedDirectText = null;
+    if (flushed != null &&
+        text.startsWith(flushed) &&
+        debugNowMs() - _flushedDirectMs <= _flushStripWindowMs) {
+      // The platform delivered (late) a character the fallback already sent
+      // directly; strip it so the terminal receives exactly one copy.
+      text = text.substring(flushed.length);
+      _traceInput('strip', kind: text.runes.length);
+    }
     final pending = _pendingTextKey;
     _pendingTextKey = null;
+    _pendingTextTimer?.cancel();
+    _pendingTextTimer = null;
     for (var i = 0; i < change.erase; i++) {
       _run(c.key(rust.KeyboardInput(key: 'Backspace', modifiers: 0, kind: 0)));
     }
-    if (change.text.isNotEmpty) {
+    if (text.isNotEmpty) {
       if (change.erase == 0 &&
           pending != null &&
-          pending.text == change.text &&
-          change.text.runes.length == 1) {
+          pending.text == text &&
+          text.runes.length == 1) {
+        _traceInput('consumed');
         _run(c.key(pending));
       } else {
-        _run(c.text(change.text));
+        _traceInput('commit', kind: text.runes.length);
+        _run(c.text(text));
       }
     }
     _syncSuggestions();
@@ -1094,6 +1191,7 @@ class TerminalViewState extends State<TerminalView>
     _searchFocus.dispose();
     _searchField.dispose();
     _connection?.close();
+    _pendingTextTimer?.cancel();
     _blinkTimer?.cancel();
     _blink.dispose();
     _preedit.dispose();
