@@ -1,6 +1,6 @@
 # HSPTerm 开发进度
 
-## 2026-11-07 第八轮 Windows 反馈修复（源码待提交；Ubuntu验证进行中）
+## 2026-11-07 第八轮 Windows 反馈修复（已构建：源码0ac681e，分支Windows CI成功）
 
 - 分支fix/round7-windows-feedback续作；不合并旧main/草稿PR#1。本轮八项：SFTP双击代次错误(P0)、CapsLock首字符丢失(P0)、偶发无响应诊断(P0)、重命名框高度(P1)、右键图标工具栏(P1)、直接粘贴路径选项(P1)、Agent CLI闪烁(P2)。
 - #3 SFTP双击“原SFTP操作绑定的SSH代次已改变”（P0）：根因=NativeLocalEditGateway.download在sftpProperties硬编码generation:0。LocalEditGateway全部方法(download/stat/upload/renameOver/新增removeFile)改为显式传generation；launch()用会话代次下载；上传/rename绑定_upload()时复核的当前代次；rename失败先尽力删除远端临时兄弟文件再rethrow（原文件不动，不再残留.hspterm-edit-*）；零字节保存显式truncate分支（空循环从未建临时文件）。Rust端代次校验不变。12项测试全过（新增：代次传播每调用==7、rename失败清理、零字节truncate）。
@@ -11,7 +11,9 @@
 - #4 直接粘贴路径选项（P1）：新增“允许向交互式程序直接粘贴路径”默认开启。Rust term-core Settings新增paste_paths_direct(serde default true，旧记录兼容+deny_unknown_fields未来字段仍拒)；Dart TerminalPreferencesValue.pastePaths同键往返（String边界无FRB重生成）；设置页开关+摘要。sendSessionPaths在insert不可用(!enterDirectory)且开关开且会话仍连接同代次时回退controller.paste（带引号、无回车、走原Rust粘贴链路含括号粘贴模式；失败不重试，剪贴板兜底）；cd变体永不直贴。4项新测试：允许时直贴引号字面量/关闭时仅剪贴板/断开不贴/cd仅剪贴板。
 - #6 Agent CLI闪烁（P2，诊断+固定不变量）：新增term-core差异测试：同批清屏+重绘=单次revision+终态完整无旧内容泄漏；无2026拆批=两真状态各自revision精确映射（协议真实中间帧不算bug）；既有2026延迟测试保留。帧诊断见#7（frameJank build/raster/pull）。完整闪烁复现与修复待Windows实机日志定位（不降刷新率）。
 - 验证：Flutter Analyze 0；全套件565+过、13失败经git stash对照全部为分支预存（workbench_lifecycle 5/桥接类需已构建native lib、其余各1），其中prototype/workbench_test因重命名键迁移已修复、file_context_menu 3→1；Rust fmt/Clippy 0警告；term-core 43+5(lib)+2(redraw)+1(serde兼容)过；storage-sync terminal_preferences 3过；真实sshd SFTP传输层抽测（posix_names/real_sftp预算/PTY+SFTP共享）在本机OpenSSH 9.6过。
-- 待办：Ubuntu debug构建+GTK冒烟进行中；真实OpenSSH SFTP本地编辑回传GUI实测、Windows CI构建、Win11实机复测清单见下。
+- Ubuntu构建/冒烟：prepare_native_extensions+pub get后debug Linux构建通过；dbus-run-session冒烟25s无异常（仅无头DRI3警告）；60s浸泡RSS 475,600→475,596KiB（debug口径）稳定、线程35-36、空闲CPU≈1.3%，无空闲增长。构建中间产物已清理。
+- Windows构建：分支workflow_dispatch run42341647948/job windows全部成功。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42341647948/artifacts/13562803287 （HSPTerm-windows-x64，40,153,965字节）。启动内存artifact13562744205。
+- 待Win11实机复测：SFTP双击本地编辑回传（代次错误应消失；rename失败提示与临时清理）、CapsLock开启后首字符（HSPTERM_INPUT_TRACE=1可采元数据日志）、偶发无响应时导出.log看uiStall/frameJank/resourceCount、重命名框高度/错误行外置、右键图标工具栏、直接粘贴路径选项默认行为、Agent CLI闪烁（配合frameJank记录）。Android继续暂停。
 
 
 
