@@ -1,6 +1,22 @@
 # HSPTerm 开发进度
 
-## 2026-11-08 第十轮 Windows 反馈修复（已构建：源码b298ffd，分支Windows CI成功）
+## 2026-11-08 第十一轮修复与性能优化（源码ee5b994；Windows CI构建中）
+
+- 三项：重命名编辑器真单行+长名不换行、双击编辑保存覆盖确认机制重做、本地编辑P0内存流式化。
+- #1 重命名编辑器：用户定位准确——expands:true+maxLines:null 使长名换行为第二行，外层单行高度导致文字偏下+溢出边框。修复=真单行（maxLines:1/minLines:1，去expands），Center在定高边框内垂直居中，长名在框内水平滚动（RenderEditable保持光标可见）。新增长名测试（lane_level_data_inventory.txt / HUD_Agent_Codex_Phase3_Diagnostics_Package.zip / 中文长名）：单行高度≤边框、中线偏差<2px、EditableText不产生第二行、End键到末尾仍单行；GTK截图（/tmp/hspterm-r9-shots/rename-long-name.png）像素级验证：文本中线==边框中线（偏移0.0px），文本全部在边框内。
+- #2 覆盖确认机制（按用户要求重做）：
+  - A 正常保存：新Rust API sftp_edit_replace 优先 POSIX-rename 原子替换（OpenSSH直接成功，无弹窗；之前故意先跑注定失败的普通rename是弹窗根源），替换后用 setstat 恢复原文件权限位。
+  - B 无POSIX扩展：sftp_edit_replace_confirmed —— 原文件先改名为备份，temp再顶替，任一步失败自动把备份改回原名（绝不直接删除原文件）；成功后恢复权限+尽力恢复uid/gid（服务器拒绝则记 LocalEditReplaceLoss 诊断不失败），最后删备份。Dart侧三选弹窗：取消/仅本次覆盖/本次连接均覆盖。
+  - 连接级记忆：LocalEditRegistry._overwriteAllowed 按(native id, generation)记录——重连换代自动失效、不同标签隔离、仅内存不落盘、只作用于编辑回传。
+  - 确认期间复核：用户决定后重验会话身份+远端size/mtime与快照一致，变化则转conflicted绝不覆盖（测试覆盖：statSizeOverride在弹窗回调中改变→无confirmed调用+状态conflicted+远端未动）。
+  - dispose不再无条件删本地文件：当前内容摘要≠上次确认同步摘要时保留草稿（editUploadFailed kind=dispose draft-kept记录），已同步文件照常清理。
+  - 测试：POSIX服务器保存零弹窗；无POSIX首次弹窗；仅本次→下次再问；均覆盖→同连接第二次保存零弹窗（asked==1）+跨连接不共享；外部修改拦截；取消保留；草稿保留（dispose后文件仍在）——18项会话测试+2项队列测试全过。真实OpenSSH新增：替换后权限保持（0o640经posix+setstat保留）+备份回滚序列（最终rename失败→备份还原原内容完整）。
+- #3 P0编辑内存：downloadTo流式（sftpReadChunk逐块→IOSink直写临时文件，进度逐块上报），uploadFrom流式（RandomAccessFile按1MiB读→sftpWriteChunk，不再readAsBytes整载）；修改检测与dispose安全检查改用增量摘要（双FNV-1a 64位+长度，1MiB分块，O(1)状态，无新依赖）替代_lastUploadedBytes整份字节。16MiB上限不变。结构性收益：单会话峰值从 ~3×文件大小 缓冲（下载list+对照基线+上传readAsBytes）降为常数（~2MiB块+摘要状态）；16MiB文件、多会话并行时按会话线性消除。
+- P1审查（证据先行，本轮未做无依据改动）：DirectoryCache每会话16目录/64MiB有界，标签关闭随session对象释放，重连清缓存已有（model 1963行）；TerminalPainter缓存2048/96有界+dispose释放；帧积压已有frameJank/pull慢日志观测（R8）。空闲基线（Ubuntu Debug，本轮ee5b994实测）：RSS 502,064→498,620KiB（45s稳定，无增长）、线程36恒定、CPU≈5-6%（Impeller调试渲染）；与R8基线475,600KiB/35线程同量级（本轮含新增列/队列功能）。多标签/高频输出/大目录/多编辑交互场景无法无头驱动，依靠已部署的resourceCount/uiStall/frameJank诊断由实机日志采集。
+- 验证：Analyze 0；全套件586过/11失败与R8-R10预存集完全一致（无新增失败，新增5项通过）；Rust fmt/Clippy 0警告；FRB正规重生成（sftpEditReplace/Confirmed+LocalEditReplaceLoss）；真实sshd两项新测试过。Ubuntu debug重建+冒烟零异常。
+- 待Win11实机：长名编辑观感与光标滚动、OpenSSH保存（应零弹窗直接成功）、非POSIX服务器三选弹窗+均覆盖记忆、断开重连后记忆失效、编辑保存权限位保持、多文件并行编辑内存观感。
+
+
 
 - 三项实机反馈：编辑类菜单项样式不一致、双击编辑保存因"文件名冲突"上传失败、重命名编辑框文字未垂直居中。
 - #1 菜单样式：编辑/按指定编码编辑/外部编辑大文件为条件项（onEditFile等回调存在才显示），第九轮统一样式时按缩进模式替换漏掉——补 _menuItemStyle。新测试：三项存在时全部 MenuItemButton 样式非空且 minimumSize 高度唯一。
