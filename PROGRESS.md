@@ -1,12 +1,13 @@
 # HSPTerm 开发进度
 
-## 2026-11-08 第十轮 Windows 反馈修复（源码b298ffd；Windows CI构建中）
+## 2026-11-08 第十轮 Windows 反馈修复（已构建：源码b298ffd，分支Windows CI成功）
 
 - 三项实机反馈：编辑类菜单项样式不一致、双击编辑保存因"文件名冲突"上传失败、重命名编辑框文字未垂直居中。
 - #1 菜单样式：编辑/按指定编码编辑/外部编辑大文件为条件项（onEditFile等回调存在才显示），第九轮统一样式时按缩进模式替换漏掉——补 _menuItemStyle。新测试：三项存在时全部 MenuItemButton 样式非空且 minimumSize 高度唯一。
 - #2 编辑保存重命名冲突（P0级根因）：sftp_rename 明确拒绝已存在目标（"目标路径已存在"），编辑回传的 temp→原文件 rename 在真实服务器上必然失败——此前 Fake 网关测试掩盖了该缺陷，实机保存从未成功过。修复：sftp_rename 新增 overwrite 可选参——服务器通告 posix-rename@openssh.com 时用 POSIX 原子覆盖；未通告时由调用方明确同意后 remove+rename（非原子回退）。LocalEditSession 首次 rename 遇"目标路径已存在"错误→onConflict 回调弹"替换远端文件？"确认框（openLocalEdit 接线）→同意则 force 重命名覆盖，拒绝则保留本地修改（failed 状态可重试），远端临时文件照旧清理。新增2项测试：同意=问一次+仅强制rename完成+远端已替换；拒绝=无强制rename+远端未动+本地保留。真实OpenSSH新增 posix_rename 覆盖已存在文件回归（plain rename 先失败→posix成功→内容替换）。FRB正规重生成。
 - #3 编辑框垂直居中：根因=TextStyle height:1.0 强制行盒=字号，而 Windows CJK fallback 字体度量大于测试字体，被压缩的行盒使字形基线偏移（Ubuntu测试字体下居中因此未复现）。去掉强制高度，保留 expands+textAlignVertical.center+isCollapsed 自然度量居中。
 - 验证：Analyze 0；编辑套件14项（12+2新）+菜单样式1项全过；Rust clippy 0、真实sshd posix_rename过；全套件581过/11失败与第八九轮预存集完全一致（无新增）。Ubuntu debug重建+dbus冒烟25s零异常。
+- Windows构建：分支workflow_dispatch run42439952428/job windows全部成功。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42439952428/artifacts/13601203923 （HSPTerm-windows-x64，40,210,758字节）。启动内存artifact13601154164。
 - 待Win11实机：编辑菜单观感、双击编辑保存到OpenSSH（posix覆盖路径应直接成功无弹窗；非posix服务器弹窗覆盖/拒绝）、重命名框文字居中与紧凑/缩放。
 
 
