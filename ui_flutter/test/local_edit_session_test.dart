@@ -67,15 +67,18 @@ class FakeGateway implements LocalEditGateway {
     int native,
     int generation,
     String from,
-    String to,
-  ) async {
-    if (renameError != null) throw renameError!;
+    String to, {
+    bool force = false,
+  }) async {
+    if (!force && renameError != null) throw renameError!;
+    forces.add(force);
     renames.add((from, to));
     remoteFiles[to] = uploads.lastWhere((u) => u.$1 == from).$2;
     mtimes[to] = (mtimes[to] ?? 0) + 1;
   }
 
   final removals = <String>[];
+  final forces = <bool>[];
   Object? renameError;
   final generationsSeen = <int>[];
   void Function(int)? statHook;
@@ -335,6 +338,66 @@ void main() {
       s.controller.dispose();
     },
   );
+
+  test('rename conflict asks once, then replaces with user consent', () async {
+    final s = await connectedSession();
+    var asked = 0;
+    gateway.seed('/dir/conflict.txt', utf8Bytes('hello'));
+    await LocalEditSession.launch(
+      s,
+      DemoFile('/dir/conflict.txt', 'conflict.txt', byteSize: 5, size: '5 B'),
+      gateway: gateway,
+      onNotice: notices.add,
+      rootOverride: root,
+      launchOverride: (_) async => true,
+      onSession: created.add,
+      onConflict: (path) {
+        asked++;
+        return Future.value(true);
+      },
+    );
+    gateway.renameError = StateError('Bad state: 目标路径已存在，请先处理同名冲突');
+    final file = singleTaskFile(root);
+    await file.writeAsString('v2');
+    await created.last.testStableCheck();
+    expect(asked, 1, reason: 'conflict asked exactly once');
+    expect(gateway.forces, [true], reason: 'only the forced rename completed');
+    expect(
+      String.fromCharCodes(gateway.remoteFiles['/dir/conflict.txt']!),
+      'v2',
+      reason: 'forced rename replaced the remote file',
+    );
+    expect(created.last.status, LocalEditStatus.editing);
+    s.controller.dispose();
+  });
+
+  test('declining the conflict keeps local edits without replacing', () async {
+    final s = await connectedSession();
+    gateway.seed('/dir/deny.txt', utf8Bytes('hello'));
+    await LocalEditSession.launch(
+      s,
+      DemoFile('/dir/deny.txt', 'deny.txt', byteSize: 5, size: '5 B'),
+      gateway: gateway,
+      onNotice: notices.add,
+      rootOverride: root,
+      launchOverride: (_) async => true,
+      onSession: created.add,
+      onConflict: (path) => Future.value(false),
+    );
+    gateway.renameError = StateError('Bad state: 目标路径已存在，请先处理同名冲突');
+    final file = singleTaskFile(root);
+    await file.writeAsString('v2');
+    await created.last.testStableCheck();
+    expect(gateway.forces, isEmpty, reason: 'no forced rename after refusal');
+    expect(created.last.status, LocalEditStatus.failed);
+    expect(
+      gateway.remoteFiles['/dir/deny.txt']?.length,
+      5,
+      reason: 'remote untouched',
+    );
+    expect(file.existsSync(), isTrue, reason: 'local edits preserved');
+    s.controller.dispose();
+  });
 
   test('registry bounds sessions and disposes all', () async {
     final registry = LocalEditRegistry();

@@ -4774,12 +4774,33 @@ pub async fn sftp_rename(
     source: String,
     destination: String,
     expected_generation: Option<u64>,
+    overwrite: Option<bool>,
 ) -> Result<()> {
     /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
     let outcome: Result<_> = crate::public_errors::guard(async move {
         validate_remote_path(&source)?;
         validate_remote_path(&destination)?;
         let remote = remote_sftp(id, expected_generation).await?;
+        if overwrite == Some(true) {
+            // Edit-save semantics: replace the destination. POSIX-rename is
+            // atomic when the server advertises the extension (OpenSSH
+            // does); otherwise an explicitly confirmed fallback removes the
+            // existing file first, so the caller must have user consent.
+            if remote.supports_posix_rename() {
+                match remote.posix_rename(source, destination).await {
+                    Ok(true) => return Ok(()),
+                    // Advertised but refused: surface instead of silently
+                    // falling into the destructive remove+rename path.
+                    Ok(false) => bail!("服务器未实际支持POSIX覆盖重命名"),
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            if remote.try_exists(destination.clone()).await? {
+                remote.remove_file(destination.clone()).await?;
+            }
+            remote.rename(source, destination).await?;
+            return Ok(());
+        }
         if remote.try_exists(destination.clone()).await? {
             bail!("目标路径已存在，请先处理同名冲突");
         }

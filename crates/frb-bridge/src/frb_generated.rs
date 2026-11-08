@@ -28,7 +28,7 @@
 // Section: imports
 
 use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
-use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
+use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
 use flutter_rust_bridge::{Handler, IntoIntoDart};
 
 // Section: boilerplate
@@ -8531,6 +8531,7 @@ fn wire__crate__api__sftp_rename_impl(
             let api_source = <String>::sse_decode(&mut deserializer);
             let api_destination = <String>::sse_decode(&mut deserializer);
             let api_expected_generation = <Option<u64>>::sse_decode(&mut deserializer);
+            let api_overwrite = <Option<bool>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -8540,6 +8541,7 @@ fn wire__crate__api__sftp_rename_impl(
                             api_source,
                             api_destination,
                             api_expected_generation,
+                            api_overwrite,
                         )
                         .await?;
                         std::result::Result::Ok(output_ok)
@@ -16249,7 +16251,7 @@ mod io {
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,
     };
-    use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
+    use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
     use flutter_rust_bridge::{Handler, IntoIntoDart};
 
     // Section: boilerplate

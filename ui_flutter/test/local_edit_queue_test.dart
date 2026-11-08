@@ -51,7 +51,13 @@ class RecordingGateway implements LocalEditGateway {
   }
 
   @override
-  Future<void> renameOver(int native, int generation, String from, String to) {
+  Future<void> renameOver(
+    int native,
+    int generation,
+    String from,
+    String to, {
+    bool force = false,
+  }) {
     remoteFiles[to] = uploads.lastWhere((u) => u.$1 == from).$2;
     return Future.value();
   }

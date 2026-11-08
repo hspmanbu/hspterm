@@ -2142,6 +2142,40 @@ async fn until_text(ssh: &mut SshConnection, terminal: &mut Terminal, expected: 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn posix_rename_replaces_an_existing_file_for_edit_saves() {
+    // Round-10: the local-edit save flow renames a temp sibling over the
+    // original. Plain SFTP rename refuses existing destinations, so the
+    // overwrite path must use posix-rename when the real server offers it.
+    let server = Server::start().await;
+    let connection = server.connect().await;
+    let sftp = connection.open_sftp().await.unwrap();
+    let dir = server.dir.path().join("posix rename edit");
+    fs::create_dir_all(&dir).unwrap();
+    let original = dir.join("notes.txt");
+    let temp = dir.join(".hspterm-edit-1");
+    fs::write(&original, b"old remote content").unwrap();
+    fs::write(&temp, b"new local content").unwrap();
+    // Plain rename over an existing file fails (server-dependent message).
+    assert!(
+        sftp.rename(temp.to_str().unwrap(), original.to_str().unwrap())
+            .await
+            .is_err()
+    );
+    assert!(
+        sftp.supports_posix_rename(),
+        "test sshd must advertise posix-rename@openssh.com"
+    );
+    assert_eq!(
+        sftp.posix_rename(temp.to_str().unwrap(), original.to_str().unwrap())
+            .await
+            .unwrap(),
+        true
+    );
+    assert_eq!(fs::read(&original).unwrap(), b"new local content");
+    assert!(!temp.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn encrypted_private_key_real_pty_resize_and_sftp_share_transport() {
     let server = Server::start().await;
     let mut ssh = server.connect().await;

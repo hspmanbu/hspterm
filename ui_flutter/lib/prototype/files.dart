@@ -964,7 +964,12 @@ class _FilesPanelState extends State<FilesPanel> {
                         maxLines: null,
                         minLines: null,
                         textAlignVertical: TextAlignVertical.center,
-                        style: TextStyle(fontSize: _nameSize, height: 1.0),
+                        // No forced line height: the CJK fallback metrics on
+                        // Windows differ from the test fonts, and height<1.0
+                        // squeezed the line box so glyphs sat off-center.
+                        // Natural metrics + expands + textAlignVertical give
+                        // true optical centering across DPI/font fallbacks.
+                        style: TextStyle(fontSize: _nameSize),
                         decoration: const InputDecoration(
                           isDense: true,
                           isCollapsed: true,
@@ -1201,16 +1206,19 @@ class _FilesPanelState extends State<FilesPanel> {
     ),
     if (widget.onEditFile != null)
       MenuItemButton(
+        style: _menuItemStyle(context),
         onPressed: () => _dispatchFileAction('edit'),
         child: const Text('编辑'),
       ),
     if (widget.onEditFileWithEncoding != null)
       MenuItemButton(
+        style: _menuItemStyle(context),
         onPressed: () => _dispatchFileAction('edit-encoding'),
         child: const Text('按指定编码编辑…'),
       ),
     if (widget.onEditRawFile != null)
       MenuItemButton(
+        style: _menuItemStyle(context),
         onPressed: () => _dispatchFileAction('edit-raw'),
         child: const Text('外部编辑大文件…'),
       ),

@@ -1141,11 +1141,13 @@ Future<void> sftpRename({
   required String source,
   required String destination,
   int? expectedGeneration,
+  bool? overwrite,
 }) => RustLib.instance.api.crateApiSftpRename(
   id: id,
   source: source,
   destination: destination,
   expectedGeneration: expectedGeneration,
+  overwrite: overwrite,
 );
 
 Future<void> sftpRemove({

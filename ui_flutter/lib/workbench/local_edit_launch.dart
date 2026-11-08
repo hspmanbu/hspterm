@@ -45,7 +45,17 @@ abstract interface class LocalEditGateway {
     List<int> bytes, {
     void Function(int done, int total)? onProgress,
   });
-  Future<void> renameOver(int native, int generation, String from, String to);
+
+  /// [force] replaces an existing destination (edit-save semantics). The
+  /// first, non-forced attempt intentionally surfaces a conflict error so
+  /// the caller can ask for the user's consent before replacing.
+  Future<void> renameOver(
+    int native,
+    int generation,
+    String from,
+    String to, {
+    bool force = false,
+  });
   Future<void> removeFile(int native, int generation, String path);
 }
 
@@ -140,12 +150,19 @@ class NativeLocalEditGateway implements LocalEditGateway {
   }
 
   @override
-  Future<void> renameOver(int native, int generation, String from, String to) {
+  Future<void> renameOver(
+    int native,
+    int generation,
+    String from,
+    String to, {
+    bool force = false,
+  }) {
     return rust.sftpRename(
       id: native,
       source: from,
       destination: to,
       expectedGeneration: generation,
+      overwrite: force ? true : null,
     );
   }
 
@@ -199,6 +216,7 @@ class LocalEditSession extends ChangeNotifier {
     this._gateway,
     this._onNotice,
     this._ownRoot,
+    this._onConflict,
   );
 
   final LiveTerminalSession _session;
@@ -238,6 +256,11 @@ class LocalEditSession extends ChangeNotifier {
   /// share an explicit root); only then does dispose retire the root.
   final bool _ownRoot;
 
+  /// Asks the user whether the remote file may be replaced when the server
+  /// blocks the atomic rename (round-10): the save itself never destroys
+  /// anything without either POSIX-rename support or explicit consent.
+  final Future<bool> Function(String remotePath)? _onConflict;
+
   StreamSubscription<FileSystemEvent>? _watch;
   Timer? _stability;
   Timer? _poll;
@@ -259,6 +282,7 @@ class LocalEditSession extends ChangeNotifier {
     Directory? rootOverride,
     Future<bool> Function(Uri uri)? launchOverride,
     void Function(LocalEditSession session)? onSession,
+    Future<bool> Function(String remotePath)? onConflict,
   }) async {
     final native = source.controller.id;
     final generation = source.controller.generation;
@@ -296,6 +320,7 @@ class LocalEditSession extends ChangeNotifier {
       gateway,
       notice,
       ownRoot,
+      onConflict,
     );
     onSession?.call(session);
     final bytes = await gateway.download(
@@ -409,7 +434,25 @@ class LocalEditSession extends ChangeNotifier {
         onProgress: _setProgress,
       );
       try {
-        await _gateway.renameOver(_native, current, tempName, _remotePath);
+        try {
+          await _gateway.renameOver(_native, current, tempName, _remotePath);
+        } on Object catch (blocked) {
+          // The destination is the file being edited, so a name conflict is
+          // expected on servers without POSIX-rename. Ask once, then retry
+          // with an explicit replace; declining keeps the local edits.
+          final replace =
+              blocked.toString().contains('目标路径已存在') &&
+              _onConflict != null &&
+              await _onConflict(_remotePath);
+          if (!replace) rethrow;
+          await _gateway.renameOver(
+            _native,
+            current,
+            tempName,
+            _remotePath,
+            force: true,
+          );
+        }
       } catch (error) {
         // The original remote file is untouched, but the temp sibling would
         // otherwise linger forever; remove it best-effort before rethrowing.
@@ -548,6 +591,31 @@ Future<void> openLocalEdit(
         if (context.mounted) showAppNotice(context, message);
       },
       onSession: model.localEdits.register,
+      onConflict: (remotePath) async {
+        if (!context.mounted) return false;
+        final name = remotePath.split('/').last;
+        return await showDialog<bool>(
+              context: context,
+              builder: (dialog) => AlertDialog(
+                title: const Text('替换远端文件？'),
+                content: Text(
+                  '保存需要替换远端同名文件「$name」；服务器不支持原子覆盖，'
+                  '确认后将先删除远端原文件再写入新内容。',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialog, false),
+                    child: const Text('取消'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialog, true),
+                    child: const Text('覆盖'),
+                  ),
+                ],
+              ),
+            ) ==
+            true;
+      },
     );
     if (context.mounted) {
       showAppNotice(context, '已在本地编辑器打开；保存后自动上传，远端变更将提示冲突');

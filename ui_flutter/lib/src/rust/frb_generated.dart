@@ -1095,6 +1095,7 @@ abstract class RustLibApi extends BaseApi {
     required String source,
     required String destination,
     int? expectedGeneration,
+    bool? overwrite,
   });
 
   Future<RemoteFile> crateApiSftpResolveEntry({
@@ -8680,6 +8681,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String source,
     required String destination,
     int? expectedGeneration,
+    bool? overwrite,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -8689,6 +8691,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(source, serializer);
           sse_encode_String(destination, serializer);
           sse_encode_opt_CastedPrimitive_u_64(expectedGeneration, serializer);
+          sse_encode_opt_box_autoadd_bool(overwrite, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -8701,7 +8704,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiSftpRenameConstMeta,
-        argValues: [id, source, destination, expectedGeneration],
+        argValues: [id, source, destination, expectedGeneration, overwrite],
         apiImpl: this,
       ),
     );
@@ -8709,7 +8712,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiSftpRenameConstMeta => const TaskConstMeta(
     debugName: "sftp_rename",
-    argNames: ["id", "source", "destination", "expectedGeneration"],
+    argNames: [
+      "id",
+      "source",
+      "destination",
+      "expectedGeneration",
+      "overwrite",
+    ],
   );
 
   @override
