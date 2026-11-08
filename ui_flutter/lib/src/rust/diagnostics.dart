@@ -20,6 +20,10 @@ enum DiagnosticCode {
   stateDisconnected,
   stateFailed,
   stateClosed,
+
+  /// Edit-save replace cleanup could not restore/remove something after
+  /// the content save itself succeeded (round-11).
+  localEditReplaceLoss,
   connectionCancelRequested,
   disconnectRequested,
   hostKeyAccepted,

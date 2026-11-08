@@ -26,16 +26,17 @@ class FakeGateway implements LocalEditGateway {
   }
 
   @override
-  Future<List<int>> download(
+  Future<void> downloadTo(
     int native,
     int generation,
-    String path, {
+    String path,
+    File target, {
     void Function(int done, int? total)? onProgress,
   }) async {
     final bytes = List.of(remoteFiles[path] ?? utf8Bytes('hello'));
     onProgress?.call(0, bytes.length);
+    await target.writeAsBytes(bytes, flush: true);
     onProgress?.call(bytes.length, bytes.length);
-    return bytes;
   }
 
   @override
@@ -49,36 +50,56 @@ class FakeGateway implements LocalEditGateway {
   );
 
   @override
-  Future<void> upload(
+  Future<void> uploadFrom(
     int native,
     int generation,
     String path,
-    List<int> bytes, {
+    File source, {
     void Function(int done, int total)? onProgress,
   }) async {
     if (refuseUpload) throw const SocketException('offline');
     if (uploadError != null) throw uploadError!;
+    final bytes = await source.readAsBytes();
     uploads.add((path, bytes));
     onProgress?.call(bytes.length, bytes.length);
   }
 
+  /// 'atomic' simulates posix-rename servers; otherwise the first phase
+  /// reports NeedsConfirmation until the confirmed (destructive) phase.
+  bool atomicReplace = true;
+  Object? confirmedError;
+  final confirmedCalls = <(String, String)>[];
   @override
-  Future<void> renameOver(
+  Future<String> replaceAtomic(
     int native,
     int generation,
-    String from,
-    String to, {
-    bool force = false,
-  }) async {
-    if (!force && renameError != null) throw renameError!;
-    forces.add(force);
-    renames.add((from, to));
-    remoteFiles[to] = uploads.lastWhere((u) => u.$1 == from).$2;
-    mtimes[to] = (mtimes[to] ?? 0) + 1;
+    String temp,
+    String original,
+  ) async {
+    if (renameError != null) throw renameError!;
+    if (!atomicReplace) return 'NeedsConfirmation';
+    renames.add((temp, original));
+    remoteFiles[original] = uploads.lastWhere((u) => u.$1 == temp).$2;
+    mtimes[original] = (mtimes[original] ?? 0) + 1;
+    return 'Applied';
+  }
+
+  @override
+  Future<String> replaceConfirmed(
+    int native,
+    int generation,
+    String temp,
+    String original,
+  ) async {
+    if (confirmedError != null) throw confirmedError!;
+    confirmedCalls.add((temp, original));
+    renames.add((temp, original));
+    remoteFiles[original] = uploads.lastWhere((u) => u.$1 == temp).$2;
+    mtimes[original] = (mtimes[original] ?? 0) + 1;
+    return 'Applied';
   }
 
   final removals = <String>[];
-  final forces = <bool>[];
   Object? renameError;
   final generationsSeen = <int>[];
   void Function(int)? statHook;
@@ -341,6 +362,7 @@ void main() {
 
   test('rename conflict asks once, then replaces with user consent', () async {
     final s = await connectedSession();
+    final registry = LocalEditRegistry();
     var asked = 0;
     gateway.seed('/dir/conflict.txt', utf8Bytes('hello'));
     await LocalEditSession.launch(
@@ -351,17 +373,24 @@ void main() {
       rootOverride: root,
       launchOverride: (_) async => true,
       onSession: created.add,
+      overwriteAllowed: registry.overwriteAllowed,
+      allowOverwrite: registry.allowOverwrite,
       onConflict: (path) {
         asked++;
-        return Future.value(true);
+        return Future.value(const LocalEditConflictDecision(always: false));
       },
     );
-    gateway.renameError = StateError('Bad state: 目标路径已存在，请先处理同名冲突');
+    // No-POSIX server: phase 1 reports NeedsConfirmation.
+    gateway.atomicReplace = false;
     final file = singleTaskFile(root);
     await file.writeAsString('v2');
     await created.last.testStableCheck();
     expect(asked, 1, reason: 'conflict asked exactly once');
-    expect(gateway.forces, [true], reason: 'only the forced rename completed');
+    expect(
+      gateway.confirmedCalls,
+      hasLength(1),
+      reason: 'confirmed replace ran once',
+    );
     expect(
       String.fromCharCodes(gateway.remoteFiles['/dir/conflict.txt']!),
       'v2',
@@ -373,6 +402,7 @@ void main() {
 
   test('declining the conflict keeps local edits without replacing', () async {
     final s = await connectedSession();
+    final registry = LocalEditRegistry();
     gateway.seed('/dir/deny.txt', utf8Bytes('hello'));
     await LocalEditSession.launch(
       s,
@@ -382,13 +412,19 @@ void main() {
       rootOverride: root,
       launchOverride: (_) async => true,
       onSession: created.add,
-      onConflict: (path) => Future.value(false),
+      overwriteAllowed: registry.overwriteAllowed,
+      allowOverwrite: registry.allowOverwrite,
+      onConflict: (path) => Future.value(null),
     );
-    gateway.renameError = StateError('Bad state: 目标路径已存在，请先处理同名冲突');
+    gateway.atomicReplace = false;
     final file = singleTaskFile(root);
     await file.writeAsString('v2');
     await created.last.testStableCheck();
-    expect(gateway.forces, isEmpty, reason: 'no forced rename after refusal');
+    expect(
+      gateway.confirmedCalls,
+      isEmpty,
+      reason: 'no confirmed replace after refusal',
+    );
     expect(created.last.status, LocalEditStatus.failed);
     expect(
       gateway.remoteFiles['/dir/deny.txt']?.length,
@@ -396,6 +432,129 @@ void main() {
       reason: 'remote untouched',
     );
     expect(file.existsSync(), isTrue, reason: 'local edits preserved');
+    s.controller.dispose();
+  });
+
+  test('POSIX-capable server saves without any confirmation', () async {
+    final s = await connectedSession();
+    gateway.seed('/dir/atomic.txt', utf8Bytes('hello'));
+    var asked = 0;
+    await LocalEditSession.launch(
+      s,
+      DemoFile('/dir/atomic.txt', 'atomic.txt', byteSize: 5, size: '5 B'),
+      gateway: gateway,
+      onNotice: notices.add,
+      rootOverride: root,
+      launchOverride: (_) async => true,
+      onSession: created.add,
+      onConflict: (_) {
+        asked++;
+        return Future.value(null);
+      },
+    );
+    final file = singleTaskFile(root);
+    await file.writeAsString('v2');
+    await created.last.testStableCheck();
+    expect(asked, 0, reason: 'atomic path never asks');
+    expect(gateway.confirmedCalls, isEmpty, reason: 'no destructive phase');
+    expect(String.fromCharCodes(gateway.remoteFiles['/dir/atomic.txt']!), 'v2');
+    s.controller.dispose();
+  });
+
+  test(
+    'always-consent covers later saves on the same connection only',
+    () async {
+      final s = await connectedSession();
+      final registry = LocalEditRegistry();
+      var asked = 0;
+      gateway.seed('/dir/always.txt', utf8Bytes('hello'));
+      await LocalEditSession.launch(
+        s,
+        DemoFile('/dir/always.txt', 'always.txt', byteSize: 5, size: '5 B'),
+        gateway: gateway,
+        onNotice: notices.add,
+        rootOverride: root,
+        launchOverride: (_) async => true,
+        onSession: created.add,
+        overwriteAllowed: registry.overwriteAllowed,
+        allowOverwrite: registry.allowOverwrite,
+        onConflict: (_) {
+          asked++;
+          return Future.value(const LocalEditConflictDecision(always: true));
+        },
+      );
+      gateway.atomicReplace = false;
+      final file = singleTaskFile(root);
+      await file.writeAsString('v2');
+      await created.last.testStableCheck();
+      expect(asked, 1);
+      // Second save on the SAME connection (same native id + generation):
+      // no dialog, direct confirmed replace.
+      await file.writeAsString('v3');
+      await created.last.testStableCheck();
+      expect(asked, 1, reason: 'connection-scoped consent suppresses the ask');
+      expect(gateway.confirmedCalls, hasLength(2));
+      expect(
+        String.fromCharCodes(gateway.remoteFiles['/dir/always.txt']!),
+        'v3',
+      );
+      // A different connection (id/generation) is NOT covered.
+      expect(registry.overwriteAllowed(1, 7), isTrue);
+      expect(registry.overwriteAllowed(2, 9), isFalse, reason: 'other tab');
+      s.controller.dispose();
+    },
+  );
+
+  test('external change during consent stops the overwrite', () async {
+    final s = await connectedSession();
+    final registry = LocalEditRegistry();
+    gateway.seed('/dir/race.txt', utf8Bytes('hello'));
+    await LocalEditSession.launch(
+      s,
+      DemoFile('/dir/race.txt', 'race.txt', byteSize: 5, size: '5 B'),
+      gateway: gateway,
+      onNotice: notices.add,
+      rootOverride: root,
+      launchOverride: (_) async => true,
+      onSession: created.add,
+      overwriteAllowed: registry.overwriteAllowed,
+      allowOverwrite: registry.allowOverwrite,
+      onConflict: (_) async {
+        // The remote changes while the dialog would be open.
+        gateway.statSizeOverride = 999;
+        return Future.value(const LocalEditConflictDecision(always: true));
+      },
+    );
+    gateway.atomicReplace = false;
+    final file = singleTaskFile(root);
+    await file.writeAsString('v2');
+    await created.last.testStableCheck();
+    expect(gateway.confirmedCalls, isEmpty, reason: 'stale consent refused');
+    expect(created.last.status, LocalEditStatus.conflicted);
+    expect(
+      gateway.remoteFiles['/dir/race.txt']?.length,
+      5,
+      reason: 'remote untouched',
+    );
+    s.controller.dispose();
+  });
+
+  test('dispose keeps an unsynced draft for the user', () async {
+    final s = await connectedSession();
+    gateway.seed('/dir/draft.txt', utf8Bytes('hello'));
+    final session = await launchFor(s, 'draft.txt');
+    final file = singleTaskFile(root);
+    await file.writeAsString('unsynced work');
+    // No testStableCheck: the change was never uploaded.
+    await session.dispose();
+    expect(
+      file.existsSync(),
+      isTrue,
+      reason: 'unsynced draft must survive dispose',
+    );
+    expect(session.status, LocalEditStatus.closed);
+    // A synced file is still cleaned up (covered elsewhere); this test
+    // pins only the draft-preservation branch.
     s.controller.dispose();
   });
 

@@ -946,41 +946,45 @@ class _FilesPanelState extends State<FilesPanel> {
                       ),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    // expands fills the row height; the line centers inside
-                    // EditableText itself so the painted baseline and the
-                    // box share one midline at any font scale. A translucent
-                    // selection color replaces the opaque default that read
-                    // as a stray dark rectangle behind the name.
+                    // A true SINGLE-LINE field (round-11): maxLines/minLines
+                    // pinned to 1 — with expands the null maxLines wrapped
+                    // long names to a second line that overflowed the
+                    // border and pushed the visible line off-center. The
+                    // field now sizes itself to one line and Center aligns
+                    // it on the row midline; long input scrolls inside the
+                    // field (RenderEditable keeps the caret visible) instead
+                    // of wrapping. A translucent selection color replaces
+                    // the opaque default that read as a stray dark
+                    // rectangle behind the name.
                     child: DefaultSelectionStyle(
                       selectionColor: Theme.of(context).colorScheme.primary
                           .withValues(alpha: 0.35),
                       cursorColor: Theme.of(context).colorScheme.primary,
-                      child: TextField(
-                        key: const ValueKey('inline-rename-field'),
-                        controller: _rename,
-                        focusNode: _renameFocus,
-                        autofocus: true,
-                        expands: true,
-                        maxLines: null,
-                        minLines: null,
-                        textAlignVertical: TextAlignVertical.center,
-                        // No forced line height: the CJK fallback metrics on
-                        // Windows differ from the test fonts, and height<1.0
-                        // squeezed the line box so glyphs sat off-center.
-                        // Natural metrics + expands + textAlignVertical give
-                        // true optical centering across DPI/font fallbacks.
-                        style: TextStyle(fontSize: _nameSize),
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          isCollapsed: true,
-                          contentPadding: EdgeInsets.symmetric(horizontal: 8),
-                          border: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          filled: false,
+                      child: Center(
+                        child: TextField(
+                          key: const ValueKey('inline-rename-field'),
+                          controller: _rename,
+                          focusNode: _renameFocus,
+                          autofocus: true,
+                          maxLines: 1,
+                          minLines: 1,
+                          // No forced line height: the CJK fallback metrics
+                          // on Windows differ from the test fonts; natural
+                          // metrics keep the glyphs optically centered
+                          // across DPI and font fallbacks.
+                          style: TextStyle(fontSize: _nameSize),
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            isCollapsed: true,
+                            contentPadding: EdgeInsets.symmetric(horizontal: 8),
+                            border: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            filled: false,
+                          ),
+                          onEditingComplete: () {},
+                          onSubmitted: (_) => commitRename(),
                         ),
-                        onEditingComplete: () {},
-                        onSubmitted: (_) => commitRename(),
                       ),
                     ),
                   ),

@@ -18,16 +18,17 @@ class RecordingGateway implements LocalEditGateway {
   bool failUpload = false;
 
   @override
-  Future<List<int>> download(
+  Future<void> downloadTo(
     int native,
     int generation,
-    String path, {
+    String path,
+    File target, {
     void Function(int done, int? total)? onProgress,
   }) async {
     final bytes = List.of(remoteFiles[path] ?? 'hello'.codeUnits);
     onProgress?.call(0, bytes.length);
+    await target.writeAsBytes(bytes, flush: true);
     onProgress?.call(bytes.length, bytes.length);
-    return bytes;
   }
 
   @override
@@ -38,28 +39,39 @@ class RecordingGateway implements LocalEditGateway {
   ) async => (size: (remoteFiles[path] ?? 'hello'.codeUnits).length, mtime: 5);
 
   @override
-  Future<void> upload(
+  Future<void> uploadFrom(
     int native,
     int generation,
     String path,
-    List<int> bytes, {
+    File source, {
     void Function(int done, int total)? onProgress,
   }) async {
     if (failUpload) throw StateError('offline');
+    final bytes = await source.readAsBytes();
     uploads.add((path, bytes));
     onProgress?.call(bytes.length, bytes.length);
   }
 
   @override
-  Future<void> renameOver(
+  Future<String> replaceAtomic(
     int native,
     int generation,
-    String from,
-    String to, {
-    bool force = false,
-  }) {
-    remoteFiles[to] = uploads.lastWhere((u) => u.$1 == from).$2;
-    return Future.value();
+    String temp,
+    String original,
+  ) {
+    remoteFiles[original] = uploads.lastWhere((u) => u.$1 == temp).$2;
+    return Future.value('Applied');
+  }
+
+  @override
+  Future<String> replaceConfirmed(
+    int native,
+    int generation,
+    String temp,
+    String original,
+  ) {
+    remoteFiles[original] = uploads.lastWhere((u) => u.$1 == temp).$2;
+    return Future.value('Applied');
   }
 
   @override

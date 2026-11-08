@@ -21,16 +21,61 @@ import '../src/rust/api.dart' as rust;
 import 'model.dart';
 
 const _maxEditBytes = 16 * 1024 * 1024;
+
+/// Incremental content fingerprint (round-11 P0): two independently seeded
+/// 64-bit FNV-1a lanes plus the byte length, fed in fixed 1 MiB chunks so
+/// no whole-file buffer is ever held. Collisions across same-length edit
+/// re-saves are astronomically unlikely for this purpose (change detection,
+/// not security); no new dependency.
+class ContentDigest {
+  ContentDigest();
+  int _a = 0xcbf29ce484222325, _b = 0x9e3779b97f4a7c15, _len = 0;
+  static const _prime = 0x100000001b3;
+  void add(List<int> bytes) {
+    _len += bytes.length;
+    var a = _a, b = _b;
+    for (final byte in bytes) {
+      a = (a ^ byte) * _prime;
+      b = (b + byte * 31) * 0x100000001b3;
+    }
+    _a = a;
+    _b = b;
+  }
+
+  @override
+  String toString() => '$_len.${_a.toRadixString(16)}.${_b.toRadixString(16)}';
+}
+
+/// Streams [file] in chunks, returning its fingerprint without buffering
+/// the whole content (async IO — never blocks the UI isolate).
+Future<String> digestOf(File file) async {
+  final digest = ContentDigest();
+  final raf = await file.open();
+  try {
+    while (true) {
+      final chunk = await raf.read(1024 * 1024);
+      if (chunk.isEmpty) break;
+      digest.add(chunk);
+    }
+  } finally {
+    await raf.close();
+  }
+  return digest.toString();
+}
+
 const _stableWindow = Duration(milliseconds: 700);
 const _pollInterval = Duration(milliseconds: 800);
 const _maxSessionsPerModel = 16;
 
 /// Abstraction over the native calls so tests can simulate every flow.
 abstract interface class LocalEditGateway {
-  Future<List<int>> download(
+  /// Streams the remote file straight into [target] (round-11 P0): no
+  /// whole-file Dart buffer; progress reports per chunk.
+  Future<void> downloadTo(
     int native,
     int generation,
-    String path, {
+    String path,
+    File target, {
     void Function(int done, int? total)? onProgress,
   });
   Future<({int size, int? mtime})> stat(
@@ -38,37 +83,49 @@ abstract interface class LocalEditGateway {
     int generation,
     String path,
   );
-  Future<void> upload(
+
+  /// Streams [source] from disk to the remote path in chunks (round-11
+  /// P0): the file is never fully loaded into memory.
+  Future<void> uploadFrom(
     int native,
     int generation,
     String path,
-    List<int> bytes, {
+    File source, {
     void Function(int done, int total)? onProgress,
   });
 
-  /// [force] replaces an existing destination (edit-save semantics). The
-  /// first, non-forced attempt intentionally surfaces a conflict error so
-  /// the caller can ask for the user's consent before replacing.
-  Future<void> renameOver(
+  /// Edit-save replace phase 1: prefers the atomic POSIX rename.
+  /// 'Applied' = replaced in one step; 'NeedsConfirmation' = only the
+  /// destructive (backup+rollback) path exists, the caller must collect
+  /// explicit user consent first.
+  Future<String> replaceAtomic(
     int native,
     int generation,
-    String from,
-    String to, {
-    bool force = false,
-  });
+    String temp,
+    String original,
+  );
+
+  /// Edit-save replace phase 2: the confirmed destructive path with backup
+  /// and rollback; preserves mode and owner/group when the server allows.
+  Future<String> replaceConfirmed(
+    int native,
+    int generation,
+    String temp,
+    String original,
+  );
   Future<void> removeFile(int native, int generation, String path);
 }
 
 class NativeLocalEditGateway implements LocalEditGateway {
   const NativeLocalEditGateway();
   @override
-  Future<List<int>> download(
+  Future<void> downloadTo(
     int native,
     int generation,
-    String path, {
+    String path,
+    File target, {
     void Function(int done, int? total)? onProgress,
   }) async {
-    final out = <int>[];
     final meta = await rust.sftpProperties(
       id: native,
       generation: generation,
@@ -77,19 +134,27 @@ class NativeLocalEditGateway implements LocalEditGateway {
     );
     final total = meta.size;
     onProgress?.call(0, total);
-    for (var offset = 0; offset < total;) {
-      final chunk = await rust.sftpReadChunk(
-        id: native,
-        path: path,
-        offset: offset,
-        length: (total - offset).clamp(0, 1024 * 1024),
-      );
-      if (chunk.isEmpty) break;
-      out.addAll(chunk);
-      offset += chunk.length;
-      onProgress?.call(offset, total);
+    final sink = target.openWrite();
+    var offset = 0;
+    try {
+      while (offset < total) {
+        final chunk = await rust.sftpReadChunk(
+          id: native,
+          path: path,
+          offset: offset,
+          length: (total - offset).clamp(0, 1024 * 1024),
+        );
+        if (chunk.isEmpty) break;
+        sink.add(chunk);
+        offset += chunk.length;
+        onProgress?.call(offset, total);
+      }
+      await sink.flush();
+    } catch (error) {
+      await sink.close().catchError((_) {});
+      rethrow;
     }
-    return out;
+    await sink.close();
   }
 
   @override
@@ -108,16 +173,17 @@ class NativeLocalEditGateway implements LocalEditGateway {
   }
 
   @override
-  Future<void> upload(
+  Future<void> uploadFrom(
     int native,
     int generation,
     String path,
-    List<int> bytes, {
+    File source, {
     void Function(int done, int total)? onProgress,
   }) async {
     const chunk = 1024 * 1024;
-    onProgress?.call(0, bytes.length);
-    if (bytes.isEmpty) {
+    final total = await source.length();
+    onProgress?.call(0, total);
+    if (total == 0) {
       // An empty save must still create (and truncate) the remote temp
       // file; the chunk loop below would never run.
       await rust.sftpWriteChunk(
@@ -130,39 +196,54 @@ class NativeLocalEditGateway implements LocalEditGateway {
       onProgress?.call(0, 0);
       return;
     }
-    for (var offset = 0; offset < bytes.length; offset += chunk) {
-      final slice = bytes.sublist(
-        offset,
-        (offset + chunk).clamp(0, bytes.length),
-      );
-      await rust.sftpWriteChunk(
-        id: native,
-        path: path,
-        offset: offset,
-        data: slice,
-        truncate: offset == 0,
-      );
-      onProgress?.call(
-        (offset + slice.length).clamp(0, bytes.length),
-        bytes.length,
-      );
+    final raf = await source.open();
+    try {
+      var offset = 0;
+      while (offset < total) {
+        final slice = await raf.read(chunk);
+        if (slice.isEmpty) break;
+        await rust.sftpWriteChunk(
+          id: native,
+          path: path,
+          offset: offset,
+          data: slice,
+          truncate: offset == 0,
+        );
+        offset += slice.length;
+        onProgress?.call(offset.clamp(0, total), total);
+      }
+    } finally {
+      await raf.close();
     }
   }
 
   @override
-  Future<void> renameOver(
+  Future<String> replaceAtomic(
     int native,
     int generation,
-    String from,
-    String to, {
-    bool force = false,
-  }) {
-    return rust.sftpRename(
+    String temp,
+    String original,
+  ) {
+    return rust.sftpEditReplace(
       id: native,
-      source: from,
-      destination: to,
-      expectedGeneration: generation,
-      overwrite: force ? true : null,
+      generation: generation,
+      temp: temp,
+      original: original,
+    );
+  }
+
+  @override
+  Future<String> replaceConfirmed(
+    int native,
+    int generation,
+    String temp,
+    String original,
+  ) {
+    return rust.sftpEditReplaceConfirmed(
+      id: native,
+      generation: generation,
+      temp: temp,
+      original: original,
     );
   }
 
@@ -193,6 +274,14 @@ String sanitizeLocalName(String name) {
   return safeExt.isEmpty ? safeStem : '$safeStem.$safeExt';
 }
 
+/// User's choice for the destructive edit-save replace (round-11).
+class LocalEditConflictDecision {
+  const LocalEditConflictDecision({required this.always});
+
+  /// true = "本次连接均覆盖": remember for this SSH connection only.
+  final bool always;
+}
+
 /// Lifecycle of a local-edit queue task (round-9).
 enum LocalEditStatus {
   downloading,
@@ -217,6 +306,9 @@ class LocalEditSession extends ChangeNotifier {
     this._onNotice,
     this._ownRoot,
     this._onConflict,
+    this._overwriteScope,
+    this._overwriteAllowed,
+    this._overwriteAllowSink,
   );
 
   final LiveTerminalSession _session;
@@ -256,16 +348,24 @@ class LocalEditSession extends ChangeNotifier {
   /// share an explicit root); only then does dispose retire the root.
   final bool _ownRoot;
 
-  /// Asks the user whether the remote file may be replaced when the server
-  /// blocks the atomic rename (round-10): the save itself never destroys
-  /// anything without either POSIX-rename support or explicit consent.
-  final Future<bool> Function(String remotePath)? _onConflict;
+  /// Asks the user how to proceed when only the destructive replace path
+  /// exists (round-11): null = cancel, always=false = replace once,
+  /// always=true = remember for this connection.
+  final Future<LocalEditConflictDecision?> Function(String remotePath)?
+  _onConflict;
+
+  /// (native id, generation) of the owning connection; the
+  /// connection-scoped overwrite memory keys on it (reconnect → new
+  /// generation → consent expires automatically).
+  final (int, int)? _overwriteScope;
+  final bool Function(int, int)? _overwriteAllowed;
+  final void Function(int, int)? _overwriteAllowSink;
 
   StreamSubscription<FileSystemEvent>? _watch;
   Timer? _stability;
   Timer? _poll;
   DateTime _lastModified = DateTime.fromMillisecondsSinceEpoch(0);
-  List<int>? _lastUploadedBytes;
+  String? _lastSyncedDigest;
   bool _uploading = false, _conflicted = false, _disposed = false;
 
   Directory get _home => _file.parent;
@@ -282,7 +382,9 @@ class LocalEditSession extends ChangeNotifier {
     Directory? rootOverride,
     Future<bool> Function(Uri uri)? launchOverride,
     void Function(LocalEditSession session)? onSession,
-    Future<bool> Function(String remotePath)? onConflict,
+    Future<LocalEditConflictDecision?> Function(String remotePath)? onConflict,
+    bool Function(int native, int generation)? overwriteAllowed,
+    void Function(int native, int generation)? allowOverwrite,
   }) async {
     final native = source.controller.id;
     final generation = source.controller.generation;
@@ -321,19 +423,30 @@ class LocalEditSession extends ChangeNotifier {
       notice,
       ownRoot,
       onConflict,
+      (native, generation),
+      overwriteAllowed,
+      allowOverwrite,
     );
     onSession?.call(session);
-    final bytes = await gateway.download(
-      native,
-      generation,
-      file.id,
-      onProgress: (done, total) => session._setProgress(done, total ?? 0),
-    );
+    // Round-11 P0: the download streams straight into the temp file; the
+    // stat snapshot is taken after the transfer (the listing size may be
+    // stale by the time the bytes land).
+    try {
+      await gateway.downloadTo(
+        native,
+        generation,
+        file.id,
+        local,
+        onProgress: (done, total) => session._setProgress(done, total ?? 0),
+      );
+    } catch (error) {
+      await session.dispose();
+      rethrow;
+    }
     final stat = await gateway.stat(native, generation, file.id);
     session
       .._originSize = stat.size
       .._originMtime = stat.mtime;
-    await local.writeAsBytes(bytes, flush: true);
     final launch = launchOverride ?? _launchFileUri;
     try {
       await session._open(launch);
@@ -349,7 +462,7 @@ class LocalEditSession extends ChangeNotifier {
 
   Future<void> _open(Future<bool> Function(Uri uri) launch) async {
     _lastModified = await _file.lastModified();
-    _lastUploadedBytes = await _file.readAsBytes();
+    _lastSyncedDigest = await digestOf(_file);
     _watch = _home.watch().listen((event) {
       if (event.path == _file.path) _scheduleStabilityCheck();
     });
@@ -379,9 +492,10 @@ class LocalEditSession extends ChangeNotifier {
     final modified = await _file.lastModified();
     // Content comparison, not size: a same-length edit is still a change.
     if (!modified.isAfter(_lastModified)) return;
-    final bytes = await _file.readAsBytes();
-    final last = _lastUploadedBytes;
-    if (last != null && _sameBytes(last, bytes)) {
+    // Content fingerprint (round-11): same-length edits still upload; an
+    // unchanged file is skipped — without buffering either version.
+    final digest = await digestOf(_file);
+    if (digest == _lastSyncedDigest) {
       _lastModified = modified;
       return;
     }
@@ -418,39 +532,86 @@ class LocalEditSession extends ChangeNotifier {
         _noticeAndLog('远端文件已被修改，本地编辑未覆盖；请手动处理后重试', AppLogEvent.editConflict);
         return;
       }
-      final bytes = await _file.readAsBytes();
-      // Upload to a sibling temp name, then rename over the original so a
-      // mid-upload failure never destroys the remote file.
+      // Upload to a sibling temp name, then replace the original so a
+      // mid-upload failure never destroys the remote file. The local file
+      // streams from disk (round-11 P0) — never fully buffered.
       final slash = _remotePath.lastIndexOf('/');
       final parent = slash == 0 ? '/' : _remotePath.substring(0, slash);
       final tempName =
           '$parent/.hspterm-edit-${DateTime.now().microsecondsSinceEpoch}';
       _setStatus(LocalEditStatus.uploading);
-      await _gateway.upload(
+      await _gateway.uploadFrom(
         _native,
         current,
         tempName,
-        bytes,
+        _file,
         onProgress: _setProgress,
       );
       try {
-        try {
-          await _gateway.renameOver(_native, current, tempName, _remotePath);
-        } on Object catch (blocked) {
-          // The destination is the file being edited, so a name conflict is
-          // expected on servers without POSIX-rename. Ask once, then retry
-          // with an explicit replace; declining keeps the local edits.
-          final replace =
-              blocked.toString().contains('目标路径已存在') &&
-              _onConflict != null &&
-              await _onConflict(_remotePath);
-          if (!replace) rethrow;
-          await _gateway.renameOver(
+        final outcome = await _gateway.replaceAtomic(
+          _native,
+          current,
+          tempName,
+          _remotePath,
+        );
+        if (outcome != 'Applied') {
+          // Only the destructive path exists. With a standing
+          // "本次连接均覆盖" consent for THIS connection (native id +
+          // generation) replace directly; otherwise ask — and re-verify
+          // the remote still matches the snapshot so consent granted
+          // against a stale state never overwrites newer content.
+          var allowed =
+              _overwriteScope != null &&
+              _overwriteAllowed != null &&
+              _overwriteAllowed(_overwriteScope.$1, _overwriteScope.$2);
+          if (!allowed && _onConflict != null) {
+            final decision = await _onConflict(_remotePath);
+            if (decision == null) {
+              throw StateError('已取消替换远端文件');
+            }
+            // Requirement: re-validate while the user was deciding — the
+            // session identity AND the remote snapshot must both still
+            // match, so consent granted against a stale state never
+            // overwrites newer content.
+            final stillCurrent =
+                _session.controller.id == _native &&
+                _session.controller.connected &&
+                _session.controller.generation == current;
+            final fresh = stillCurrent
+                ? await _gateway.stat(_native, current, _remotePath)
+                : null;
+            final unchanged =
+                fresh != null &&
+                fresh.size == _originSize &&
+                (fresh.mtime == null ||
+                    _originMtime == null ||
+                    fresh.mtime == _originMtime);
+            if (!unchanged) {
+              _conflicted = true;
+              _setStatus(LocalEditStatus.conflicted);
+              _noticeAndLog(
+                stillCurrent
+                    ? '远端文件在确认期间已被修改，本地编辑未覆盖；请手动处理后重试'
+                    : '确认期间原连接已断开；修改已保留，可稍后重试',
+                AppLogEvent.editConflict,
+              );
+              return;
+            }
+            if (decision.always &&
+                _overwriteScope != null &&
+                _overwriteAllowSink != null) {
+              _overwriteAllowSink(_overwriteScope.$1, _overwriteScope.$2);
+            }
+            allowed = true;
+          }
+          if (!allowed) {
+            throw StateError('未获替换授权');
+          }
+          await _gateway.replaceConfirmed(
             _native,
             current,
             tempName,
             _remotePath,
-            force: true,
           );
         }
       } catch (error) {
@@ -464,17 +625,17 @@ class LocalEditSession extends ChangeNotifier {
         }
         rethrow;
       }
-      _originSize = bytes.length;
+      _originSize = await _file.length();
       final after = await _gateway.stat(_native, current, _remotePath);
       _originMtime = after.mtime;
-      _lastUploadedBytes = bytes;
+      _lastSyncedDigest = await digestOf(_file);
       _conflicted = false;
       _setStatus(LocalEditStatus.editing);
       AppRunLog.instance.event(
         AppLogEvent.editUploaded,
         terminal: _native,
         generation: current,
-        fields: {'bytes': bytes.length, 'result': 'ok'},
+        fields: {'bytes': _originSize, 'result': 'ok'},
       );
     } catch (error) {
       _setStatus(LocalEditStatus.failed);
@@ -498,14 +659,6 @@ class LocalEditSession extends ChangeNotifier {
     );
   }
 
-  static bool _sameBytes(List<int> a, List<int> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
-
   bool _disposeStarted = false;
   @override
   Future<void> dispose() async {
@@ -517,13 +670,35 @@ class LocalEditSession extends ChangeNotifier {
     _stability?.cancel();
     _poll?.cancel();
     try {
-      if (await _file.exists()) await _file.delete();
-      if (await _home.exists() && await _home.list().isEmpty) {
-        await _home.delete();
+      // Round-11 requirement: NEVER delete a local file whose content was
+      // not confirmed synced. Unsynced drafts stay on disk for the user
+      // (the queue tile remains actionable until the process exits); only
+      // files identical to the last confirmed upload (or the pristine
+      // download, when nothing was ever uploaded) are cleaned up.
+      var safeToDelete = false;
+      if (await _file.exists()) {
+        final current = await digestOf(_file);
+        safeToDelete = current == _lastSyncedDigest;
+      } else {
+        safeToDelete = true;
       }
-      final root = _home.parent;
-      if (_ownRoot && await root.exists() && await root.list().isEmpty) {
-        await root.delete();
+      if (safeToDelete) {
+        if (await _file.exists()) await _file.delete();
+        if (await _home.exists() && await _home.list().isEmpty) {
+          await _home.delete();
+        }
+        final root = _home.parent;
+        if (_ownRoot && await root.exists() && await root.list().isEmpty) {
+          await root.delete();
+        }
+      } else {
+        AppRunLog.instance.event(
+          AppLogEvent.editUploadFailed,
+          terminal: _native,
+          generation: _originGeneration,
+          count: 1,
+          fields: {'result': 'draft-kept', 'kind': 'dispose'},
+        );
       }
     } catch (_) {
       // Best-effort cleanup; the OS temp cleaner owns the rest.
@@ -537,6 +712,19 @@ class LocalEditSession extends ChangeNotifier {
 class LocalEditRegistry extends ChangeNotifier {
   final _sessions = <LocalEditSession>[];
   bool _closed = false;
+
+  /// "本次连接均覆盖" memory (round-11), keyed by the SSH native id AND
+  /// generation: a reconnect bumps the generation, so the consent expires
+  /// with the connection that granted it. Runtime state only — never
+  /// persisted, never shared across tabs of the same host.
+  final _overwriteAllowed = <(int, int)>{};
+
+  bool overwriteAllowed(int native, int generation) =>
+      _overwriteAllowed.contains((native, generation));
+
+  void allowOverwrite(int native, int generation) {
+    _overwriteAllowed.add((native, generation));
+  }
 
   bool get isFull => _sessions.length >= _maxSessionsPerModel;
   int get length => _sessions.length;
@@ -591,30 +779,44 @@ Future<void> openLocalEdit(
         if (context.mounted) showAppNotice(context, message);
       },
       onSession: model.localEdits.register,
+      overwriteAllowed: model.localEdits.overwriteAllowed,
+      allowOverwrite: model.localEdits.allowOverwrite,
       onConflict: (remotePath) async {
-        if (!context.mounted) return false;
+        if (!context.mounted) return null;
         final name = remotePath.split('/').last;
-        return await showDialog<bool>(
-              context: context,
-              builder: (dialog) => AlertDialog(
-                title: const Text('替换远端文件？'),
-                content: Text(
-                  '保存需要替换远端同名文件「$name」；服务器不支持原子覆盖，'
-                  '确认后将先删除远端原文件再写入新内容。',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(dialog, false),
-                    child: const Text('取消'),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(dialog, true),
-                    child: const Text('覆盖'),
-                  ),
-                ],
+        // Three-way decision (round-11); the server lacks POSIX-rename so
+        // the replace moves the original aside to a backup first and rolls
+        // back on failure — nothing is deleted outright.
+        return showDialog<LocalEditConflictDecision>(
+          context: context,
+          builder: (dialog) => AlertDialog(
+            title: const Text('替换远端文件？'),
+            content: Text(
+              '保存需要替换远端同名文件「$name」；服务器不支持原子覆盖，'
+              '确认后将备份原文件再写入新内容，失败自动还原。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('取消'),
               ),
-            ) ==
-            true;
+              FilledButton(
+                onPressed: () => Navigator.pop(
+                  dialog,
+                  const LocalEditConflictDecision(always: false),
+                ),
+                child: const Text('仅本次覆盖'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(
+                  dialog,
+                  const LocalEditConflictDecision(always: true),
+                ),
+                child: const Text('本次连接均覆盖'),
+              ),
+            ],
+          ),
+        );
       },
     );
     if (context.mounted) {

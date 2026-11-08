@@ -19,6 +19,9 @@ pub enum DiagnosticCode {
     StateDisconnected,
     StateFailed,
     StateClosed,
+    /// Edit-save replace cleanup could not restore/remove something after
+    /// the content save itself succeeded (round-11).
+    LocalEditReplaceLoss,
     ConnectionCancelRequested,
     DisconnectRequested,
     HostKeyAccepted,

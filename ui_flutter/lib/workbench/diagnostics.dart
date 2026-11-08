@@ -57,6 +57,7 @@ String diagnosticLabel(DiagnosticCode code) => switch (code) {
   DiagnosticCode.coreWorkerPanicked => '核心工作异常退出（详情已脱敏）',
   DiagnosticCode.directorySizeRemote => '目录大小：远端扫描',
   DiagnosticCode.directorySizeFallback => '目录大小：回退本地扫描',
+  DiagnosticCode.localEditReplaceLoss => '本地编辑替换后清理未完全成功',
 };
 bool diagnosticIsFailure(DiagnosticCode code) => [
   DiagnosticCode.connectionRejected,

@@ -28,7 +28,7 @@
 // Section: imports
 
 use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
-use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
+use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
 use flutter_rust_bridge::{Handler, IntoIntoDart};
 
 // Section: boilerplate
@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1167429212;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -948329257;
 
 // Section: executor
 
@@ -8158,6 +8158,96 @@ fn wire__crate__api__sftp_directory_size_stop_impl(
         },
     )
 }
+fn wire__crate__api__sftp_edit_replace_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "sftp_edit_replace",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <u32>::sse_decode(&mut deserializer);
+            let api_generation = <u64>::sse_decode(&mut deserializer);
+            let api_temp = <String>::sse_decode(&mut deserializer);
+            let api_original = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::sftp_edit_replace(
+                            api_id,
+                            api_generation,
+                            api_temp,
+                            api_original,
+                        )
+                        .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__sftp_edit_replace_confirmed_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "sftp_edit_replace_confirmed",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <u32>::sse_decode(&mut deserializer);
+            let api_generation = <u64>::sse_decode(&mut deserializer);
+            let api_temp = <String>::sse_decode(&mut deserializer);
+            let api_original = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::sftp_edit_replace_confirmed(
+                            api_id,
+                            api_generation,
+                            api_temp,
+                            api_original,
+                        )
+                        .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__sftp_file_search_page_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -10192,19 +10282,20 @@ impl SseDecode for crate::diagnostics::DiagnosticCode {
             9 => crate::diagnostics::DiagnosticCode::StateDisconnected,
             10 => crate::diagnostics::DiagnosticCode::StateFailed,
             11 => crate::diagnostics::DiagnosticCode::StateClosed,
-            12 => crate::diagnostics::DiagnosticCode::ConnectionCancelRequested,
-            13 => crate::diagnostics::DiagnosticCode::DisconnectRequested,
-            14 => crate::diagnostics::DiagnosticCode::HostKeyAccepted,
-            15 => crate::diagnostics::DiagnosticCode::HostKeyRejected,
-            16 => crate::diagnostics::DiagnosticCode::VaultOpened,
-            17 => crate::diagnostics::DiagnosticCode::ConfigurationRestored,
-            18 => crate::diagnostics::DiagnosticCode::TerminalPreferencesSaved,
-            19 => crate::diagnostics::DiagnosticCode::UploadQueued,
-            20 => crate::diagnostics::DiagnosticCode::DownloadQueued,
-            21 => crate::diagnostics::DiagnosticCode::TransferRequestRejected,
-            22 => crate::diagnostics::DiagnosticCode::CoreWorkerPanicked,
-            23 => crate::diagnostics::DiagnosticCode::DirectorySizeRemote,
-            24 => crate::diagnostics::DiagnosticCode::DirectorySizeFallback,
+            12 => crate::diagnostics::DiagnosticCode::LocalEditReplaceLoss,
+            13 => crate::diagnostics::DiagnosticCode::ConnectionCancelRequested,
+            14 => crate::diagnostics::DiagnosticCode::DisconnectRequested,
+            15 => crate::diagnostics::DiagnosticCode::HostKeyAccepted,
+            16 => crate::diagnostics::DiagnosticCode::HostKeyRejected,
+            17 => crate::diagnostics::DiagnosticCode::VaultOpened,
+            18 => crate::diagnostics::DiagnosticCode::ConfigurationRestored,
+            19 => crate::diagnostics::DiagnosticCode::TerminalPreferencesSaved,
+            20 => crate::diagnostics::DiagnosticCode::UploadQueued,
+            21 => crate::diagnostics::DiagnosticCode::DownloadQueued,
+            22 => crate::diagnostics::DiagnosticCode::TransferRequestRejected,
+            23 => crate::diagnostics::DiagnosticCode::CoreWorkerPanicked,
+            24 => crate::diagnostics::DiagnosticCode::DirectorySizeRemote,
+            25 => crate::diagnostics::DiagnosticCode::DirectorySizeFallback,
             _ => unreachable!("Invalid variant for DiagnosticCode: {}", inner),
         };
     }
@@ -12695,59 +12786,63 @@ fn pde_ffi_dispatcher_primary_impl(
         206 => wire__crate__api__sftp_directory_size_begin_impl(port, ptr, rust_vec_len, data_len),
         207 => wire__crate__api__sftp_directory_size_step_impl(port, ptr, rust_vec_len, data_len),
         208 => wire__crate__api__sftp_directory_size_stop_impl(port, ptr, rust_vec_len, data_len),
-        209 => wire__crate__api__sftp_file_search_page_impl(port, ptr, rust_vec_len, data_len),
-        210 => wire__crate__api__sftp_list_directory_impl(port, ptr, rust_vec_len, data_len),
-        211 => wire__crate__api__sftp_locate_terminal_path_impl(port, ptr, rust_vec_len, data_len),
-        212 => wire__crate__api__sftp_open_directory_impl(port, ptr, rust_vec_len, data_len),
-        213 => wire__crate__api__sftp_open_file_search_impl(port, ptr, rust_vec_len, data_len),
-        214 => wire__crate__api__sftp_properties_impl(port, ptr, rust_vec_len, data_len),
-        215 => wire__crate__api__sftp_read_chunk_impl(port, ptr, rust_vec_len, data_len),
-        216 => wire__crate__api__sftp_remove_impl(port, ptr, rust_vec_len, data_len),
-        217 => wire__crate__api__sftp_rename_impl(port, ptr, rust_vec_len, data_len),
-        218 => wire__crate__api__sftp_resolve_entry_impl(port, ptr, rust_vec_len, data_len),
-        219 => wire__crate__api__sftp_set_properties_impl(port, ptr, rust_vec_len, data_len),
-        220 => wire__crate__api__sftp_write_chunk_impl(port, ptr, rust_vec_len, data_len),
-        221 => wire__crate__api__shutdown_editors_impl(port, ptr, rust_vec_len, data_len),
-        222 => wire__crate__api__shutdown_file_previews_impl(port, ptr, rust_vec_len, data_len),
-        223 => wire__crate__api__ssh_network_defaults_impl(port, ptr, rust_vec_len, data_len),
-        224 => wire__crate__api__start_forwarding_impl(port, ptr, rust_vec_len, data_len),
-        225 => wire__crate__api__start_temporary_forwarding_impl(port, ptr, rust_vec_len, data_len),
-        226 => wire__crate__api__stop_forwarding_impl(port, ptr, rust_vec_len, data_len),
-        227 => wire__crate__api__stop_remote_copy_impl(port, ptr, rust_vec_len, data_len),
-        228 => wire__crate__api__stop_transfer_impl(port, ptr, rust_vec_len, data_len),
-        229 => wire__crate__api__take_frame_impl(port, ptr, rust_vec_len, data_len),
-        230 => {
+        209 => wire__crate__api__sftp_edit_replace_impl(port, ptr, rust_vec_len, data_len),
+        210 => {
+            wire__crate__api__sftp_edit_replace_confirmed_impl(port, ptr, rust_vec_len, data_len)
+        }
+        211 => wire__crate__api__sftp_file_search_page_impl(port, ptr, rust_vec_len, data_len),
+        212 => wire__crate__api__sftp_list_directory_impl(port, ptr, rust_vec_len, data_len),
+        213 => wire__crate__api__sftp_locate_terminal_path_impl(port, ptr, rust_vec_len, data_len),
+        214 => wire__crate__api__sftp_open_directory_impl(port, ptr, rust_vec_len, data_len),
+        215 => wire__crate__api__sftp_open_file_search_impl(port, ptr, rust_vec_len, data_len),
+        216 => wire__crate__api__sftp_properties_impl(port, ptr, rust_vec_len, data_len),
+        217 => wire__crate__api__sftp_read_chunk_impl(port, ptr, rust_vec_len, data_len),
+        218 => wire__crate__api__sftp_remove_impl(port, ptr, rust_vec_len, data_len),
+        219 => wire__crate__api__sftp_rename_impl(port, ptr, rust_vec_len, data_len),
+        220 => wire__crate__api__sftp_resolve_entry_impl(port, ptr, rust_vec_len, data_len),
+        221 => wire__crate__api__sftp_set_properties_impl(port, ptr, rust_vec_len, data_len),
+        222 => wire__crate__api__sftp_write_chunk_impl(port, ptr, rust_vec_len, data_len),
+        223 => wire__crate__api__shutdown_editors_impl(port, ptr, rust_vec_len, data_len),
+        224 => wire__crate__api__shutdown_file_previews_impl(port, ptr, rust_vec_len, data_len),
+        225 => wire__crate__api__ssh_network_defaults_impl(port, ptr, rust_vec_len, data_len),
+        226 => wire__crate__api__start_forwarding_impl(port, ptr, rust_vec_len, data_len),
+        227 => wire__crate__api__start_temporary_forwarding_impl(port, ptr, rust_vec_len, data_len),
+        228 => wire__crate__api__stop_forwarding_impl(port, ptr, rust_vec_len, data_len),
+        229 => wire__crate__api__stop_remote_copy_impl(port, ptr, rust_vec_len, data_len),
+        230 => wire__crate__api__stop_transfer_impl(port, ptr, rust_vec_len, data_len),
+        231 => wire__crate__api__take_frame_impl(port, ptr, rust_vec_len, data_len),
+        232 => {
             wire__crate__api__temporary_connection_source_impl(port, ptr, rust_vec_len, data_len)
         }
-        231 => wire__crate__api__terminal_agent_state_impl(port, ptr, rust_vec_len, data_len),
-        232 => wire__crate__api__terminal_command_ranges_impl(port, ptr, rust_vec_len, data_len),
-        233 => wire__crate__api__terminal_display_settings_impl(port, ptr, rust_vec_len, data_len),
-        234 => wire__crate__api__terminal_font_bytes_impl(port, ptr, rust_vec_len, data_len),
-        235 => wire__crate__api__terminal_forwardings_impl(port, ptr, rust_vec_len, data_len),
-        236 => {
+        233 => wire__crate__api__terminal_agent_state_impl(port, ptr, rust_vec_len, data_len),
+        234 => wire__crate__api__terminal_command_ranges_impl(port, ptr, rust_vec_len, data_len),
+        235 => wire__crate__api__terminal_display_settings_impl(port, ptr, rust_vec_len, data_len),
+        236 => wire__crate__api__terminal_font_bytes_impl(port, ptr, rust_vec_len, data_len),
+        237 => wire__crate__api__terminal_forwardings_impl(port, ptr, rust_vec_len, data_len),
+        238 => {
             wire__crate__api__terminal_integration_status_impl(port, ptr, rust_vec_len, data_len)
         }
-        237 => wire__crate__api__terminal_metrics_impl(port, ptr, rust_vec_len, data_len),
-        238 => wire__crate__api__terminal_relative_paths_impl(port, ptr, rust_vec_len, data_len),
-        239 => wire__crate__api__terminal_suggestions_impl(port, ptr, rust_vec_len, data_len),
-        240 => wire__crate__api__terminal_tmux_prompt_impl(port, ptr, rust_vec_len, data_len),
-        241 => {
+        239 => wire__crate__api__terminal_metrics_impl(port, ptr, rust_vec_len, data_len),
+        240 => wire__crate__api__terminal_relative_paths_impl(port, ptr, rust_vec_len, data_len),
+        241 => wire__crate__api__terminal_suggestions_impl(port, ptr, rust_vec_len, data_len),
+        242 => wire__crate__api__terminal_tmux_prompt_impl(port, ptr, rust_vec_len, data_len),
+        243 => {
             wire__crate__api__terminal_tmux_restore_enabled_impl(port, ptr, rust_vec_len, data_len)
         }
-        242 => wire__crate__api__terminal_working_directory_impl(port, ptr, rust_vec_len, data_len),
-        243 => wire__crate__api__terminate_remote_process_impl(port, ptr, rust_vec_len, data_len),
-        244 => wire__crate__api__test_display_rules_impl(port, ptr, rust_vec_len, data_len),
-        245 => wire__crate__api__test_host_connection_impl(port, ptr, rust_vec_len, data_len),
-        246 => wire__crate__api__transfer_failures_impl(port, ptr, rust_vec_len, data_len),
-        247 => wire__crate__api__transfer_preferences_impl(port, ptr, rust_vec_len, data_len),
-        248 => wire__crate__api__transfer_reconnect_notice_impl(port, ptr, rust_vec_len, data_len),
-        249 => wire__crate__api__unlock_existing_vault_impl(port, ptr, rust_vec_len, data_len),
-        250 => wire__crate__api__unlock_vault_impl(port, ptr, rust_vec_len, data_len),
-        251 => wire__crate__api__update_editor_impl(port, ptr, rust_vec_len, data_len),
-        252 => wire__crate__api__vault_unlock_hint_impl(port, ptr, rust_vec_len, data_len),
-        253 => wire__crate__api__verify_secure_unlock_impl(port, ptr, rust_vec_len, data_len),
-        254 => wire__crate__api__watch_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
-        255 => wire__crate__api__watch_events_impl(port, ptr, rust_vec_len, data_len),
+        244 => wire__crate__api__terminal_working_directory_impl(port, ptr, rust_vec_len, data_len),
+        245 => wire__crate__api__terminate_remote_process_impl(port, ptr, rust_vec_len, data_len),
+        246 => wire__crate__api__test_display_rules_impl(port, ptr, rust_vec_len, data_len),
+        247 => wire__crate__api__test_host_connection_impl(port, ptr, rust_vec_len, data_len),
+        248 => wire__crate__api__transfer_failures_impl(port, ptr, rust_vec_len, data_len),
+        249 => wire__crate__api__transfer_preferences_impl(port, ptr, rust_vec_len, data_len),
+        250 => wire__crate__api__transfer_reconnect_notice_impl(port, ptr, rust_vec_len, data_len),
+        251 => wire__crate__api__unlock_existing_vault_impl(port, ptr, rust_vec_len, data_len),
+        252 => wire__crate__api__unlock_vault_impl(port, ptr, rust_vec_len, data_len),
+        253 => wire__crate__api__update_editor_impl(port, ptr, rust_vec_len, data_len),
+        254 => wire__crate__api__vault_unlock_hint_impl(port, ptr, rust_vec_len, data_len),
+        255 => wire__crate__api__verify_secure_unlock_impl(port, ptr, rust_vec_len, data_len),
+        256 => wire__crate__api__watch_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
+        257 => wire__crate__api__watch_events_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -12870,19 +12965,20 @@ impl flutter_rust_bridge::IntoDart for crate::diagnostics::DiagnosticCode {
             Self::StateDisconnected => 9.into_dart(),
             Self::StateFailed => 10.into_dart(),
             Self::StateClosed => 11.into_dart(),
-            Self::ConnectionCancelRequested => 12.into_dart(),
-            Self::DisconnectRequested => 13.into_dart(),
-            Self::HostKeyAccepted => 14.into_dart(),
-            Self::HostKeyRejected => 15.into_dart(),
-            Self::VaultOpened => 16.into_dart(),
-            Self::ConfigurationRestored => 17.into_dart(),
-            Self::TerminalPreferencesSaved => 18.into_dart(),
-            Self::UploadQueued => 19.into_dart(),
-            Self::DownloadQueued => 20.into_dart(),
-            Self::TransferRequestRejected => 21.into_dart(),
-            Self::CoreWorkerPanicked => 22.into_dart(),
-            Self::DirectorySizeRemote => 23.into_dart(),
-            Self::DirectorySizeFallback => 24.into_dart(),
+            Self::LocalEditReplaceLoss => 12.into_dart(),
+            Self::ConnectionCancelRequested => 13.into_dart(),
+            Self::DisconnectRequested => 14.into_dart(),
+            Self::HostKeyAccepted => 15.into_dart(),
+            Self::HostKeyRejected => 16.into_dart(),
+            Self::VaultOpened => 17.into_dart(),
+            Self::ConfigurationRestored => 18.into_dart(),
+            Self::TerminalPreferencesSaved => 19.into_dart(),
+            Self::UploadQueued => 20.into_dart(),
+            Self::DownloadQueued => 21.into_dart(),
+            Self::TransferRequestRejected => 22.into_dart(),
+            Self::CoreWorkerPanicked => 23.into_dart(),
+            Self::DirectorySizeRemote => 24.into_dart(),
+            Self::DirectorySizeFallback => 25.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -14755,19 +14851,20 @@ impl SseEncode for crate::diagnostics::DiagnosticCode {
                 crate::diagnostics::DiagnosticCode::StateDisconnected => 9,
                 crate::diagnostics::DiagnosticCode::StateFailed => 10,
                 crate::diagnostics::DiagnosticCode::StateClosed => 11,
-                crate::diagnostics::DiagnosticCode::ConnectionCancelRequested => 12,
-                crate::diagnostics::DiagnosticCode::DisconnectRequested => 13,
-                crate::diagnostics::DiagnosticCode::HostKeyAccepted => 14,
-                crate::diagnostics::DiagnosticCode::HostKeyRejected => 15,
-                crate::diagnostics::DiagnosticCode::VaultOpened => 16,
-                crate::diagnostics::DiagnosticCode::ConfigurationRestored => 17,
-                crate::diagnostics::DiagnosticCode::TerminalPreferencesSaved => 18,
-                crate::diagnostics::DiagnosticCode::UploadQueued => 19,
-                crate::diagnostics::DiagnosticCode::DownloadQueued => 20,
-                crate::diagnostics::DiagnosticCode::TransferRequestRejected => 21,
-                crate::diagnostics::DiagnosticCode::CoreWorkerPanicked => 22,
-                crate::diagnostics::DiagnosticCode::DirectorySizeRemote => 23,
-                crate::diagnostics::DiagnosticCode::DirectorySizeFallback => 24,
+                crate::diagnostics::DiagnosticCode::LocalEditReplaceLoss => 12,
+                crate::diagnostics::DiagnosticCode::ConnectionCancelRequested => 13,
+                crate::diagnostics::DiagnosticCode::DisconnectRequested => 14,
+                crate::diagnostics::DiagnosticCode::HostKeyAccepted => 15,
+                crate::diagnostics::DiagnosticCode::HostKeyRejected => 16,
+                crate::diagnostics::DiagnosticCode::VaultOpened => 17,
+                crate::diagnostics::DiagnosticCode::ConfigurationRestored => 18,
+                crate::diagnostics::DiagnosticCode::TerminalPreferencesSaved => 19,
+                crate::diagnostics::DiagnosticCode::UploadQueued => 20,
+                crate::diagnostics::DiagnosticCode::DownloadQueued => 21,
+                crate::diagnostics::DiagnosticCode::TransferRequestRejected => 22,
+                crate::diagnostics::DiagnosticCode::CoreWorkerPanicked => 23,
+                crate::diagnostics::DiagnosticCode::DirectorySizeRemote => 24,
+                crate::diagnostics::DiagnosticCode::DirectorySizeFallback => 25,
                 _ => {
                     unimplemented!("");
                 }
@@ -16251,7 +16348,7 @@ mod io {
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,
     };
-    use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
+    use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
     use flutter_rust_bridge::{Handler, IntoIntoDart};
 
     // Section: boilerplate

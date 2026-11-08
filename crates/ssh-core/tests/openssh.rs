@@ -2165,14 +2165,73 @@ async fn posix_rename_replaces_an_existing_file_for_edit_saves() {
         sftp.supports_posix_rename(),
         "test sshd must advertise posix-rename@openssh.com"
     );
-    assert_eq!(
+    assert!(
         sftp.posix_rename(temp.to_str().unwrap(), original.to_str().unwrap())
             .await
-            .unwrap(),
-        true
+            .unwrap()
     );
     assert_eq!(fs::read(&original).unwrap(), b"new local content");
     assert!(!temp.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn edit_replace_preserves_mode_and_backup_path_rolls_back() {
+    use std::os::unix::fs::PermissionsExt;
+    // Round-11: mirrors the bridge's sftp_edit_replace[_confirmed] logic.
+    let server = Server::start().await;
+    let connection = server.connect().await;
+    let sftp = connection.open_sftp().await.unwrap();
+    let dir = server.dir.path().join("edit replace");
+    fs::create_dir_all(&dir).unwrap();
+    let original = dir.join("config.yaml");
+    let temp = dir.join(".hspterm-edit-9");
+    fs::write(&original, b"old").unwrap();
+    fs::set_permissions(&original, fs::Permissions::from_mode(0o640)).unwrap();
+    fs::write(&temp, b"new").unwrap();
+
+    // Atomic path (posix): mode carries over via explicit setstat after the
+    // rename — posix-rename itself keeps the TEMP's mode.
+    let attrs = sftp
+        .symlink_metadata(original.to_str().unwrap())
+        .await
+        .unwrap();
+    let mode = attrs.permissions.unwrap();
+    assert!(
+        sftp.posix_rename(temp.to_str().unwrap(), original.to_str().unwrap())
+            .await
+            .unwrap()
+    );
+    sftp.set_metadata(
+        original.to_str().unwrap(),
+        russh_sftp::protocol::FileAttributes {
+            permissions: Some(mode),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        (fs::metadata(&original).unwrap().permissions().mode() & 0o777) == 0o640,
+        "mode preserved through the replace"
+    );
+
+    // Confirmed path (no posix): backup aside, move in, restore mode,
+    // remove backup; a failed final rename rolls the backup back.
+    let backup = dir.join(".hspterm-backup-1");
+    sftp.rename(original.to_str().unwrap(), backup.to_str().unwrap())
+        .await
+        .unwrap();
+    // Simulate the failure: renaming the (now missing) temp fails, so the
+    // original must come back from the backup.
+    assert!(
+        sftp.rename(temp.to_str().unwrap(), original.to_str().unwrap())
+            .await
+            .is_err()
+    );
+    sftp.rename(backup.to_str().unwrap(), original.to_str().unwrap())
+        .await
+        .unwrap();
+    assert!(fs::read(&original).unwrap() == b"new", "rolled back intact");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

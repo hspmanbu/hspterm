@@ -37,6 +37,18 @@ pub(crate) async fn guard<T>(future: impl Future<Output = anyhow::Result<T>>) ->
         Err(_) => Err(panicked()),
     }
 }
+/// Records a non-fatal loss (best-effort cleanup that failed after the
+/// primary operation already succeeded). These never fail the call; they
+/// surface in diagnostics only, with the fixed message the caller passes.
+pub(crate) fn log_loss(message: String) {
+    crate::diagnostics::record(
+        crate::diagnostics::DiagnosticCode::LocalEditReplaceLoss,
+        None,
+        None,
+    );
+    log::debug!("{message}");
+}
+
 pub(crate) fn guard_sync<T>(action: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
     prepare();
     match std::panic::catch_unwind(AssertUnwindSafe(action)) {

@@ -4810,6 +4810,126 @@ pub async fn sftp_rename(
     .await;
     crate::public_errors::finish(outcome)
 }
+/// Edit-save replace, phase 1 (round-11): prefer the atomic POSIX rename.
+/// Returns "Applied" when the server supports posix-rename@openssh.com and
+/// the temp file replaced the original in one step, or "NeedsConfirmation"
+/// when only the destructive path is possible — the caller must collect the
+/// user's explicit consent before phase 2. The original's permissions are
+/// captured and reapplied so the replaced entry keeps its mode.
+pub async fn sftp_edit_replace(
+    id: u32,
+    generation: u64,
+    temp: String,
+    original: String,
+) -> Result<String> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        validate_remote_path(&temp)?;
+        validate_remote_path(&original)?;
+        let remote = remote_sftp(id, Some(generation)).await?;
+        if !remote.supports_posix_rename() {
+            return Ok("NeedsConfirmation".to_owned());
+        }
+        let attrs = remote.symlink_metadata(original.clone()).await?;
+        let permissions = attrs.permissions;
+        match remote.posix_rename(temp, original.clone()).await {
+            Ok(true) => {}
+            // Advertised but refused: never fall into the destructive path
+            // without consent either.
+            Ok(false) => bail!("服务器未实际支持POSIX覆盖重命名"),
+            Err(error) => return Err(error.into()),
+        }
+        if let Some(mode) = permissions {
+            remote
+                .set_metadata(
+                    original,
+                    russh_sftp::protocol::FileAttributes {
+                        permissions: Some(mode),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+        }
+        Ok("Applied".to_owned())
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+/// Edit-save replace, phase 2 (round-11): the explicitly confirmed
+/// destructive path for servers without POSIX-rename. The original is moved
+/// aside to a backup first; any failure rolls it back, so the remote never
+/// loses data mid-save. Permissions (and owner/group when the server
+/// accepts them) carry over to the replacement.
+pub async fn sftp_edit_replace_confirmed(
+    id: u32,
+    generation: u64,
+    temp: String,
+    original: String,
+) -> Result<String> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        validate_remote_path(&temp)?;
+        validate_remote_path(&original)?;
+        let remote = remote_sftp(id, Some(generation)).await?;
+        let attrs = remote.symlink_metadata(original.clone()).await?;
+        let slash = original.rfind('/').unwrap_or(0);
+        let parent = if slash == 0 {
+            "/".to_owned()
+        } else {
+            original[..slash].to_owned()
+        };
+        let backup = format!(
+            "{}/.hspterm-backup-{}",
+            parent,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_micros())
+                .unwrap_or(0)
+        );
+        remote.rename(original.clone(), backup.clone()).await?;
+        if let Err(error) = remote.rename(temp, original.clone()).await {
+            // Roll the original back before surfacing the failure.
+            let _ = remote.rename(backup, original).await;
+            return Err(error.into());
+        }
+        // Restore mode; uid/gid only when the server honors them for this
+        // login (permission errors here are non-fatal — the content save
+        // already succeeded).
+        let mut restored = russh_sftp::protocol::FileAttributes {
+            permissions: attrs.permissions,
+            ..Default::default()
+        };
+        if restored.permissions.is_none() {
+            restored.permissions = Some(0o644);
+        }
+        if let Err(mode_error) = remote.set_metadata(original.clone(), restored).await {
+            crate::public_errors::log_loss(format!("替换后恢复权限失败：{mode_error}"));
+        }
+        if (attrs.uid.is_some() || attrs.gid.is_some())
+            && remote
+                .set_metadata(
+                    original.clone(),
+                    russh_sftp::protocol::FileAttributes {
+                        uid: attrs.uid,
+                        gid: attrs.gid,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .is_err()
+        {
+            crate::public_errors::log_loss("替换后恢复所有者/组未获服务器接受".into());
+        }
+        if let Err(remove_error) = remote.remove_file(backup).await {
+            crate::public_errors::log_loss(format!("清理备份失败：{remove_error}"));
+        }
+        Ok("Applied".to_owned())
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
 pub async fn sftp_remove(
     id: u32,
     path: String,

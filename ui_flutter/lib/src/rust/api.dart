@@ -1150,6 +1150,41 @@ Future<void> sftpRename({
   overwrite: overwrite,
 );
 
+/// Edit-save replace, phase 1 (round-11): prefer the atomic POSIX rename.
+/// Returns "Applied" when the server supports posix-rename@openssh.com and
+/// the temp file replaced the original in one step, or "NeedsConfirmation"
+/// when only the destructive path is possible — the caller must collect the
+/// user's explicit consent before phase 2. The original's permissions are
+/// captured and reapplied so the replaced entry keeps its mode.
+Future<String> sftpEditReplace({
+  required int id,
+  required int generation,
+  required String temp,
+  required String original,
+}) => RustLib.instance.api.crateApiSftpEditReplace(
+  id: id,
+  generation: generation,
+  temp: temp,
+  original: original,
+);
+
+/// Edit-save replace, phase 2 (round-11): the explicitly confirmed
+/// destructive path for servers without POSIX-rename. The original is moved
+/// aside to a backup first; any failure rolls it back, so the remote never
+/// loses data mid-save. Permissions (and owner/group when the server
+/// accepts them) carry over to the replacement.
+Future<String> sftpEditReplaceConfirmed({
+  required int id,
+  required int generation,
+  required String temp,
+  required String original,
+}) => RustLib.instance.api.crateApiSftpEditReplaceConfirmed(
+  id: id,
+  generation: generation,
+  temp: temp,
+  original: original,
+);
+
 Future<void> sftpRemove({
   required int id,
   required String path,

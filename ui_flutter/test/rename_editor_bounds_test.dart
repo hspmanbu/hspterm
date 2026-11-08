@@ -167,6 +167,59 @@ void main() {
     },
   );
 
+  testWidgets('long names stay single-line inside the border', (tester) async {
+    final samples = [
+      'lane_level_data_inventory.txt',
+      'HUD_Agent_Codex_Phase3_Diagnostics_Package.zip',
+      '超长中文文件名示例_2026_年度诊断报告_第一部分_含备注.txt',
+    ];
+    for (final name in samples) {
+      final m = WorkbenchModel()..demo();
+      final pane = m.focus!;
+      final file = DemoFile('/dir/$name', name, byteSize: 5, size: '5 B');
+      pane.files.insert(0, file);
+      await mount(tester, m);
+      await tester.tap(find.text(name).first);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.f2);
+      await tester.pumpAndSettle();
+
+      final editorBox = tester.renderObject(
+        find.byKey(const ValueKey('inline-rename')),
+      ) as RenderBox;
+      final fieldBox = tester.renderObject(
+        find.byKey(const ValueKey('inline-rename-field')),
+      ) as RenderBox;
+      // Single line: the field never grows past the bordered box height.
+      expect(
+        fieldBox.size.height,
+        lessThanOrEqualTo(editorBox.size.height),
+        reason: name,
+      );
+      // The one visible line sits on the box midline (±1px).
+      final fieldCenter =
+          fieldBox.localToGlobal(Offset.zero).dy + fieldBox.size.height / 2;
+      final editorCenter =
+          editorBox.localToGlobal(Offset.zero).dy + editorBox.size.height / 2;
+      expect(
+        (fieldCenter - editorCenter).abs(),
+        lessThan(2.0),
+        reason: 'centered: $name',
+      );
+      // The EditableText is single-line (no wrap): its render object's
+      // height equals one line box, not two.
+      final editable =
+          tester.renderObject(find.byType(EditableText)) as RenderBox;
+      expect(
+        editable.size.height,
+        lessThanOrEqualTo(fieldBox.size.height + 1),
+        reason: 'no wrapped second line: $name',
+      );
+      await tester.pumpWidget(const SizedBox());
+      m.dispose();
+    }
+  });
+
   testWidgets('editor keeps full row height in compact mode and after zoom', (
     tester,
   ) async {
