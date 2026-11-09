@@ -271,10 +271,7 @@ impl Document {
                 }
                 // A tombstone always outranks its own older entry: if both
                 // survive here the merge invariant is broken.
-                if h.deleted
-                    .iter()
-                    .any(|t| t.text == e.text && t.at >= e.used)
-                {
+                if h.deleted.iter().any(|t| t.text == e.text && t.at >= e.used) {
                     return Err(HistoryError::Format);
                 }
             }
@@ -307,7 +304,8 @@ impl Document {
         // A clear epoch already suppresses everything older; its tombstones
         // are redundant and can never exceed the bounded set below.
         h.deleted.retain(|t| t.at > h.clear);
-        h.deleted.sort_by(|a, b| b.at.cmp(&a.at).then_with(|| a.text.cmp(&b.text)));
+        h.deleted
+            .sort_by(|a, b| b.at.cmp(&a.at).then_with(|| a.text.cmp(&b.text)));
         h.deleted.truncate(PER_HOST);
     }
     fn merged(a: &Self, b: &Self) -> Result<Self> {
@@ -342,9 +340,7 @@ impl Document {
                     // Tombstones merge point-wise: the newer delete wins per
                     // text. Commutative, associative and idempotent.
                     for tombstone in &history.deleted {
-                        if let Some(old) =
-                            h.deleted.iter_mut().find(|t| t.text == tombstone.text)
-                        {
+                        if let Some(old) = h.deleted.iter_mut().find(|t| t.text == tombstone.text) {
                             old.at = old.at.clone().max(tombstone.at.clone());
                         } else {
                             h.deleted.push(tombstone.clone());
@@ -356,12 +352,10 @@ impl Document {
         // Resolution: a tombstone suppresses its older entry, a genuinely
         // newer re-execution (used > at) invalidates the tombstone instead.
         for h in result.hosts.values_mut() {
-            h.deleted.retain(|t| {
-                !h.entries.iter().any(|e| e.text == t.text && e.used > t.at)
-            });
-            h.entries.retain(|e| {
-                !h.deleted.iter().any(|t| t.text == e.text && t.at >= e.used)
-            });
+            h.deleted
+                .retain(|t| !h.entries.iter().any(|e| e.text == t.text && e.used > t.at));
+            h.entries
+                .retain(|e| !h.deleted.iter().any(|t| t.text == e.text && t.at >= e.used));
             Self::compact(h);
         }
         // Capacity failure is explicit; never silently discard another host.
@@ -617,7 +611,11 @@ impl<'a> HistoryRepository<'a> {
                     })
             })
             .collect();
-        hits.sort_by(|a, b| b.used_counter.cmp(&a.used_counter).then_with(|| a.text.cmp(&b.text)));
+        hits.sort_by(|a, b| {
+            b.used_counter
+                .cmp(&a.used_counter)
+                .then_with(|| a.text.cmp(&b.text))
+        });
         hits.truncate(limit);
         Ok(hits)
     }
