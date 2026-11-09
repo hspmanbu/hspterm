@@ -1,0 +1,48 @@
+{
+  "platform": "Ubuntu Linux x86_64 dev; Windows 11 real-machine verification pending",
+  "source_commit": "a849625",
+  "progress_commit": "beba68b",
+  "windows_ci": {"run": 42569313140, "status": "dispatched, result recorded in PROGRESS.md when finished"},
+  "flutter_analyze": "0 issues",
+  "flutter_format": "clean (dart format lib test --set-exit-if-changed)",
+  "flutter_suite": {
+    "passed": 594,
+    "failed": 10,
+    "note": "pre-existing set minus one: terminal_path_bridge_test fixed by the locate cache-hit repair; remaining = workbench_lifecycle x5, sftp_properties_bridge, transfer_queue, explorer_files_panel, live_workbench, file_context_menu (each confirmed pre-existing via git-stash comparison where needed)"
+  },
+  "new_tests": [
+    "round12_locate_follow_test: cache-hit/repeat/current-dir/concurrent-navigation locate + follow persistence across model reload (real loopback sshd)",
+    "dialog_bounds_test: small-window confirm keeps buttons visible and scrolls; oversized dialog squeezed",
+    "app_notice_test quiet notices: info/success never raise a SnackBar",
+    "local_edit_session_test: idle auto-close + in-flight upload exemption (FakeGateway holdUploads gate) + closeAllActive repeatable",
+    "storage-sync round12_palette_fingerprint_migration: uncustomized legacy palette upgrades, customized survives"
+  ],
+  "rust": {
+    "fmt": "clean",
+    "clippy": "workspace -D warnings clean",
+    "test_workspace_single_threaded": "0 failures (term-core 45, storage-sync 221 incl. new migration test, ssh-core + openssh suites all green)",
+    "real_openssh_posix_rename": "2 passed"
+  },
+  "gtk_smoke": "flutter build linux --debug + 25s dbus-run-session under xvfb-run, zero exceptions (Impeller OpenGLESSDF)",
+  "frb": "no API/DTO changes this round; no regeneration needed (legacy palette helpers stay below the bridge)",
+  "memory_analysis": {
+    "evidence_based_fixes": [
+      "TerminalController metadata no longer anchors frame.changedRows (double-reference residency)",
+      "edit digest moved to a background isolate (16MiB file = ~16M iterations used to run on the UI isolate)",
+      "streamed edit downloads flush per chunk (IOSink could buffer the whole file under slow temp-dir writers)",
+      "edit backstop poll 800ms->5s"
+    ],
+    "diagnostics_added": [
+      "frameJank: vsyncToBuildUs/buildUs/buildToRasterUs/rasterUs/totalUs; per-minute frameAgg with queueShare; >250ms single-frame details",
+      "memorySample: maxRssKiB + 10s ramp for the first five minutes",
+      "resourceCount: dirCacheKiB/dirCacheDirs/rssKiB/maxRssKiB"
+    ],
+    "unproven_suspect": "Rust-side full-snapshot churn in the frame pull path (per-cell String allocations, resident previous snapshot) — deliberately not modified this round; awaiting on-device attribution via the new fields"
+  },
+  "not_implemented_this_round": [
+    "single-drag SFTP->Explorer delivery (analysis complete: provider must register synchronously, FILECONTENTS stays lazy; left for next round)",
+    "image clipboard paste upload",
+    "settings history search/delete with tombstone sync semantics (CRDT design complete in round analysis)",
+    "per-candidate delete button (depends on the history tombstone API)"
+  ]
+}
