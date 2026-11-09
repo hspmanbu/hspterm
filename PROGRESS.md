@@ -1,5 +1,21 @@
 # HSPTerm 开发进度
 
+## 2026-11-09 第十二轮修复与优化（已构建：源码a849625，分支Windows CI运行中 run 42569313140）
+
+- 八项：Ctrl+定位缓存命中失败(P0)、跟随状态按主机持久化、通知四级免打扰、内存确定性修复+诊断增强、本地编辑15分钟空闲关闭+批量关闭、Explorer打开所在文件夹修复、明亮柔和默认配色+指纹迁移、弹窗屏幕边界约束；另有候选框默认不选中。**未实施（留待下轮）：SFTP一次拖放到Explorer、图片粘贴、设置中历史命令搜索/删除（含墓碑同步语义）、候选内删除按钮。**
+- #1 定位失败（根因与用户判断一致）：locateTerminalPath 固定 check(directoryEpoch+1)，而 loadDirectory 缓存命中分支直接 return 不增 epoch——首次定位成功、再次定位已缓存目录必抛 StateError。更深层：缓存命中导航不使在途读取的 isCurrent 失效，跟随/定位完成后可覆盖用户新导航。修复=新增 directoryPublishVersion（每次目录发布递增，含缓存命中）；缓存命中分支 ++directoryEpoch+清 pendingFileLocation/loadingDirectory/sftpError（导航代次统一）；定位检查改为"恰好发布一次且目录匹配才发布选择，并发导航静默放弃，零发布才报读取失败"。新测试 round12_locate_follow_test（缓存命中/重复/当前目录/并发不覆盖/shutdown报错，真实sshd）；terminal_path_bridge_test 的 stale 段改用未缓存目录构造（旧构造依赖"定位必走真实读取"的已废除语义）——该测试从11项预存失败中修复转通过。
+- #2 跟随持久化：setTerminalDirectoryFollow 经注入 store.save 只改 followOsc7（其余字段含凭据引用原样拷贝），临时连接仅本次、失败回滚 override 并上抛、成功清同主机全部会话 override（多标签一致）、重启经 _records 恢复。新测试：持久化/重启第二模型恢复/第二标签一致/关闭再保存。
+- #3 通知分级：AppNoticeLevel(info/success/warning/error)，仅 warning/error 弹 SnackBar（3s同文本去重、错误优先）；info/success 走全局 QuietNoticeView 状态栏静默通道（Flexible+ellipsis 防溢出）；40+ 调用点显式分级，操作被拒类（请先保存/剪贴板为空/输入法候选确认）升 warning；全局错误通道 OperationNotice 升 error。Windows 系统通知/终端通知设置未动；不吞异常不删日志。
+- #4 内存（分析+确定性修复+诊断，见 root_causes 报告归档于本条目）：(a) TerminalController.applyFrame 的 metadata 不再锚定整帧 changedRows（与 rows 双引用驻留），改存标量副本；(b) 编辑内容摘要 digestOf 移至后台 Isolate（16MiB≈1600万次迭代曾占 UI isolate，帧排队+心跳漂移同源）；(c) 流式下载逐块 await flush（Defender 扫描 %TEMP% 时 IOSink 可积压整文件）；(d) 编辑兜底轮询 800ms→5s。诊断增强：frameJank 拆 vsyncToBuildUs/buildUs/buildToRasterUs/rasterUs/totalUs 微秒段（>250ms 单帧明细+每分钟 frameAgg 聚合含 queueShare）；memorySample 加 maxRssKiB 且启动前5分钟10s加密采样；resourceCount 加 dirCacheKiB/dirCacheDirs/rssKiB/maxRssKiB。帧拉取链路 Rust 侧全量快照 churn（previous Snapshot+每格 String）为本轮分析最强嫌疑但未实证，未动核心（风险大），待新诊断字段实机归因后下轮处理。
+- #5 本地编辑：会话 _lastRealChange 仅真实内容变化/同步成功重置（mtime 空转不重置），15min 无修改自动关闭（下载/上传/冲突中豁免，检查粒度跟随超时）；dispose 等待在途上传（修流式读与文件清理竞态）、_setStatus 加 disposed 守卫（修迟到上传回调 notify 断言隐患）、closed 转移先于 disposed 标记；editIdleClosed 日志（空闲分钟数）。Registry 新增 closeAllActive（可重复、不永久关闭），队列本地编辑区头部"关闭所有本地编辑会话"按钮（无会话时不渲染该区、未同步修改先确认并说明草稿保留、上传中安全结束）。新测试：idle 超时关闭/上传中豁免（FakeGateway 加 holdUploads 门控）/closeAllActive 后可再注册。
+- #6 Explorer 打开所在文件夹：旧实现 explorer /select, 按退出码判失败——explorer 复用进程时退出码 1 是常态。新链路：runner prototype_window 通道新增 reveal 方法（SHParseDisplayName→父PIDL派生→SHOpenFolderAndSelectItems，选中与打开窗口不可能错位）；Dart 三级回退 reveal→explorer /select（忽略退出码）→打开父目录；本地文件/父目录先存在性检查（不存在报真实错误，不再误开程序目录）。
+- #7 配色：新默认"明亮柔和"表（fg/cursor 0xe6ebf4，蓝6db3ff 绿6fe08c 青4fd8d0 黄ffd54d 紫cf8bff 等16色全换，各色对深底≥4.3:1）；default_color 268 槽位修正为 dim(foreground)（与 preferences::color 旧不一致）；256色/dim公式/TrueColor/OSC 优先级链未动。持久化：colors 非 Option，"未自定义"唯一判定=记录不存在——新增载入时指纹迁移（保存值与旧默认逐项相等→返回新默认，不落盘；任何偏差保留），legacy_default_ansi/legacyDark 留档；设置页三预设：明亮柔和（默认）/经典深色（旧表）/浅色。测试：storage-sync 迁移（旧默认升级/自定义不动）+ term-core 45 全过。
+- #8 弹窗边界：runner ensureDialogVisible（MonitorFromWindow+GetMonitorInfo 工作区交集不足以容纳 480x400 时 SetWindowPos 平移窗口回工作区，尺寸不变）；Dart ensureDialogHostVisible（非 Windows/旧通道静默跳过）+showBoundedDialog（按视口约束 max 宽高）+confirm() 接入（长文 SingleChildScrollView、按钮保底可达）。多显示器/DPI/负坐标由原生工作区计算覆盖（待实机）。
+- #9 候选框默认不选中：selected=-1 语义，首次↓选第一条/↑选最后一条/后续循环；候选刷新恢复未选；无选择时 Enter/Tab 不被拦截（正常提交 Shell/Readline 补全）、Esc 关闭不改输入、鼠标点击不变。view.dart 拦截条件重构+新测试（未选 Enter 直传/首次方向键/恢复候选）。
+- 验证：Analyze 0；全套件 594过/10失败=预存集减1（terminal_path_bridge 修复；workbench_lifecycle5/sftp_properties/transfer_queue/explorer_files_panel/live_workbench/file_context_menu 均预存，stash 对照确认无新增）；新增 9 项测试全过（round12×2/dialog_bounds×2/app_notice quiet/idle/closeAll/迁移/跟随）。Rust fmt0/Clippy0/全量 test 0失败（term-core45+storage-sync221 含新迁移测试+ssh-core/openssh 全过）；posix_rename 真实sshd 2项过；GTK xvfb 冒烟 25s 零异常。无 FRB API 变更（legacy_default 不跨桥）。
+- Windows构建：dispatch run 42569313140（源码a849625）进行中，结果待记。
+- 待Win11实机：缓存命中/重复/当前目录 Ctrl+定位（应全部成功无"原会话已改变"）、跟随开关重启+多标签恢复、通知分级观感（普通操作只走状态栏）、编辑15分钟自动关闭与队列批量关闭、Explorer 打开所在文件夹（含中文/空格路径）、新配色 MOTD/ANSI 观感与经典深色回退、旧默认自动升级、窗口半出屏后弹确认框、候选框默认无高亮+Enter 直传、内存/帧新诊断字段（frameAgg queueShare 定位拥塞层）。
+
 ## 2026-11-08 第十一轮修复与性能优化（已构建：源码ee5b994，分支Windows CI成功）
 
 - 三项：重命名编辑器真单行+长名不换行、双击编辑保存覆盖确认机制重做、本地编辑P0内存流式化。
