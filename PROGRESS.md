@@ -13,7 +13,7 @@
 - #8 弹窗边界：runner ensureDialogVisible（MonitorFromWindow+GetMonitorInfo 工作区交集不足以容纳 480x400 时 SetWindowPos 平移窗口回工作区，尺寸不变）；Dart ensureDialogHostVisible（非 Windows/旧通道静默跳过）+showBoundedDialog（按视口约束 max 宽高）+confirm() 接入（长文 SingleChildScrollView、按钮保底可达）。多显示器/DPI/负坐标由原生工作区计算覆盖（待实机）。
 - #9 候选框默认不选中：selected=-1 语义，首次↓选第一条/↑选最后一条/后续循环；候选刷新恢复未选；无选择时 Enter/Tab 不被拦截（正常提交 Shell/Readline 补全）、Esc 关闭不改输入、鼠标点击不变。view.dart 拦截条件重构+新测试（未选 Enter 直传/首次方向键/恢复候选）。
 - 验证：Analyze 0；全套件 594过/10失败=预存集减1（terminal_path_bridge 修复；workbench_lifecycle5/sftp_properties/transfer_queue/explorer_files_panel/live_workbench/file_context_menu 均预存，stash 对照确认无新增）；新增 9 项测试全过（round12×2/dialog_bounds×2/app_notice quiet/idle/closeAll/迁移/跟随）。Rust fmt0/Clippy0/全量 test 0失败（term-core45+storage-sync221 含新迁移测试+ssh-core/openssh 全过）；posix_rename 真实sshd 2项过；GTK xvfb 冒烟 25s 零异常。无 FRB API 变更（legacy_default 不跨桥）。
-- Windows构建：dispatch run 42569313140（源码a849625）进行中，结果待记。
+- Windows构建：分支workflow_dispatch run 42569313140/job 全部成功。完整包：https://github.com/hspmanbu/hspterm/actions/runs/42569313140/artifacts/13653322838 （HSPTerm-windows-x64，40,256,258字节）。启动内存artifact 13652859788。
 - 待Win11实机：缓存命中/重复/当前目录 Ctrl+定位（应全部成功无"原会话已改变"）、跟随开关重启+多标签恢复、通知分级观感（普通操作只走状态栏）、编辑15分钟自动关闭与队列批量关闭、Explorer 打开所在文件夹（含中文/空格路径）、新配色 MOTD/ANSI 观感与经典深色回退、旧默认自动升级、窗口半出屏后弹确认框、候选框默认无高亮+Enter 直传、内存/帧新诊断字段（frameAgg queueShare 定位拥塞层）。
 
 ## 2026-11-08 第十一轮修复与性能优化（已构建：源码ee5b994，分支Windows CI成功）
