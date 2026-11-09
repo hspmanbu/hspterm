@@ -13,14 +13,37 @@ class TerminalSuggestionsOverlay extends StatefulWidget {
     required this.cursorColumn,
     required this.cursorRow,
     required this.choose,
+    required this.delete,
   });
   final TerminalSuggestionsController controller;
   final Size viewport, cell;
   final int cursorColumn, cursorRow;
   final void Function(int, String) choose;
+
+  /// Round-12: tombstone-delete the command at [index]; the ticket guards
+  /// staleness on the Rust side.
+  final void Function(int, String) delete;
   @override
   State<TerminalSuggestionsOverlay> createState() =>
       _TerminalSuggestionsOverlayState();
+}
+
+/// Always occupies a fixed slot so the row layout does not shift on hover.
+class _CandidateDeleteButton extends StatelessWidget {
+  const _CandidateDeleteButton({required this.onDelete});
+  final VoidCallback onDelete;
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 26,
+    height: 24,
+    child: IconButton(
+      tooltip: '删除该历史记录',
+      padding: EdgeInsets.zero,
+      iconSize: 16,
+      onPressed: onDelete,
+      icon: const Icon(Icons.delete_outline),
+    ),
+  );
 }
 
 class _TerminalSuggestionsOverlayState
@@ -137,17 +160,29 @@ class _TerminalSuggestionsOverlayState
                                 ? Theme.of(context).colorScheme.primary
                                       .withValues(alpha: .18)
                                 : null,
-                            child: Tooltip(
-                              message: choices[index],
-                              child: Text(
-                                choices[index],
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontFamily: 'monospace',
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Tooltip(
+                                    message: choices[index],
+                                    child: Text(
+                                      choices[index],
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontFamily: 'monospace',
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                // Round-12: hover-revealed delete; removing
+                                // the tombstoned command never selects or
+                                // executes the row.
+                                _CandidateDeleteButton(
+                                  onDelete: () => widget.delete(index, ticket),
+                                ),
+                              ],
                             ),
                           ),
                         ),

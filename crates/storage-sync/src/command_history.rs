@@ -34,6 +34,20 @@ pub enum HistoryError {
 type Result<T> = std::result::Result<T, HistoryError>;
 type Raw = Option<Zeroizing<Vec<u8>>>;
 
+/// One decrypted search row (round-12 settings page). Lives only inside the
+/// gateway response; never logged, never persisted outside the vault.
+#[derive(Clone)]
+pub struct CommandSearchHit {
+    pub host_id: String,
+    pub text: String,
+    pub used_counter: u64,
+}
+impl Drop for CommandSearchHit {
+    fn drop(&mut self) {
+        self.text.zeroize();
+    }
+}
+
 /// Logical order, never a wall-clock deadline. Clear operations advance an
 /// epoch. A stale device's entire older epoch is suppressed, including entries
 /// that the clearing device had not observed. Epoch tombstones do not expire.
@@ -69,11 +83,29 @@ impl Drop for Entry {
         self.text.zeroize();
     }
 }
+/// Round-12 single-command delete marker. A tombstone suppresses any entry
+/// with the same exact text whose `used` stamp is not newer than `at`,
+/// across merges, so a stale device cannot resurrect the command. A later
+/// real execution of the same text removes the tombstone and forms a fresh
+/// legal record.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Tombstone {
+    text: String,
+    at: Stamp,
+}
+impl Drop for Tombstone {
+    fn drop(&mut self) {
+        self.text.zeroize();
+    }
+}
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HostHistory {
     clear: Stamp,
     entries: Vec<Entry>,
+    #[serde(default)]
+    deleted: Vec<Tombstone>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -213,16 +245,35 @@ impl Document {
             if !crate::repository::valid_id(host, "host") || !h.clear.valid(self.clock) {
                 return Err(HistoryError::Format);
             }
-            if h.entries.len() > PER_HOST {
+            if h.entries.len() > PER_HOST || h.deleted.len() > PER_HOST {
                 return Err(HistoryError::Capacity);
             }
             let mut seen = std::collections::HashSet::new();
+            let mut deleted = std::collections::HashSet::new();
+            for t in &h.deleted {
+                if !eligible_text(&t.text)
+                    || !t.at.valid(self.clock)
+                    || t.at <= h.clear
+                    || t.at <= self.clear_all
+                    || !deleted.insert(t.text.as_str())
+                {
+                    return Err(HistoryError::Format);
+                }
+            }
             for e in &h.entries {
                 if !eligible_text(&e.text)
                     || !e.used.valid(self.clock)
                     || e.used <= h.clear
                     || e.used <= self.clear_all
                     || !seen.insert(e.text.as_str())
+                {
+                    return Err(HistoryError::Format);
+                }
+                // A tombstone always outranks its own older entry: if both
+                // survive here the merge invariant is broken.
+                if h.deleted
+                    .iter()
+                    .any(|t| t.text == e.text && t.at >= e.used)
                 {
                     return Err(HistoryError::Format);
                 }
@@ -253,6 +304,11 @@ impl Document {
         h.entries
             .sort_by(|a, b| b.used.cmp(&a.used).then_with(|| a.text.cmp(&b.text)));
         h.entries.truncate(PER_HOST);
+        // A clear epoch already suppresses everything older; its tombstones
+        // are redundant and can never exceed the bounded set below.
+        h.deleted.retain(|t| t.at > h.clear);
+        h.deleted.sort_by(|a, b| b.at.cmp(&a.at).then_with(|| a.text.cmp(&b.text)));
+        h.deleted.truncate(PER_HOST);
     }
     fn merged(a: &Self, b: &Self) -> Result<Self> {
         let mut result = Self {
@@ -283,10 +339,29 @@ impl Document {
                             h.entries.push(entry.clone());
                         }
                     }
+                    // Tombstones merge point-wise: the newer delete wins per
+                    // text. Commutative, associative and idempotent.
+                    for tombstone in &history.deleted {
+                        if let Some(old) =
+                            h.deleted.iter_mut().find(|t| t.text == tombstone.text)
+                        {
+                            old.at = old.at.clone().max(tombstone.at.clone());
+                        } else {
+                            h.deleted.push(tombstone.clone());
+                        }
+                    }
                 }
             }
         }
+        // Resolution: a tombstone suppresses its older entry, a genuinely
+        // newer re-execution (used > at) invalidates the tombstone instead.
         for h in result.hosts.values_mut() {
+            h.deleted.retain(|t| {
+                !h.entries.iter().any(|e| e.text == t.text && e.used > t.at)
+            });
+            h.entries.retain(|e| {
+                !h.deleted.iter().any(|t| t.text == e.text && t.at >= e.used)
+            });
             Self::compact(h);
         }
         // Capacity failure is explicit; never silently discard another host.
@@ -395,6 +470,14 @@ impl<'a> HistoryRepository<'a> {
         for text in &allowed {
             let used = document.tick(&actor)?;
             let h = document.hosts.entry(host.to_owned()).or_default();
+            // A real re-execution outranks a pending tombstone: drop it and
+            // the new entry becomes the fresh legal record.
+            h.deleted.retain(|t| {
+                if t.text == *text && used > t.at {
+                    return false;
+                }
+                true
+            });
             if let Some(entry) = h.entries.iter_mut().find(|e| e.text == *text) {
                 entry.used = used;
             } else {
@@ -427,6 +510,7 @@ impl<'a> HistoryRepository<'a> {
                 HostHistory {
                     clear: epoch,
                     entries: vec![],
+                    deleted: vec![],
                 },
             );
         } else {
@@ -438,6 +522,104 @@ impl<'a> HistoryRepository<'a> {
             &document,
             Some((old_writer.as_deref().map(Vec::as_slice), &actor)),
         )
+    }
+    /// Round-12 single/batch delete: writes per-text tombstones so older
+    /// synced payloads (or an offline device's pre-delete copy) can never
+    /// resurrect the command on merge. `host = None` deletes the command on
+    /// every host that currently stores it (the suggestion-box delete).
+    /// Returns the number of distinct accepted texts. Deleting unknown text
+    /// still writes the marker: a device that has not seen the delete yet
+    /// must not refill it.
+    pub fn delete_commands(&mut self, host: Option<&str>, texts: &[&str]) -> Result<usize> {
+        if texts.is_empty() || texts.len() > 32 {
+            return Err(HistoryError::Capacity);
+        }
+        let accepted: Vec<&str> = texts
+            .iter()
+            .copied()
+            .filter(|text| eligible_text(text))
+            .collect();
+        if accepted.is_empty() {
+            return Ok(0);
+        }
+        if let Some(id) = host {
+            self.host(id)?;
+        }
+        let (prior, mut document) = self.read()?;
+        let (old_writer, actor) = self.actor()?;
+        let targets: Vec<String> = match host {
+            Some(id) => vec![id.to_owned()],
+            None => document.hosts.keys().cloned().collect(),
+        };
+        let mut touched = false;
+        for text in &accepted {
+            let at = document.tick(&actor)?;
+            for id in &targets {
+                let h = document.hosts.entry(id.clone()).or_default();
+                // A newer live entry (user re-executed meanwhile) wins over
+                // the delete: skip writing a stale marker for it.
+                if let Some(entry) = h.entries.iter().find(|e| e.text == *text)
+                    && entry.used > at
+                {
+                    continue;
+                }
+                if let Some(existing) = h.deleted.iter_mut().find(|t| t.text == *text) {
+                    existing.at = existing.at.clone().max(at.clone());
+                } else {
+                    h.deleted.push(Tombstone {
+                        text: (*text).to_owned(),
+                        at: at.clone(),
+                    });
+                }
+                h.entries.retain(|e| !(e.text == *text && e.used <= at));
+                Document::compact(h);
+                touched = true;
+            }
+        }
+        if touched {
+            self.commit(
+                prior.as_deref().map(Vec::as_slice),
+                &document,
+                Some((old_writer.as_deref().map(Vec::as_slice), &actor)),
+            )?;
+        }
+        Ok(accepted.len())
+    }
+    /// One bounded decrypt on the worker: substring, case-insensitive, most
+    /// recently used first. Never exposes more than `limit` rows; paging is
+    /// the caller's job. Command text never enters diagnostics or errors.
+    pub fn search_commands(
+        &mut self,
+        query: &str,
+        host: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<CommandSearchHit>> {
+        if limit == 0 || limit > 200 {
+            return Err(HistoryError::Capacity);
+        }
+        let document = self.read()?.1;
+        if !document.enabled {
+            return Ok(Vec::new());
+        }
+        let needle = query.to_lowercase();
+        let mut hits: Vec<CommandSearchHit> = document
+            .hosts
+            .iter()
+            .filter(|(id, _)| host.is_none_or(|wanted| id.as_str() == wanted))
+            .flat_map(|(id, h)| {
+                h.entries
+                    .iter()
+                    .filter(|e| needle.is_empty() || e.text.to_lowercase().contains(&needle))
+                    .map(move |e| CommandSearchHit {
+                        host_id: id.clone(),
+                        text: e.text.clone(),
+                        used_counter: e.used.counter,
+                    })
+            })
+            .collect();
+        hits.sort_by(|a, b| b.used_counter.cmp(&a.used_counter).then_with(|| a.text.cmp(&b.text)));
+        hits.truncate(limit);
+        Ok(hits)
     }
     /// Load once per repository change on a worker. Matching a keystroke uses
     /// this bounded in-memory snapshot, never SQLite, crypto or networking.
@@ -607,6 +789,7 @@ mod tests {
             HostHistory {
                 clear,
                 entries: vec![],
+                deleted: vec![],
             },
         );
     }
@@ -990,5 +1173,113 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn tombstone_delete_survives_stale_merge_without_resurrection() {
+        let mut origin = Document::default();
+        add(&mut origin, HOST, "kubectl delete pod", A);
+        let stale = origin.clone();
+        // The deleting device removes the entry and writes the marker.
+        let mut deleted = origin.clone();
+        let at = deleted.tick(A).unwrap();
+        let h = deleted.hosts.get_mut(HOST).unwrap();
+        h.entries.retain(|e| e.text != "kubectl delete pod");
+        h.deleted.push(Tombstone {
+            text: "kubectl delete pod".into(),
+            at,
+        });
+        let merged_one = Document::merged(&deleted, &stale).unwrap();
+        assert!(
+            merged_one.hosts[HOST]
+                .entries
+                .iter()
+                .all(|e| e.text != "kubectl delete pod"),
+            "a stale pre-delete payload must not resurrect the command"
+        );
+        assert!(
+            merged_one.hosts[HOST]
+                .deleted
+                .iter()
+                .any(|t| t.text == "kubectl delete pod"),
+            "the marker must survive for other stale devices"
+        );
+        // Commutative: either merge order yields the identical document.
+        let merged_two = Document::merged(&stale, &deleted).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&merged_one).unwrap(),
+            serde_json::to_vec(&merged_two).unwrap()
+        );
+        // Idempotent.
+        let again = Document::merged(&merged_one, &merged_two).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&merged_one).unwrap(),
+            serde_json::to_vec(&again).unwrap()
+        );
+        merged_one.validate().unwrap();
+    }
+
+    #[test]
+    fn genuinely_newer_execution_invalidates_the_tombstone() {
+        // Device A deleted the command (marker at=T2). A device whose clock
+        // already knows T2 re-executes it (used=T3 > T2): the fresh legal
+        // record must survive and the stale marker retires. (An offline
+        // device whose clock predates the delete is suppressed, consistent
+        // with the clear-epoch semantics.)
+        let mut deleter = Document::default();
+        add(&mut deleter, HOST, "echo again", A);
+        let at = deleter.tick(A).unwrap();
+        let h = deleter.hosts.get_mut(HOST).unwrap();
+        h.entries.retain(|e| e.text != "echo again");
+        h.deleted.push(Tombstone {
+            text: "echo again".into(),
+            at,
+        });
+        let mut reexecutor = deleter.clone();
+        add(&mut reexecutor, HOST, "echo again", B);
+        let merged = Document::merged(&deleter, &reexecutor).unwrap();
+        assert!(
+            merged.hosts[HOST]
+                .entries
+                .iter()
+                .any(|e| e.text == "echo again"),
+            "a genuinely newer execution is a fresh legal record"
+        );
+        assert!(
+            !merged.hosts[HOST]
+                .deleted
+                .iter()
+                .any(|t| t.text == "echo again"),
+            "the stale marker must be retired by the newer execution"
+        );
+        merged.validate().unwrap();
+    }
+
+    #[test]
+    fn clear_epoch_still_suppresses_and_prunes_redundant_markers() {
+        let mut local = Document::default();
+        add(&mut local, HOST, "echo kept", A);
+        let at = local.tick(A).unwrap();
+        let h = local.hosts.get_mut(HOST).unwrap();
+        h.deleted.push(Tombstone {
+            text: "echo kept".into(),
+            at,
+        });
+        let clear = local.tick(A).unwrap();
+        local.hosts.insert(
+            HOST.into(),
+            HostHistory {
+                clear,
+                entries: vec![],
+                deleted: vec![],
+            },
+        );
+        let view = local.hosts.get_mut(HOST).unwrap();
+        Document::compact(view);
+        assert!(
+            view.deleted.is_empty(),
+            "a clear epoch subsumes older per-text markers"
+        );
+        local.validate().unwrap();
     }
 }

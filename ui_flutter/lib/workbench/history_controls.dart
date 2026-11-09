@@ -13,6 +13,11 @@ abstract interface class HistoryControlsGateway {
   Future<HistoryControls> load();
   Future<HistoryControls> setEnabled(HistoryControls source, bool value);
   Future<HistoryControls> clear(HistoryControls source, String? hostId);
+  Future<List<rust.CommandSearchRow>> searchCommands(
+    String query,
+    String? hostId,
+  );
+  Future<int> deleteCommands(List<String> texts, String? hostId);
 }
 
 class NativeHistoryControlsGateway implements HistoryControlsGateway {
@@ -26,6 +31,14 @@ class NativeHistoryControlsGateway implements HistoryControlsGateway {
   @override
   Future<HistoryControls> clear(HistoryControls source, String? hostId) =>
       model.updateCommandHistory(source, clearHostId: hostId);
+  @override
+  Future<List<rust.CommandSearchRow>> searchCommands(
+    String query,
+    String? hostId,
+  ) => rust.searchCommandHistory(query: query, hostId: hostId, limit: 100);
+  @override
+  Future<int> deleteCommands(List<String> texts, String? hostId) =>
+      rust.deleteCommandHistory(texts: texts, hostId: hostId);
 }
 
 /// Metadata only: command contents are never requested or shown here.
@@ -41,6 +54,17 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
   bool _enabled = true, _busy = false, _committing = false;
   String? _error, _status;
   final _search = TextEditingController();
+
+  // Round-12 saved-command manager: decrypted plaintext exists only while
+  // this panel is open; controllers/results are disposed with it.
+  final _commandSearch = TextEditingController();
+  String? _commandHostFilter;
+  Timer? _commandDebounce;
+  List<rust.CommandSearchRow> _commandResults = const [];
+  final _commandSelected = <String>{};
+  bool _commandLoading = false;
+  int _commandEpoch = 0;
+
   @override
   void initState() {
     super.initState();
@@ -49,6 +73,8 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
 
   @override
   void dispose() {
+    _commandDebounce?.cancel();
+    _commandSearch.dispose();
     _search.dispose();
     super.dispose();
   }
@@ -164,6 +190,56 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
     }
   }
 
+  Future<void> _searchCommands() async {
+    final epoch = ++_commandEpoch;
+    setState(() => _commandLoading = true);
+    try {
+      final results = await widget.gateway.searchCommands(
+        _commandSearch.text,
+        _commandHostFilter,
+      );
+      if (mounted && epoch == _commandEpoch) {
+        setState(() {
+          _commandResults = results;
+          _commandSelected.removeWhere(
+            (text) => !results.any((row) => row.text == text),
+          );
+        });
+      }
+    } catch (_) {
+      // Public summary only; the query and results never reach the log.
+      if (mounted && epoch == _commandEpoch) {
+        setState(() => _commandResults = const []);
+      }
+    } finally {
+      if (mounted && epoch == _commandEpoch) {
+        setState(() => _commandLoading = false);
+      }
+    }
+  }
+
+  Future<void> _deleteCommands(List<String> texts) async {
+    if (texts.isEmpty || _busy) return;
+    setState(() => _busy = true);
+    try {
+      final deleted = await widget.gateway.deleteCommands(
+        texts,
+        _commandHostFilter,
+      );
+      if (mounted) {
+        setState(() {
+          _status = '已删除 $deleted 条并加密保存删除标记；其他设备的旧同步记录也不会复活。';
+        });
+      }
+      await _searchCommands();
+      await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = '删除未完成：$error。记录仍保留，请重试。');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final source = _view;
@@ -273,6 +349,134 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
             ),
           ),
         ],
+        const Divider(height: 32),
+        const Text('管理已保存命令'),
+        const SizedBox(height: 8),
+        const Text(
+          '搜索并删除具体命令记录。删除会写入防复活标记：其他设备的旧同步数据不会把命令带回来；重新执行同一命令会形成新的正常记录。命令正文仅在本页打开时解密读取，不写入日志。',
+          style: TextStyle(fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        SettingsField(
+          child: TextField(
+            key: const ValueKey('history-command-search'),
+            controller: _commandSearch,
+            enabled: !_busy,
+            onChanged: (_) {
+              _commandDebounce?.cancel();
+              _commandDebounce = Timer(
+                const Duration(milliseconds: 300),
+                () => _searchCommands(),
+              );
+            },
+            decoration: const InputDecoration(
+              labelText: '搜索命令正文（全部主机，不区分大小写）',
+              prefixIcon: Icon(Icons.manage_search, size: 18),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            DropdownButton<String?>(
+              key: const ValueKey('history-command-host-filter'),
+              value: _commandHostFilter,
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('全部主机'),
+                ),
+                ...?source?.hosts.map(
+                  (h) => DropdownMenuItem<String?>(
+                    value: h.id,
+                    child: Text(h.name),
+                  ),
+                ),
+              ],
+              onChanged: _busy
+                  ? null
+                  : (value) {
+                      setState(() => _commandHostFilter = value);
+                      _searchCommands();
+                    },
+            ),
+            if (_commandLoading)
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            TextButton(
+              key: const ValueKey('history-command-search-run'),
+              onPressed: _busy ? null : _searchCommands,
+              child: const Text('搜索'),
+            ),
+            FilledButton.tonal(
+              key: const ValueKey('history-command-delete-selected'),
+              onPressed: _busy || _commandSelected.isEmpty
+                  ? null
+                  : () => _deleteCommands(_commandSelected.toList()),
+              child: Text('删除所选（${_commandSelected.length}）'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (_commandResults.isEmpty)
+          const Text(
+            '输入关键词后搜索；无结果显示为空。',
+            key: ValueKey('history-command-empty'),
+            style: TextStyle(fontSize: 12),
+          )
+        else
+          SizedBox(
+            height: 240,
+            child: ListView.builder(
+              key: const ValueKey('history-command-results'),
+              itemCount: _commandResults.length,
+              itemBuilder: (_, i) {
+                final row = _commandResults[i];
+                final hostName =
+                    source?.hosts
+                        .where((h) => h.id == row.hostId)
+                        .firstOrNull
+                        ?.name ??
+                    row.hostId;
+                return CheckboxListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  key: ValueKey('history-command-row-$i'),
+                  value: _commandSelected.contains(row.text),
+                  onChanged: _busy
+                      ? null
+                      : (checked) => setState(() {
+                          if (checked == true) {
+                            _commandSelected.add(row.text);
+                          } else {
+                            _commandSelected.remove(row.text);
+                          }
+                        }),
+                  title: Text(
+                    row.text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                    ),
+                  ),
+                  subtitle: Text('$hostName · 使用序号 ${row.usedCounter}'),
+                  secondary: IconButton(
+                    tooltip: '删除该命令记录',
+                    onPressed: _busy ? null : () => _deleteCommands([row.text]),
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                  ),
+                );
+              },
+            ),
+          ),
       ],
     ).guardSettings(
       confirmed: () => _view != null && _error == null,

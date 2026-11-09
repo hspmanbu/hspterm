@@ -19,6 +19,13 @@ class SuggestionsBackend extends FakeBackend
   int queries = 0;
   final observedTexts = <List<String>>[];
   final selected = <(int, int, String, int, bool)>[];
+  final deleted = <(int, String, int)>[];
+  @override
+  Future<bool> deleteSuggestion(int id, String ticket, int index) async {
+    deleted.add((id, ticket, index));
+    return true;
+  }
+
   @override
   Future<rust.TerminalSuggestions?> suggestions(int id, int generation) async {
     queries++;

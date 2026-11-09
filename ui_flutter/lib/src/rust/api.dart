@@ -29,7 +29,7 @@ import 'transfers/export_cleanup.dart';
 
 // These functions are ignored because they are not marked as `pub`: `agent_connected`, `agent_scope`, `allowed_integration`, `apply_entry_preferences`, `bind_display`, `check_directory_session`, `check_file_generation`, `close_terminal_owned`, `configuration_restored`, `configuration_synchronized`, `connect_terminal_inner`, `connect_terminal_run`, `credential`, `display_sources`, `ensure_command_source`, `entry`, `event`, `history_version`, `integrated_result`, `integration_guard`, `integration_status`, `invalidate_backup_agents`, `invalidate_synchronized_agents`, `key_credential`, `migrate_legacy_profiles`, `modifiers`, `next_id`, `parse_account_lines`, `persist_key_file`, `property_children`, `publish_terminal_preferences`, `record_integration_commands`, `record`, `remember_host_key`, `remote_sftp`, `replace_display`, `retire_suggestions_for`, `retire_suggestions`, `sessions`, `suggestion_context`, `terminal_path_context_revision`, `terminal_path_context`, `tmux_event`, `transfer_connection`, `trust_id`, `unlock_vault_inner`, `validate_remote_path`, `vault`, `with_vault`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DirSizeJob`, `Entry`, `SavedProfile`, `SuggestionProposal`, `SuggestionsCache`, `TerminalCloseState`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `from`, `from`, `from`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`, `default`
 
 Future<void> unlockVault({required String path, required String password}) =>
@@ -1554,6 +1554,42 @@ Future<HistoryControls> clearCommandHistory({
   hostId: hostId,
 );
 
+Future<List<CommandSearchRow>> searchCommandHistory({
+  required String query,
+  String? hostId,
+  required int limit,
+}) => RustLib.instance.api.crateApiSearchCommandHistory(
+  query: query,
+  hostId: hostId,
+  limit: limit,
+);
+
+/// Tombstoned single/batch delete. `host_id = None` deletes the texts on
+/// every host that stores them. The revision of the history document is
+/// consumed inside the atomic commit; stale callers get a public summary.
+Future<int> deleteCommandHistory({
+  required List<String> texts,
+  String? hostId,
+}) => RustLib.instance.api.crateApiDeleteCommandHistory(
+  texts: texts,
+  hostId: hostId,
+);
+
+/// Round-12 candidate delete: resolves the exact text from the live ticket
+/// (never trusts Dart-side strings), tombstone-deletes it on every host so
+/// a synced stale copy cannot resurrect it, and retires every session's
+/// candidate cache. Returns 1 when a command was deleted, 0 for an expired
+/// ticket/index or nothing to delete.
+Future<int> deleteTerminalSuggestion({
+  required int id,
+  required String ticket,
+  required int index,
+}) => RustLib.instance.api.crateApiDeleteTerminalSuggestion(
+  id: id,
+  ticket: ticket,
+  index: index,
+);
+
 Future<PaletteShortcutView> commandPaletteShortcut() =>
     RustLib.instance.api.crateApiCommandPaletteShortcut();
 
@@ -2041,6 +2077,32 @@ class BridgeEvent {
           text == other.text &&
           detail == other.detail &&
           rttMicros == other.rttMicros;
+}
+
+/// One decrypted search row for the settings history manager. The command
+/// text crosses the bridge only inside this response and is never logged.
+class CommandSearchRow {
+  final String hostId;
+  final String text;
+  final int usedCounter;
+
+  const CommandSearchRow({
+    required this.hostId,
+    required this.text,
+    required this.usedCounter,
+  });
+
+  @override
+  int get hashCode => hostId.hashCode ^ text.hashCode ^ usedCounter.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CommandSearchRow &&
+          runtimeType == other.runtimeType &&
+          hostId == other.hostId &&
+          text == other.text &&
+          usedCounter == other.usedCounter;
 }
 
 /// One bounded chunk of a progressively reported directory-size walk. Totals

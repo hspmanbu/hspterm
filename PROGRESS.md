@@ -1,5 +1,14 @@
 # HSPTerm 开发进度
 
+## 2026-11-09 第十二轮第二批（源码待记，分支Windows CI待dispatch；上批a849625已成功run42569313140）
+
+- 四项：Rust帧链路快照churn修复(P0内存)、历史命令管理（设置页搜索/单条与批量删除+同步墓碑语义）、候选框内删除历史按钮、任务七拖放与任务九图片粘贴**仍未实施**（分析方案已归档，下轮继续）。
+- #1 帧链路(P0)：term-core 新增 FrameFingerprint（借用活网格逐行FNV+content/cursor分离标量哈希，零String物化）与 FrameProbe；ssh-core 新增 frame_if_changed——指纹相同返回 None 不再克隆全屏 Snapshot（旧路径每次 take 全屏克隆且 previous 常驻一份）；frb-bridge previous 改为 KB 级指纹缓存，delta 行过滤改指纹比较，None 快速路径消费 revision 使拉取循环静默。**过程中引入并修复一个死锁**：take_frame 持 previous 锁跨 frame_if_changed 的 terminal 锁形成嵌套，与 terminal-first 路径成环——改为克隆 1KiB 指纹后立即释放 previous 锁（两段短临界区，无嵌套）。验证：native_bridge 20次SSH生命周期循环 RSS 仅增287KB（死锁复现用例转通过）；frb-bridge 串行77全过（含 osc8/行过滤回归）；term-core46/ssh-core80 全过；Flutter 桥接/历史/候选/定位 18 项全过。光标样式变化走 cursor 哈希不触发全帧（修复开发中发现的误判）。
+- #2 历史管理：command_history v1 文档向后兼容扩展 HostHistory.deleted（per-text 墓碑 Tombstone{text,at}）；合并点态 max+裁决（墓碑抑制 used<=at 的 entry，更新执行作废墓碑），交换/结合/幂等（编码字节相等测试）；validate 防墓碑与旧 entry 共存；compact 剪枝 at<=clear + PER_HOST 上限；record 重执行移除被覆盖墓碑。新API：delete_commands(host:Option,None=全局)、search_commands（解密worker内小写包含匹配、used降序、限200、Zeroize）。FRB：searchCommandHistory/deleteCommandHistory/deleteTerminalSuggestion（按活ticket反查文本，不信任Dart侧字符串）/CommandSearchRow，正规codegen。设置页"管理已保存命令"：防抖搜索、主机筛选、单条/勾选批量删除、正文仅面板打开时解密、dispose 清理、关键词不入日志。删除后 retire_suggestions_for 使所有终端候选立即刷新。
+- #3 候选内删除：overlay 行尾删除按钮（固定槽位防布局跳动）→ controller.deleteCandidate（ticket+index 活校验）→ Rust 墓碑删除 → 候选立即刷新；删除不触发选择/执行，shell 输入不受影响。
+- 验证：Analyze 0；Flutter 全套件 594/10=预存集无新增；Rust fmt/clippy 干净、frb-bridge 串行77、term-core46、storage-sync 命令历史16（含3墓碑测试）、ssh-core+openssh 全过；GTK xvfb 冒烟过；native_bridge 20循环 RSS delta 287KB。教训已入技能：FRB 重生成后必须重建 debug lib 再跑测试（content-hash）；stash/pop 循环同样使 lib 过期；全局单例状态跨同文件测试残留。
+- 待Win11实机：帧链路内存对比（同场景 RSS 曲线）、历史搜索/删除/防复活、候选删除按钮观感、（上批清单继续有效）。
+
 ## 2026-11-09 第十二轮修复与优化（已构建：源码a849625，分支Windows CI运行中 run 42569313140）
 
 - 八项：Ctrl+定位缓存命中失败(P0)、跟随状态按主机持久化、通知四级免打扰、内存确定性修复+诊断增强、本地编辑15分钟空闲关闭+批量关闭、Explorer打开所在文件夹修复、明亮柔和默认配色+指纹迁移、弹窗屏幕边界约束；另有候选框默认不选中。**未实施（留待下轮）：SFTP一次拖放到Explorer、图片粘贴、设置中历史命令搜索/删除（含墓碑同步语义）、候选内删除按钮。**

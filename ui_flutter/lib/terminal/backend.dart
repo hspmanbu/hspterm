@@ -99,6 +99,10 @@ abstract interface class TerminalSuggestionsBackend {
     int index,
     bool execute,
   );
+
+  /// Round-12 candidate delete: tombstones the command behind the live
+  /// ticket/index on every host; stale tickets resolve to false.
+  Future<bool> deleteSuggestion(int id, String ticket, int index);
 }
 
 abstract interface class TerminalCommandsBackend {
@@ -145,6 +149,14 @@ class NativeTerminalBackend
     index: index,
     execute: execute,
   );
+  @override
+  Future<bool> deleteSuggestion(int id, String ticket, int index) async =>
+      await rust.deleteTerminalSuggestion(
+        id: id,
+        ticket: ticket,
+        index: index,
+      ) !=
+      0;
   const NativeTerminalBackend();
   @override
   Future<String?> reconnectNotice(int id) =>

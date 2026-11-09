@@ -844,6 +844,162 @@ impl Terminal {
     pub fn history_stats(&self) -> HistoryStats {
         self.history.stats(self.term.grid())
     }
+}
+
+/// Cheap whole-frame probe (round-12): per-visible-row and scalar hashes
+/// computed by borrowing the live grid. Never materializes Strings, so a
+/// take that finds nothing visible changed costs one 8-byte word per row
+/// instead of a full-screen `Snapshot` clone. The bridge keeps only this
+/// struct between frames instead of a resident snapshot copy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrameFingerprint {
+    pub revision: u64,
+    /// Everything a mismatch republishes as a full frame: size, palette,
+    /// modes, alt screen, theosc52/right-click/copy-on-selection switches.
+    pub content: u64,
+    /// Cursor geometry/style: changes must be delivered (the frame carries
+    /// them as scalars) but never force a full-frame republication.
+    pub cursor: u64,
+    pub rows: Vec<u64>,
+}
+
+/// Probe result: the fingerprint to keep for the next call plus the
+/// materialized snapshot when anything visible changed. `snapshot: None`
+/// means the delivered frame is still current and only the revision needed
+/// consuming.
+#[derive(Clone)]
+pub struct FrameProbe {
+    pub fingerprint: FrameFingerprint,
+    pub snapshot: Option<Snapshot>,
+}
+
+fn fnv(state: &mut u64, word: u64) {
+    *state = (*state ^ word).wrapping_mul(0x100000001b3);
+}
+
+fn mix_color(state: &mut u64, color: Color) {
+    match color {
+        Color::Named(v) => {
+            fnv(state, 1);
+            fnv(state, u64::from(v as u16));
+        }
+        Color::Indexed(v) => {
+            fnv(state, 2);
+            fnv(state, u64::from(v));
+        }
+        Color::Spec(v) => {
+            fnv(state, 3);
+            fnv(
+                state,
+                u64::from(v.r) << 16 | u64::from(v.g) << 8 | u64::from(v.b),
+            );
+        }
+    }
+}
+
+impl Terminal {
+    pub fn frame_fingerprint(&self) -> FrameFingerprint {
+        let grid = self.term.grid();
+        let offset = grid.display_offset();
+        let mut content: u64 = 0xcbf29ce484222325;
+        let mut cursor: u64 = 0xcbf29ce484222325;
+        fnv(&mut content, self.size.columns() as u64);
+        fnv(&mut content, self.size.screen_lines() as u64);
+        fnv(&mut content, offset as u64);
+        fnv(&mut cursor, u64::from(grid.cursor.point.column.0 as u16));
+        fnv(
+            &mut cursor,
+            u64::from(grid.cursor.point.line.0 as i16 as u16),
+        );
+        fnv(
+            &mut cursor,
+            u64::from(self.term.mode().contains(TermMode::SHOW_CURSOR) as u8),
+        );
+        fnv(
+            &mut cursor,
+            match self.term.cursor_style().shape {
+                alacritty_terminal::vte::ansi::CursorShape::Block => 0,
+                alacritty_terminal::vte::ansi::CursorShape::Underline => 1,
+                alacritty_terminal::vte::ansi::CursorShape::Beam => 2,
+                alacritty_terminal::vte::ansi::CursorShape::HollowBlock => 3,
+                alacritty_terminal::vte::ansi::CursorShape::Hidden => 4,
+            },
+        );
+        fnv(
+            &mut cursor,
+            u64::from(self.term.cursor_style().blinking as u8),
+        );
+        fnv(
+            &mut content,
+            u64::from(self.events.0.lock().osc52_enabled as u8),
+        );
+        fnv(&mut content, u64::from(self.right_click_paste as u8));
+        fnv(&mut content, u64::from(self.copy_on_selection as u8));
+        fnv(
+            &mut content,
+            u64::from(self.term.mode().intersects(TermMode::MOUSE_MODE) as u8),
+        );
+        fnv(
+            &mut content,
+            u64::from(self.term.mode().contains(TermMode::ALT_SCREEN) as u8),
+        );
+        fnv(&mut content, grid.history_size() as u64);
+        fnv(&mut content, self.output_lines);
+        fnv(&mut content, u64::from(self.size_locked as u8));
+        for index in 0..269usize {
+            match self.term.colors()[index]
+                .map(|v| [v.r, v.g, v.b])
+                .or_else(|| {
+                    self.user_colors
+                        .as_ref()
+                        .and_then(|c| c.color(index))
+                        .map(|c| [(c >> 16) as u8, (c >> 8) as u8, c as u8])
+                }) {
+                Some([r, g, b]) => {
+                    fnv(&mut content, 1);
+                    fnv(
+                        &mut content,
+                        u64::from(r) << 16 | u64::from(g) << 8 | u64::from(b),
+                    );
+                }
+                None => fnv(&mut content, 0),
+            }
+        }
+        let mut rows = Vec::with_capacity(self.size.screen_lines());
+        for row in 0..self.size.screen_lines() {
+            let mut state: u64 = 0xcbf29ce484222325;
+            for column in 0..self.size.columns() {
+                let cell = &grid[Point::new(Line(row as i32 - offset as i32), Column(column))];
+                fnv(&mut state, u64::from(cell.c as u32));
+                if let Some(extra) = cell.zerowidth() {
+                    fnv(&mut state, 0x7a_77 << 48);
+                    for ch in extra {
+                        fnv(&mut state, u64::from(*ch as u32));
+                    }
+                }
+                mix_color(&mut state, cell.fg);
+                mix_color(&mut state, cell.bg);
+                fnv(&mut state, u64::from(cell.flags.bits()));
+                if let Some(link) = cell.hyperlink() {
+                    fnv(&mut state, 0x18 << 56);
+                    for byte in link.id().as_bytes() {
+                        fnv(&mut state, u64::from(*byte));
+                    }
+                    fnv(&mut state, 0x1d << 56);
+                    for byte in link.uri().as_bytes() {
+                        fnv(&mut state, u64::from(*byte));
+                    }
+                }
+            }
+            rows.push(state);
+        }
+        FrameFingerprint {
+            revision: self.revision,
+            content,
+            cursor,
+            rows,
+        }
+    }
     pub fn try_snapshot(&self) -> Result<Snapshot, TerminalError> {
         self.history.check()?;
         let snapshot = self.snapshot();
@@ -1136,5 +1292,36 @@ mod tests {
         assert!(t.content_revision() > revision);
         t.feed(b"\x1b[?2026h-end\x1b[?2026l").unwrap();
         assert!(t.snapshot().text().contains("batched-end"));
+    }
+
+    #[test]
+    fn frame_fingerprint_is_stable_and_sensitive() {
+        let mut t = term();
+        let a = t.frame_fingerprint();
+        let b = t.frame_fingerprint();
+        assert_eq!(a, b, "same state must produce the same fingerprint");
+        t.feed(b"hello").unwrap();
+        let c = t.frame_fingerprint();
+        assert_ne!(a.rows, c.rows, "new output must change the row hash");
+        // Only the touched row differs; the untouched rows keep their hash.
+        assert_eq!(a.rows.len(), c.rows.len());
+        let differing = a.rows.iter().zip(&c.rows).filter(|(x, y)| x != y).count();
+        assert!(
+            (1..=2).contains(&differing),
+            "a 5-byte feed touches few rows"
+        );
+        // Colors change the row hash without changing the text.
+        let before = t.frame_fingerprint();
+        t.feed(b"\x1b[31mX\x1b[0m").unwrap();
+        assert_ne!(before.rows, t.frame_fingerprint().rows);
+        // Palette entries are part of the scalar hash.
+        let base = t.frame_fingerprint();
+        t.feed(b"\x1b]4;1;rgb:11/22/33\x1b\\").unwrap();
+        assert_ne!(base.content, t.frame_fingerprint().content);
+        // Hyperlinks change the row hash even with identical text.
+        let plain = t.frame_fingerprint();
+        t.feed(b"\r\x1b]8;;https://x.invalid\x1b\\same\x1b]8;;\x1b\\")
+            .unwrap();
+        assert_ne!(plain.rows, t.frame_fingerprint().rows);
     }
 }

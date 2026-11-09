@@ -92,6 +92,7 @@ pub fn apply(vault: &mut Vault, scope: &str, expected: &str, action: Action) -> 
                 HostHistory {
                     clear: stamp,
                     entries: vec![],
+                    deleted: vec![],
                 },
             );
         }

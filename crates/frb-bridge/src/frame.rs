@@ -1,6 +1,6 @@
 use crate::api::{RenderCell, RenderFrame, RenderHyperlink, RenderRow};
 pub(crate) use hspterm_term_core::default_color as base_color;
-use hspterm_term_core::{Cell, CellColor, Snapshot};
+use hspterm_term_core::{Cell, CellColor, FrameFingerprint, Snapshot};
 
 mod hyperlinks;
 
@@ -19,21 +19,23 @@ fn color(snapshot: &Snapshot, color: &CellColor) -> u32 {
         }
     }
 }
-pub(crate) fn delta(previous: Option<&Snapshot>, snapshot: &Snapshot) -> RenderFrame {
-    let full = previous.is_none_or(|p| {
-        p.size != snapshot.size
-            || p.palette != snapshot.palette
-            || p.alternate_screen != snapshot.alternate_screen
-    });
+pub(crate) fn delta(
+    previous: Option<&FrameFingerprint>,
+    snapshot: &Snapshot,
+    current: &FrameFingerprint,
+) -> RenderFrame {
+    // Row filtering compares the grid-borrowed fingerprints; a scalar
+    // mismatch (size/palette/cursor/mode...) or a different row count
+    // republishes everything, matching the previous full-snapshot semantics.
+    let full =
+        previous.is_none_or(|p| p.content != current.content || p.rows.len() != current.rows.len());
     let columns = usize::from(snapshot.size.columns);
     let mut link_budget = hyperlinks::Budget::default();
     let changed_rows = snapshot
         .cells
         .chunks(columns)
         .enumerate()
-        .filter(|(i, row)| {
-            full || previous.is_none_or(|p| p.cells[*i * columns..(*i + 1) * columns] != **row)
-        })
+        .filter(|(i, _row)| full || previous.is_none_or(|p| p.rows[*i] != current.rows[*i]))
         .map(|(i, row)| RenderRow {
             index: i as u16,
             hyperlinks: Some(hyperlinks::spans(row, &mut link_budget)),
@@ -98,7 +100,8 @@ mod tests {
         t.feed(b"\x1b]8;id=x;https://example.invalid/a\x1b\\same\x1b]8;;\x1b\\")
             .unwrap();
         let first = t.snapshot();
-        let links = delta(None, &first).changed_rows[0]
+        let first_fp = t.frame_fingerprint();
+        let links = delta(None, &first, &first_fp).changed_rows[0]
             .hyperlinks
             .clone()
             .unwrap();
@@ -107,7 +110,8 @@ mod tests {
         t.feed(b"\r\x1b]8;id=x;https://example.invalid/b\x1b\\same\x1b]8;;\x1b\\")
             .unwrap();
         let next = t.snapshot();
-        let patch = delta(Some(&first), &next);
+        let next_fp = t.frame_fingerprint();
+        let patch = delta(Some(&first_fp), &next, &next_fp);
         assert_eq!(patch.changed_rows.len(), 1);
         assert_eq!(
             patch.changed_rows[0].hyperlinks.as_ref().unwrap()[0]
@@ -115,10 +119,14 @@ mod tests {
                 .as_deref(),
             Some("https://example.invalid/b")
         );
-        assert!(delta(Some(&next), &next).changed_rows.is_empty());
+        assert!(
+            delta(Some(&next_fp), &next, &next_fp)
+                .changed_rows
+                .is_empty()
+        );
         t.feed(b"\rsame").unwrap();
         assert!(
-            delta(Some(&next), &t.snapshot()).changed_rows[0]
+            delta(Some(&next_fp), &t.snapshot(), &t.frame_fingerprint()).changed_rows[0]
                 .hyperlinks
                 .as_ref()
                 .unwrap()
@@ -129,16 +137,22 @@ mod tests {
     fn changes_only_changed_rows_and_resolves_palette_and_cursor() {
         let mut t = Terminal::new(Size::new(20, 4).unwrap(), 10).unwrap();
         let first = t.snapshot();
-        assert!(delta(None, &first).full);
+        let first_fp = t.frame_fingerprint();
+        assert!(delta(None, &first, &first_fp).full);
         t.feed(b"\x1b[2;1H\x1b[38;5;196mred\x1b[6 q").unwrap();
         let next = t.snapshot();
-        let patch = delta(Some(&first), &next);
+        let next_fp = t.frame_fingerprint();
+        let patch = delta(Some(&first_fp), &next, &next_fp);
         assert!(!patch.full);
         assert_eq!(patch.changed_rows.len(), 1);
         assert_eq!(patch.changed_rows[0].index, 1);
         assert_eq!(patch.changed_rows[0].cells[0].foreground, 0xffff0000);
         assert_eq!(patch.cursor_shape, 2);
         assert!(!patch.cursor_blink);
-        assert!(delta(Some(&next), &next).changed_rows.is_empty());
+        assert!(
+            delta(Some(&next_fp), &next, &next_fp)
+                .changed_rows
+                .is_empty()
+        );
     }
 }

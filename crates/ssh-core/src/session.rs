@@ -1,7 +1,7 @@
 //! One independently owned pane/session, with explicit connection generations.
 use crate::{Authentication, ConnectConfig, HostKeyPolicy, PtyEvent, SshConnection, SshError};
 use alacritty_terminal::event::Event;
-use hspterm_term_core::{KeyEvent, MouseEvent, PastePlan, Size, Snapshot, Terminal};
+use hspterm_term_core::{FrameProbe, KeyEvent, MouseEvent, PastePlan, Size, Snapshot, Terminal};
 use parking_lot::Mutex;
 use std::{sync::Arc, time::Instant};
 use tokio::{
@@ -430,6 +430,30 @@ impl ManagedSession {
         } else {
             Ok(Some(terminal.try_snapshot()?))
         }
+    }
+    /// Round-12 frame path: probe the live grid by fingerprint first. When
+    /// nothing visible changed since the delivered frame this returns only
+    /// the fingerprint (no whole-screen snapshot materialized); otherwise
+    /// the caller receives the snapshot together with the fingerprint it
+    /// must keep for the next call. `previous` must be the fingerprint
+    /// returned last time. The caller always consumes `fingerprint.revision`
+    /// as its delivered revision so the pull loop goes quiet.
+    pub fn frame_if_changed(
+        &self,
+        previous: Option<&hspterm_term_core::FrameFingerprint>,
+    ) -> Result<FrameProbe, SshError> {
+        let terminal = self.terminal.lock();
+        let fingerprint = terminal.frame_fingerprint();
+        if previous.is_some_and(|prev| *prev == fingerprint) {
+            return Ok(FrameProbe {
+                fingerprint,
+                snapshot: None,
+            });
+        }
+        Ok(FrameProbe {
+            snapshot: Some(terminal.try_snapshot()?),
+            fingerprint,
+        })
     }
     pub fn shutdown(&self) {
         self.stop.cancel();

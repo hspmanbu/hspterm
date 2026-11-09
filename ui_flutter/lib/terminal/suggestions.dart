@@ -147,6 +147,29 @@ class TerminalSuggestionsController extends ChangeNotifier {
     }
   }
 
+  /// Round-12 candidate delete: tombstones the exact command behind the
+  /// live ticket/index on every host, then refreshes so the deleted row
+  /// disappears immediately. Nothing runs and the shell input is untouched.
+  Future<bool> deleteCandidate(int index) async {
+    final source = view;
+    if (!showing ||
+        source == null ||
+        index < 0 ||
+        index >= source.choices.length) {
+      return false;
+    }
+    final gateway = terminal.backend as TerminalSuggestionsBackend;
+    final native = terminal.id;
+    if (native == null) return false;
+    final deleted = await gateway.deleteSuggestion(
+      native,
+      source.ticket,
+      index,
+    );
+    refresh();
+    return deleted;
+  }
+
   Future<String> choose({
     required bool execute,
     int? index,

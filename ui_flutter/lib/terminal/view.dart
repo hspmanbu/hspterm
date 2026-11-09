@@ -243,6 +243,21 @@ class TerminalViewState extends State<TerminalView>
     );
   }
 
+  /// Round-12 candidate delete from the overlay row button.
+  Future<void> _deleteSuggestion(int index, String ticket) async {
+    final deleted = await _suggestions.deleteCandidate(index);
+    if (!mounted || !deleted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 4),
+        showCloseIcon: true,
+        persist: false,
+        behavior: SnackBarBehavior.floating,
+        content: const Text('已删除该历史记录'),
+      ),
+    );
+  }
+
   Future<void> _chooseSuggestion(
     bool execute, {
     int? index,
@@ -1019,6 +1034,7 @@ class TerminalViewState extends State<TerminalView>
               cursorRow: c.metadata?.cursorRow ?? 0,
               choose: (index, ticket) =>
                   _run(_chooseSuggestion(true, index: index, ticket: ticket)),
+              delete: (index, ticket) => _run(_deleteSuggestion(index, ticket)),
             ),
             if (_searchOpen)
               Positioned(

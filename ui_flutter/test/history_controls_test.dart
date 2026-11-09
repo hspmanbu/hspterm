@@ -5,6 +5,7 @@ import 'package:hspterm/prototype/model.dart';
 import 'package:hspterm/prototype/settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hspterm/src/rust/history_controls.dart';
+import 'package:hspterm/src/rust/api.dart' as rust;
 import 'package:hspterm/workbench/history_controls.dart';
 
 HistoryControls fixture({
@@ -20,6 +21,15 @@ HistoryControls fixture({
 );
 
 class _Gateway implements HistoryControlsGateway {
+  @override
+  Future<List<rust.CommandSearchRow>> searchCommands(
+    String query,
+    String? hostId,
+  ) async => const [];
+
+  @override
+  Future<int> deleteCommands(List<String> texts, String? hostId) async => 0;
+
   HistoryControls value = fixture();
   Object? loadError, saveError;
   Completer<void>? saving;

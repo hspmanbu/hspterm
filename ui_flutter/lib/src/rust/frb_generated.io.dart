@@ -152,6 +152,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeEvent dco_decode_bridge_event(dynamic raw);
 
   @protected
+  CommandSearchRow dco_decode_command_search_row(dynamic raw);
+
+  @protected
   DiagnosticCode dco_decode_diagnostic_code(dynamic raw);
 
   @protected
@@ -258,6 +261,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<AgentKeyOption> dco_decode_list_agent_key_option(dynamic raw);
+
+  @protected
+  List<CommandSearchRow> dco_decode_list_command_search_row(dynamic raw);
 
   @protected
   List<DiagnosticEvent> dco_decode_list_diagnostic_event(dynamic raw);
@@ -717,6 +723,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeEvent sse_decode_bridge_event(SseDeserializer deserializer);
 
   @protected
+  CommandSearchRow sse_decode_command_search_row(SseDeserializer deserializer);
+
+  @protected
   DiagnosticCode sse_decode_diagnostic_code(SseDeserializer deserializer);
 
   @protected
@@ -839,6 +848,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<AgentKeyOption> sse_decode_list_agent_key_option(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<CommandSearchRow> sse_decode_list_command_search_row(
     SseDeserializer deserializer,
   );
 
@@ -1426,6 +1440,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bridge_event(BridgeEvent self, SseSerializer serializer);
 
   @protected
+  void sse_encode_command_search_row(
+    CommandSearchRow self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_diagnostic_code(
     DiagnosticCode self,
     SseSerializer serializer,
@@ -1590,6 +1610,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_agent_key_option(
     List<AgentKeyOption> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_command_search_row(
+    List<CommandSearchRow> self,
     SseSerializer serializer,
   );
 

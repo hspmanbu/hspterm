@@ -1,5 +1,5 @@
 use crate::diagnostics::{self, DiagnosticCode};
-use crate::{frame::delta, frb_generated::StreamSink};
+use crate::frb_generated::StreamSink;
 use alacritty_terminal::event::Event;
 use anyhow::{Context, Result, bail, ensure};
 use hspterm_ssh_core::{
@@ -8,7 +8,7 @@ use hspterm_ssh_core::{
 };
 use hspterm_storage_sync::Vault;
 use hspterm_term_core::{
-    Key, KeyEvent, KeyKind, Modifiers, MouseAction, MouseButton, MouseEvent, Size, Snapshot,
+    FrameFingerprint, Key, KeyEvent, KeyKind, Modifiers, MouseAction, MouseButton, MouseEvent, Size,
 };
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -159,7 +159,7 @@ struct Entry {
     visible: AtomicBool,
     in_flight: AtomicBool,
     last_revision: AtomicU64,
-    previous: Mutex<Option<Snapshot>>,
+    previous: Mutex<Option<FrameFingerprint>>,
     display: Mutex<Option<crate::display::DisplayRuntime>>,
     preferences_scope: Mutex<Option<String>>,
     kick: Notify,
@@ -1337,22 +1337,29 @@ pub async fn take_frame(id: u32) -> Result<Option<RenderFrame>> {
             if !entry.visible.load(Ordering::Acquire) {
                 return Ok(None);
             }
-            let revision = entry.last_revision.load(Ordering::Acquire);
-            let Some(snapshot) = entry.session.snapshot_if_changed(if revision == u64::MAX {
-                None
-            } else {
-                Some(revision)
-            })?
-            else {
+            // Round-12: clone the 1 KiB fingerprint and DROP the previous
+            // guard before touching the session terminal. The old code held
+            // this guard across the whole frame build; nested with the
+            // terminal mutex inside frame_if_changed it can form a lock
+            // cycle with every other path that takes the terminal first.
+            let previous_copy = entry.previous.lock().clone();
+            let probe = entry.session.frame_if_changed(previous_copy.as_ref())?;
+            let Some(snapshot) = probe.snapshot else {
+                // Nothing visible changed; consume the revision so the pull
+                // loop stays quiet until the next real change.
+                entry
+                    .last_revision
+                    .store(probe.fingerprint.revision, Ordering::Release);
                 return Ok(None);
             };
+            let fingerprint = probe.fingerprint;
             let search = entry
                 .search
                 .lock()
                 .clone()
                 .filter(|index| index.revision() == snapshot.content_revision);
-            let mut previous = entry.previous.lock();
-            let mut frame = delta(previous.as_ref(), &snapshot);
+            let mut previous_copy = entry.previous.lock();
+            let mut frame = crate::frame::delta(previous_copy.as_ref(), &snapshot, &fingerprint);
             if let Some(runtime) = entry.display.lock().as_ref() {
                 let config = runtime.decorator.config();
                 frame.same_word_enabled = Some(
@@ -1432,7 +1439,7 @@ pub async fn take_frame(id: u32) -> Result<Option<RenderFrame>> {
             entry
                 .last_revision
                 .store(snapshot.revision, Ordering::Release);
-            *previous = Some(snapshot);
+            *previous_copy = Some(fingerprint);
             Ok(Some(frame))
         })();
         entry.in_flight.store(false, Ordering::Release);
@@ -6056,6 +6063,105 @@ pub async fn clear_command_history(
             })
         })
         .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+/// One decrypted search row for the settings history manager. The command
+/// text crosses the bridge only inside this response and is never logged.
+#[derive(Clone)]
+pub struct CommandSearchRow {
+    pub host_id: String,
+    pub text: String,
+    pub used_counter: u64,
+}
+
+pub async fn search_command_history(
+    query: String,
+    host_id: Option<String>,
+    limit: u32,
+) -> Result<Vec<CommandSearchRow>> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(move || {
+            with_vault(|v| {
+                use hspterm_storage_sync::command_history::HistoryRepository;
+                Ok(HistoryRepository::new(v)
+                    .search_commands(&query, host_id.as_deref(), limit as usize)?
+                    .into_iter()
+                    .map(|mut hit| CommandSearchRow {
+                        host_id: std::mem::take(&mut hit.host_id),
+                        text: std::mem::take(&mut hit.text),
+                        used_counter: hit.used_counter,
+                    })
+                    .collect())
+            })
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+/// Tombstoned single/batch delete. `host_id = None` deletes the texts on
+/// every host that stores them. The revision of the history document is
+/// consumed inside the atomic commit; stale callers get a public summary.
+pub async fn delete_command_history(texts: Vec<String>, host_id: Option<String>) -> Result<u32> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(move || {
+            with_vault(|v| {
+                use hspterm_storage_sync::command_history::HistoryRepository;
+                let borrowed: Vec<&str> = texts.iter().map(String::as_str).collect();
+                let deleted =
+                    HistoryRepository::new(v).delete_commands(host_id.as_deref(), &borrowed)?;
+                if deleted > 0 {
+                    retire_suggestions_for(host_id.as_deref());
+                }
+                Ok(deleted as u32)
+            })
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+/// Round-12 candidate delete: resolves the exact text from the live ticket
+/// (never trusts Dart-side strings), tombstone-deletes it on every host so
+/// a synced stale copy cannot resurrect it, and retires every session's
+/// candidate cache. Returns 1 when a command was deleted, 0 for an expired
+/// ticket/index or nothing to delete.
+pub async fn delete_terminal_suggestion(id: u32, ticket: String, index: u32) -> Result<u32> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        let entry = entry(id)?;
+        let text = {
+            let cache = entry.suggestions.lock();
+            cache
+                .proposal
+                .as_ref()
+                .filter(|p| p.ticket == ticket)
+                .and_then(|p| p.choices.get(usize::try_from(index).unwrap_or(usize::MAX)))
+                .map(|t| t.to_string())
+        };
+        let Some(text) = text else {
+            return Ok(0);
+        };
+        let deleted = tokio::task::spawn_blocking(move || {
+            with_vault(|v| {
+                use hspterm_storage_sync::command_history::HistoryRepository;
+                HistoryRepository::new(v)
+                    .delete_commands(None, &[&text])
+                    .map_err(anyhow::Error::from)
+            })
+        })
+        .await??;
+        if deleted > 0 {
+            retire_suggestions_for(None);
+        }
+        Ok(deleted as u32)
     })
     .await;
     crate::public_errors::finish(outcome)
