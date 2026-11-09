@@ -1,6 +1,6 @@
 # HSPTerm 开发进度
 
-## 2026-11-09 第十二轮第二批（源码待记，分支Windows CI待dispatch；上批a849625已成功run42569313140）
+## 2026-11-09 第十二轮第二批（源码e6ab150，分支Windows CI成功 run 42598050452）
 
 - 四项：Rust帧链路快照churn修复(P0内存)、历史命令管理（设置页搜索/单条与批量删除+同步墓碑语义）、候选框内删除历史按钮、任务七拖放与任务九图片粘贴**仍未实施**（分析方案已归档，下轮继续）。
 - #1 帧链路(P0)：term-core 新增 FrameFingerprint（借用活网格逐行FNV+content/cursor分离标量哈希，零String物化）与 FrameProbe；ssh-core 新增 frame_if_changed——指纹相同返回 None 不再克隆全屏 Snapshot（旧路径每次 take 全屏克隆且 previous 常驻一份）；frb-bridge previous 改为 KB 级指纹缓存，delta 行过滤改指纹比较，None 快速路径消费 revision 使拉取循环静默。**过程中引入并修复一个死锁**：take_frame 持 previous 锁跨 frame_if_changed 的 terminal 锁形成嵌套，与 terminal-first 路径成环——改为克隆 1KiB 指纹后立即释放 previous 锁（两段短临界区，无嵌套）。验证：native_bridge 20次SSH生命周期循环 RSS 仅增287KB（死锁复现用例转通过）；frb-bridge 串行77全过（含 osc8/行过滤回归）；term-core46/ssh-core80 全过；Flutter 桥接/历史/候选/定位 18 项全过。光标样式变化走 cursor 哈希不触发全帧（修复开发中发现的误判）。
