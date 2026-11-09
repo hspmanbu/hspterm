@@ -143,6 +143,11 @@ class LiveTerminalSession extends TerminalSession {
   VoidCallback? changedListener;
   int directoryEpoch = 0, sftpGeneration = 0;
   int pathLocationEpoch = 0;
+  // Bumped every time a directory listing is actually published for the user
+  // (fresh read OR cache hit). Unlike [directoryEpoch] (a network request
+  // sequence) this counts published navigations, so cache-hit navigation can
+  // be observed by in-flight locate/follow requests.
+  int directoryPublishVersion = 0;
   int followedDirectoryVersion = -1;
   late final directoryCache = DirectoryCache(directories);
   @override
@@ -243,6 +248,34 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   (LiveTerminalSession, int)? _followLoading;
 
   final _followOverrides = Expando<bool>();
+
+  /// Copy of the stored host record with only the OSC7 follow flag changed;
+  /// every other field (including credentials references) is preserved.
+  rust.HostConfig _withFollow(rust.HostConfig record, bool value) =>
+      rust.HostConfig(
+        id: record.id,
+        name: record.name,
+        address: record.address,
+        port: record.port,
+        username: record.username,
+        privateKey: record.privateKey,
+        groupId: record.groupId,
+        favorite: record.favorite,
+        note: record.note,
+        credentialSet: record.credentialSet,
+        timeoutSeconds: record.timeoutSeconds,
+        keepaliveSeconds: record.keepaliveSeconds,
+        keepaliveFailures: record.keepaliveFailures,
+        useNetworkDefaults: record.useNetworkDefaults,
+        keepaliveResponseSeconds: record.keepaliveResponseSeconds,
+        openSftp: record.openSftp,
+        followOsc7: value,
+        proxy: record.proxy,
+        jumpHostId: record.jumpHostId,
+        agentForwarding: record.agentForwarding,
+        tmuxEnabled: record.tmuxEnabled,
+        shellIntegration: record.shellIntegration,
+      );
   @override
   bool followsTerminalDirectory(TerminalSession session) =>
       _followOverrides[session] ??
@@ -253,10 +286,40 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     bool value,
   ) async {
     final s = _connected(session);
+    final previous = _followOverrides[s];
     _followOverrides[s] = value;
     s.followedDirectoryVersion = -1;
     _syncDirectoryFollow();
     changed();
+    // Persist per host so the choice survives restarts and applies uniformly
+    // to every tab of the same host. Temporary connections stay session-local.
+    final record = _records[s.host.id];
+    if (record == null || s.temporaryConnection) return;
+    if ((record.followOsc7 ?? false) == value) return;
+    try {
+      final saved = await store.save(_withFollow(record, value), null, null);
+      if (_disposed || _shutdown != null) return;
+      _records[saved.id] = saved;
+      s.host.followOsc7 = value;
+      // All tabs of the same host now read the persisted record; per-session
+      // overrides for it are stale and would reintroduce divergence.
+      for (final other in sessions) {
+        if (other is LiveTerminalSession && other.host.id == saved.id) {
+          _followOverrides[other] = null;
+          if (!identical(other, s)) other.followedDirectoryVersion = -1;
+        }
+      }
+      _syncDirectoryFollow();
+      changed();
+    } catch (error) {
+      // Restore the pre-toggle state so the UI never shows a follow mode the
+      // store was unable to keep.
+      _followOverrides[s] = previous;
+      s.followedDirectoryVersion = -1;
+      _syncDirectoryFollow();
+      changed();
+      rethrow;
+    }
   }
 
   @override
@@ -2358,29 +2421,28 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   Future<void> locateTerminalPath(TerminalSession session, String text) {
     final s = _connected(session);
     final id = s.controller.id!, generation = s.controller.generation;
-    final request = ++s.pathLocationEpoch, directoryEpoch = s.directoryEpoch;
-    void check(int expectedDirectoryEpoch) {
+    final request = ++s.pathLocationEpoch;
+    void check() {
       if (_disposed ||
           _shutdown != null ||
           !sessions.contains(s) ||
           !s.controller.connected ||
           s.controller.id != id ||
           s.controller.generation != generation ||
-          s.pathLocationEpoch != request ||
-          s.directoryEpoch != expectedDirectoryEpoch) {
+          s.pathLocationEpoch != request) {
         throw StateError('原会话或目录已改变；未定位到其他会话');
       }
     }
 
     final operation = () async {
-      check(directoryEpoch);
+      check();
       // Only an explicit local menu action reaches this metadata request.
       final entry = await rust.sftpLocateTerminalPath(
         id: id,
         generation: generation,
         text: text,
       );
-      check(directoryEpoch);
+      check();
       final folder = entry.directory && !entry.symlink;
       final parent = entry.path.substring(0, entry.path.lastIndexOf('/'));
       final directory = folder
@@ -2388,16 +2450,29 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
           : parent.isEmpty
           ? '/'
           : parent;
+      // Navigation is tracked by directoryPublishVersion, which increments on
+      // every published listing — cache hits included. directoryEpoch only
+      // sequences network requests, so a cache-hit navigation previously left
+      // the +1 expectation below unsatisfied and failed the locate.
+      final publishBefore = s.directoryPublishVersion;
       await loadDirectory(s, directory);
-      check(directoryEpoch + 1);
-      if (s.path != directory) throw StateError('目录尚未成功读取；未发布文件选择');
-      s.pendingFileLocation = RemoteFileLocation(
-        directory,
-        folder ? null : entry.path,
-        generation,
-      );
-      if (identical(focus, s)) sidebar = true;
-      changed();
+      check();
+      final published = s.directoryPublishVersion - publishBefore;
+      if (s.path == directory && published == 1) {
+        s.pendingFileLocation = RemoteFileLocation(
+          directory,
+          folder ? null : entry.path,
+          generation,
+        );
+        if (identical(focus, s)) sidebar = true;
+        changed();
+        return;
+      }
+      if (published == 0) {
+        throw StateError('目录尚未成功读取；未发布文件选择');
+      }
+      // A newer navigation raced this locate; keep its state and do not
+      // publish a stale file selection over it.
     }();
     _track(operation);
     return operation;
@@ -2450,11 +2525,19 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         s.controller.connected &&
         s.directoryCacheGeneration == s.connectionGeneration &&
         s.directoryCache.files.containsKey(path)) {
+      // A cache-hit navigation is still a navigation: it invalidates any
+      // in-flight listing/follow request on this session (they observe
+      // directoryEpoch via isCurrent) and resets transient load state.
+      ++s.directoryEpoch;
+      s.pendingFileLocation = null;
+      s.loadingDirectory = false;
+      s.sftpError = null;
       if (remember && s.path != path) {
         s.back.add(s.path);
         s.forward.clear();
       }
       s.path = path;
+      s.directoryPublishVersion++;
       AppRunLog.instance.event(
         AppLogEvent.sftpDirectoryCacheHit,
         terminal: s.controller.id,
@@ -2490,6 +2573,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         s.forward.clear();
       }
       s.path = result.path;
+      s.directoryPublishVersion++;
       s.sftpEnabled = true;
       s.directoryCacheGeneration = s.connectionGeneration;
       s.directoryCache.store(result);

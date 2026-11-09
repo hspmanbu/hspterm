@@ -37,6 +37,27 @@ class TerminalPreferencesValue {
   /// Portable layout/bundled preset; device font names/files never enter this map.
   final Map<String, dynamic>? typography;
   static const dark = [
+    0x262b36,
+    0xff6b6e,
+    0x6fe08c,
+    0xffd54d,
+    0x6db3ff,
+    0xcf8bff,
+    0x4fd8d0,
+    0xd8dee9,
+    0x7f8fae,
+    0xff9298,
+    0xa5f3ae,
+    0xffe987,
+    0xa3c8ff,
+    0xe5b3ff,
+    0x8bf0ea,
+    0xffffff,
+  ];
+
+  /// Pre-round-12 dark palette; kept for the load-time fingerprint
+  /// migration (an exact match was never customized).
+  static const legacyDark = [
     0x1d2028,
     0xf07178,
     0xb6ec92,
@@ -336,10 +357,22 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
     );
   }
 
-  void _preset(bool light) {
-    final values = light
-        ? [0x24364a, 0xf6f8fb, 0x24364a, ...TerminalPreferencesValue.light]
-        : [0xd8dee9, 0x10151d, 0xd8dee9, ...TerminalPreferencesValue.dark];
+  void _preset(String which) {
+    final values = switch (which) {
+      'light' => [
+        0x24364a,
+        0xf6f8fb,
+        0x24364a,
+        ...TerminalPreferencesValue.light,
+      ],
+      'classic' => [
+        0xd8dee9,
+        0x10151d,
+        0xd8dee9,
+        ...TerminalPreferencesValue.legacyDark,
+      ],
+      _ => [0xe6ebf4, 0x10151d, 0xe6ebf4, ...TerminalPreferencesValue.dark],
+    };
     setState(() {
       for (var i = 0; i < values.length; i++) {
         _colors[i].text = values[i]
@@ -577,11 +610,15 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
                 spacing: 8,
                 children: [
                   OutlinedButton(
-                    onPressed: () => _preset(false),
-                    child: const Text('深色配色预设'),
+                    onPressed: () => _preset('bright'),
+                    child: const Text('明亮柔和（默认）'),
                   ),
                   OutlinedButton(
-                    onPressed: () => _preset(true),
+                    onPressed: () => _preset('classic'),
+                    child: const Text('经典深色'),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => _preset('light'),
                     child: const Text('浅色配色预设'),
                   ),
                 ],

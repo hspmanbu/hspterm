@@ -276,7 +276,7 @@ class TerminalViewState extends State<TerminalView>
       _shownOperationError = message;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !c.connected || c.error != message) return;
-        showAppNotice(context, message);
+        showAppNotice(context, message, level: AppNoticeLevel.error);
         c.dismissError(message);
         _shownOperationError = null;
       });
@@ -468,7 +468,8 @@ class TerminalViewState extends State<TerminalView>
       return KeyEventResult.handled;
     }
     if (event is KeyDownEvent) _suggestionOwned.remove(event.physicalKey);
-    if (!composing &&
+    final suggestionKeys =
+        !composing &&
         mods == 0 &&
         _suggestions.showing &&
         {
@@ -478,7 +479,14 @@ class TerminalViewState extends State<TerminalView>
           LogicalKeyboardKey.numpadEnter,
           LogicalKeyboardKey.tab,
           LogicalKeyboardKey.escape,
-        }.contains(key)) {
+        }.contains(key);
+    // Enter/Tab keep their normal shell meaning (submit / readline completion)
+    // while no candidate is explicitly selected; only arrows/Esc own the box.
+    final commitKey =
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.tab;
+    if (suggestionKeys && (!commitKey || _suggestions.selected >= 0)) {
       if (down) {
         ApplicationKeyScope.claim(context, event);
         _suggestionOwned.add(event.physicalKey);

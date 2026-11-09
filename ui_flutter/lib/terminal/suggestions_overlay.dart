@@ -44,6 +44,7 @@ class _TerminalSuggestionsOverlayState
   void _reveal() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients || !widget.controller.showing) return;
+      if (widget.controller.selected < 0) return;
       final top = widget.controller.selected * 30.0;
       final position = _scroll.position;
       final next = top < position.pixels

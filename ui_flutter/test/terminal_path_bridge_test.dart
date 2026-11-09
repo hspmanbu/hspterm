@@ -220,13 +220,18 @@ void main() {
       expect(a.pendingFileLocation?.file, isNull);
       expect(a.path, directory.path);
       final tasks = await rust.listTransferTasks();
+      // A locate whose fresh read is superseded by explicit user navigation
+      // must never publish over the newer state. The stale target directory
+      // is deliberately NOT cached yet so its read really is in flight.
+      final staleDir = await Directory(
+        '${server.directory.path}/stale locate dir',
+      ).create();
       holdPage = true;
-      final staleLocation = m.locateTerminalPath(a, file.path);
-      final rejected = expectLater(staleLocation, throwsA(anything));
+      final staleLocation = m.locateTerminalPath(a, staleDir.path);
       await pageStarted.future.timeout(const Duration(seconds: 10));
       await m.loadDirectory(a, server.directory.path);
       releasePage.complete();
-      await rejected;
+      await staleLocation;
       expect(a.path, server.directory.path);
       expect(
         a.pendingFileLocation,

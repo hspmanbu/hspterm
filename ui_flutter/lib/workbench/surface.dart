@@ -73,7 +73,7 @@ class _LiveTerminalSurfaceState extends State<LiveTerminalSurface> {
     if (c.connected && recovery != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && c.reconnectNotice == recovery) {
-          showAppNotice(context, recovery);
+          showAppNotice(context, recovery, level: AppNoticeLevel.warning);
           c.dismissReconnectNotice();
         }
       });

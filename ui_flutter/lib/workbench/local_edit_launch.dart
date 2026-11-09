@@ -10,6 +10,7 @@
 //! watchers and temp files.
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -47,25 +48,37 @@ class ContentDigest {
 }
 
 /// Streams [file] in chunks, returning its fingerprint without buffering
-/// the whole content (async IO — never blocks the UI isolate).
-Future<String> digestOf(File file) async {
+/// the whole content. Runs on a background isolate (round-12): the per-byte
+/// loop must never occupy the UI isolate — a 16 MiB file is ~16M iterations
+/// and used to stall frames and the heartbeat.
+Future<String> digestOf(File file) => Isolate.run(() {
   final digest = ContentDigest();
-  final raf = await file.open();
+  final raf = File(file.path).openSync();
   try {
     while (true) {
-      final chunk = await raf.read(1024 * 1024);
+      final chunk = raf.readSync(1024 * 1024);
       if (chunk.isEmpty) break;
       digest.add(chunk);
     }
   } finally {
-    await raf.close();
+    raf.closeSync();
   }
   return digest.toString();
-}
+});
 
 const _stableWindow = Duration(milliseconds: 700);
-const _pollInterval = Duration(milliseconds: 800);
+
+/// Backstop poll only (round-12): the directory watch drives change
+/// detection at interactive speed; this catches events the platform drops.
+/// A slow interval keeps per-session timers cheap on the UI isolate.
+const _pollInterval = Duration(seconds: 5);
 const _maxSessionsPerModel = 16;
+
+/// A local-edit session auto-closes after this long without a real content
+/// change (round-12). Watches/timers/subscriptions are released and unsynced
+/// drafts stay on disk.
+const defaultEditIdleTimeout = Duration(minutes: 15);
+const _idleCheckInterval = Duration(seconds: 30);
 
 /// Abstraction over the native calls so tests can simulate every flow.
 abstract interface class LocalEditGateway {
@@ -147,6 +160,10 @@ class NativeLocalEditGateway implements LocalEditGateway {
         if (chunk.isEmpty) break;
         sink.add(chunk);
         offset += chunk.length;
+        // Flush per chunk (round-12): without an await point the IOSink can
+        // buffer the whole file when the target (e.g. %TEMP% under Defender)
+        // writes slower than SFTP reads — up to 16 MiB resident per session.
+        await sink.flush();
         onProgress?.call(offset, total);
       }
       await sink.flush();
@@ -308,8 +325,9 @@ class LocalEditSession extends ChangeNotifier {
     this._onConflict,
     this._overwriteScope,
     this._overwriteAllowed,
-    this._overwriteAllowSink,
-  );
+    this._overwriteAllowSink, [
+    this.idleTimeout = defaultEditIdleTimeout,
+  ]);
 
   final LiveTerminalSession _session;
   final String _remotePath;
@@ -326,7 +344,7 @@ class LocalEditSession extends ChangeNotifier {
   LiveTerminalSession get session => _session;
 
   void _setStatus(LocalEditStatus next) {
-    if (status == next) return;
+    if (_disposed || status == next) return;
     status = next;
     notifyListeners();
   }
@@ -364,9 +382,21 @@ class LocalEditSession extends ChangeNotifier {
   StreamSubscription<FileSystemEvent>? _watch;
   Timer? _stability;
   Timer? _poll;
+  Timer? _idleTimer;
   DateTime _lastModified = DateTime.fromMillisecondsSinceEpoch(0);
   String? _lastSyncedDigest;
   bool _uploading = false, _conflicted = false, _disposed = false;
+
+  /// Instant of the last REAL content change (creation or a digest that
+  /// differed from the last synced one). mtime-only churn never resets this.
+  DateTime _lastRealChange = DateTime.now();
+
+  /// Idle auto-close threshold; injectable for tests.
+  final Duration idleTimeout;
+
+  /// Tracks the running upload so dispose can wait for it instead of racing
+  /// a streaming read against file cleanup.
+  Future<void> _inFlightUpload = Future.value();
 
   Directory get _home => _file.parent;
   bool get conflicted => _conflicted;
@@ -385,6 +415,7 @@ class LocalEditSession extends ChangeNotifier {
     Future<LocalEditConflictDecision?> Function(String remotePath)? onConflict,
     bool Function(int native, int generation)? overwriteAllowed,
     void Function(int native, int generation)? allowOverwrite,
+    Duration idleTimeout = defaultEditIdleTimeout,
   }) async {
     final native = source.controller.id;
     final generation = source.controller.generation;
@@ -426,6 +457,7 @@ class LocalEditSession extends ChangeNotifier {
       (native, generation),
       overwriteAllowed,
       allowOverwrite,
+      idleTimeout,
     );
     onSession?.call(session);
     // Round-11 P0: the download streams straight into the temp file; the
@@ -463,18 +495,51 @@ class LocalEditSession extends ChangeNotifier {
   Future<void> _open(Future<bool> Function(Uri uri) launch) async {
     _lastModified = await _file.lastModified();
     _lastSyncedDigest = await digestOf(_file);
+    _lastRealChange = DateTime.now();
     _watch = _home.watch().listen((event) {
       if (event.path == _file.path) _scheduleStabilityCheck();
     });
     // Directory events can be missed (and editors saving via rename
     // generate create/delete): a cheap poll backs the watch.
     _poll = Timer.periodic(_pollInterval, (_) => _scheduleStabilityCheck());
+    // The idle check granularity follows the timeout: production uses the
+    // 30 s floor, tests injecting tiny timeouts get equally tiny ticks.
+    final idleCheckEvery = idleTimeout < _idleCheckInterval
+        ? idleTimeout
+        : _idleCheckInterval;
+    _idleTimer = Timer.periodic(idleCheckEvery, (_) => _checkIdle());
     final opened = await launch(Uri.file(_file.absolute.path));
     if (!opened) {
       throw StateError('系统没有成功打开本地文件');
     }
     _setStatus(LocalEditStatus.editing);
   }
+
+  /// Auto-close after [idleTimeout] without a real content change. Never
+  /// fires mid-download/upload; unsynced drafts survive (dispose keeps them).
+  void _checkIdle() {
+    if (_disposed || _uploading) return;
+    if (status == LocalEditStatus.downloading ||
+        status == LocalEditStatus.uploading) {
+      return;
+    }
+    final idle = DateTime.now().difference(_lastRealChange);
+    if (idle < idleTimeout) return;
+    AppRunLog.instance.event(
+      AppLogEvent.editIdleClosed,
+      terminal: _native,
+      generation: _originGeneration,
+      count: idle.inMinutes,
+    );
+    _onNotice(
+      '「$displayName」已连续 $_idleTimeoutLabel 无修改，编辑会话已自动关闭；'
+      '未同步的修改保留在本地草稿',
+    );
+    unawaited(dispose());
+  }
+
+  String get _idleTimeoutLabel =>
+      idleTimeout.inMinutes >= 1 ? '${idleTimeout.inMinutes} 分钟' : '很短时间';
 
   void _scheduleStabilityCheck() {
     if (_disposed || _uploading) return;
@@ -500,12 +565,20 @@ class LocalEditSession extends ChangeNotifier {
       return;
     }
     _lastModified = modified;
+    // A real content change resets the idle auto-close clock.
+    _lastRealChange = DateTime.now();
     await _upload();
   }
 
   Future<void> retry() => _upload();
 
-  Future<void> _upload() async {
+  Future<void> _upload() {
+    // Track the in-flight upload so dispose waits instead of deleting the
+    // local file under a streaming read.
+    return _inFlightUpload = _uploadInner();
+  }
+
+  Future<void> _uploadInner() async {
     if (_disposed || _uploading) return;
     _uploading = true;
     try {
@@ -629,6 +702,8 @@ class LocalEditSession extends ChangeNotifier {
       final after = await _gateway.stat(_native, current, _remotePath);
       _originMtime = after.mtime;
       _lastSyncedDigest = await digestOf(_file);
+      // A finished sync is the newest baseline; restart the idle clock.
+      _lastRealChange = DateTime.now();
       _conflicted = false;
       _setStatus(LocalEditStatus.editing);
       AppRunLog.instance.event(
@@ -664,11 +739,17 @@ class LocalEditSession extends ChangeNotifier {
   Future<void> dispose() async {
     if (_disposeStarted) return;
     _disposeStarted = true;
-    _disposed = true;
+    // Publish the terminal state before marking disposed: _setStatus ignores
+    // calls after _disposed, but the closed transition itself must land.
     _setStatus(LocalEditStatus.closed);
+    _disposed = true;
     await _watch?.cancel();
     _stability?.cancel();
     _poll?.cancel();
+    _idleTimer?.cancel();
+    // An in-flight upload streams from the local file; let it finish (or
+    // fail) before any cleanup decides whether the file can be deleted.
+    await _inFlightUpload.catchError((_) {});
     try {
       // Round-11 requirement: NEVER delete a local file whose content was
       // not confirmed synced. Unsynced drafts stay on disk for the user
@@ -758,6 +839,22 @@ class LocalEditRegistry extends ChangeNotifier {
     await Future.wait(pending.map((s) => s.dispose()));
     notifyListeners();
   }
+
+  /// Closes every active session but keeps the registry open for new ones
+  /// (round-12). Unlike [disposeAll] this is repeatable: the queue's
+  /// "close all sessions" action must not permanently disable editing.
+  /// Unsynced drafts survive per-session dispose rules; in-flight uploads
+  /// are awaited inside each dispose.
+  Future<void> closeAllActive() async {
+    if (_closed) return;
+    final pending = List.of(_sessions);
+    for (final session in pending) {
+      session.removeListener(notifyListeners);
+    }
+    _sessions.clear();
+    await Future.wait(pending.map((s) => s.dispose()));
+    notifyListeners();
+  }
 }
 
 /// Wraps [LocalEditSession.launch] with the user-facing notices.
@@ -769,14 +866,22 @@ Future<void> openLocalEdit(
 ) async {
   try {
     if (model.localEdits.isFull) {
-      if (context.mounted) showAppNotice(context, '本地编辑任务过多，请先关闭部分编辑会话');
+      if (context.mounted) {
+        showAppNotice(
+          context,
+          '本地编辑任务过多，请先关闭部分编辑会话',
+          level: AppNoticeLevel.warning,
+        );
+      }
       return;
     }
     await LocalEditSession.launch(
       source,
       file,
       onNotice: (message) {
-        if (context.mounted) showAppNotice(context, message);
+        if (context.mounted) {
+          showAppNotice(context, message, level: AppNoticeLevel.warning);
+        }
       },
       onSession: model.localEdits.register,
       overwriteAllowed: model.localEdits.overwriteAllowed,
@@ -823,6 +928,8 @@ Future<void> openLocalEdit(
       showAppNotice(context, '已在本地编辑器打开；保存后自动上传，远端变更将提示冲突');
     }
   } catch (error) {
-    if (context.mounted) showAppNotice(context, '本地编辑打开失败：$error');
+    if (context.mounted) {
+      showAppNotice(context, '本地编辑打开失败：$error', level: AppNoticeLevel.error);
+    }
   }
 }

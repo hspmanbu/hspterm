@@ -1,6 +1,56 @@
 import '../app_notice.dart';
 
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+/// Round-12 dialog visibility guard. A Flutter dialog cannot leave its
+/// window's client area, so when the window itself hangs off the monitor a
+/// centered dialog is unreachable. On Windows the runner slides the window
+/// back into the monitor work area (size unchanged) before the dialog
+/// opens; elsewhere this is a no-op. The dialog body is also height-bounded
+/// and scrollable so long text can never push the buttons off-window.
+Future<void> ensureDialogHostVisible(
+  BuildContext context, {
+  double minWidth = 480,
+  double minHeight = 400,
+}) async {
+  if (!Platform.isWindows) return;
+  try {
+    await const MethodChannel('hspterm/prototype_window').invokeMethod<void>(
+      'ensureDialogVisible',
+      {'minWidth': minWidth, 'minHeight': minHeight},
+    );
+  } on MissingPluginException {
+    // Non-standard embedding (tests, older runner): the dialog keeps its
+    // ordinary in-window centering.
+  } on PlatformException {
+    // Window geometry unavailable; never block the dialog on this.
+  }
+}
+
+/// showDialog with screen-bounds awareness (round-12): the host window is
+/// first made dialog-visible, and the dialog itself is constrained to the
+/// available size with a scrollable body so title/buttons stay reachable.
+Future<T?> showBoundedDialog<T>(
+  BuildContext context,
+  WidgetBuilder builder, {
+  bool barrierDismissible = true,
+}) {
+  final size = MediaQuery.sizeOf(context);
+  return showDialog<T>(
+    context: context,
+    barrierDismissible: barrierDismissible,
+    builder: (c) => ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: size.width < 560 ? size.width - 24 : 536,
+        maxHeight: size.height - 48,
+      ),
+      child: builder(c),
+    ),
+  );
+}
 
 abstract final class Desk {
   static const accent = Color(0xff70cbb2);
@@ -194,8 +244,11 @@ class ResizeGrip extends StatelessWidget {
   );
 }
 
-void notice(BuildContext context, String message) =>
-    showAppNotice(context, message);
+void notice(
+  BuildContext context,
+  String message, {
+  AppNoticeLevel level = AppNoticeLevel.info,
+}) => showAppNotice(context, message, level: level);
 
 Future<bool> confirm(
   BuildContext context,
@@ -203,31 +256,37 @@ Future<bool> confirm(
   String body, {
   String accept = '确认',
   bool danger = false,
-}) async =>
-    await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text(title, style: const TextStyle(fontSize: 17)),
-        content: SizedBox(width: 380, child: Text(body)),
-        actions: [
-          TextButton(
-            autofocus: true,
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text('取消'),
+}) async {
+  await ensureDialogHostVisible(context);
+  if (!context.mounted) return false;
+  return await showBoundedDialog<bool>(
+        context,
+        (c) => AlertDialog(
+          title: Text(title, style: const TextStyle(fontSize: 17)),
+          content: SizedBox(
+            width: 380,
+            child: SingleChildScrollView(child: Text(body)),
           ),
-          FilledButton(
-            style: danger
-                ? FilledButton.styleFrom(
-                    backgroundColor: Theme.of(c).colorScheme.error,
-                  )
-                : null,
-            onPressed: () => Navigator.pop(c, true),
-            child: Text(accept),
-          ),
-        ],
-      ),
-    ) ??
-    false;
+          actions: [
+            TextButton(
+              autofocus: true,
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              style: danger
+                  ? FilledButton.styleFrom(
+                      backgroundColor: Theme.of(c).colorScheme.error,
+                    )
+                  : null,
+              onPressed: () => Navigator.pop(c, true),
+              child: Text(accept),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+}
 
 class SectionHeading extends StatelessWidget {
   const SectionHeading(this.title, {super.key, this.trailing});

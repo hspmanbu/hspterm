@@ -14,6 +14,7 @@ void main() {
                 onPressed: () => showAppNotice(
                   context,
                   'synthetic notice',
+                  level: AppNoticeLevel.warning,
                   action: SnackBarAction(label: '说明', onPressed: () {}),
                 ),
                 child: const Text('show'),
@@ -31,6 +32,7 @@ void main() {
       await tester.pump(const Duration(seconds: 6));
       await tester.pumpAndSettle();
       expect(find.text('synthetic notice'), findsNothing);
+      resetAppNoticeDedupe();
       await tester.tap(find.text('show'));
       await tester.pumpAndSettle();
       await tester.tap(
@@ -43,6 +45,47 @@ void main() {
       expect(find.text('synthetic notice'), findsNothing);
     },
   );
+
+  testWidgets(
+    'info and success notices stay quiet (no SnackBar) and dedupe repeats',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => Column(
+                children: [
+                  TextButton(
+                    onPressed: () => showAppNotice(context, 'quiet info'),
+                    child: const Text('info'),
+                  ),
+                  TextButton(
+                    onPressed: () => showAppNotice(
+                      context,
+                      'quiet success',
+                      level: AppNoticeLevel.success,
+                    ),
+                    child: const Text('success'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('info'));
+      await tester.tap(find.text('success'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byType(SnackBar),
+        findsNothing,
+        reason: 'ordinary operations never raise a SnackBar',
+      );
+      expect(quietNoticeNotifier.value?.message, 'quiet success');
+      expect(quietNoticeNotifier.value?.level, AppNoticeLevel.success);
+    },
+  );
+
   test('FFI wrapper is removed from existing action text', () {
     expect(appMessage('操作失败：AnyhowException(没有可靠目录)'), '操作失败：没有可靠目录');
   });

@@ -21,6 +21,7 @@ import 'cached_path_field.dart';
 import 'queue.dart';
 import 'bookmarks.dart';
 import '../platform/explorer_drop.dart';
+import '../app_notice.dart';
 
 class RemoteDrag {
   RemoteDrag(
@@ -487,7 +488,7 @@ class _FilesPanelState extends State<FilesPanel> {
 
   void run(Future<void> work) => unawaited(
     work.catchError((Object error) {
-      if (mounted) notice(context, '操作失败：$error');
+      if (mounted) notice(context, '操作失败：$error', level: AppNoticeLevel.error);
     }),
   );
   String pathOf(String directory, String name) =>
@@ -1164,7 +1165,9 @@ class _FilesPanelState extends State<FilesPanel> {
           setState(() => selected.clear());
         }
       } catch (error) {
-        if (mounted) notice(context, '删除未全部完成：$error');
+        if (mounted) {
+          notice(context, '删除未全部完成：$error', level: AppNoticeLevel.warning);
+        }
       }
     }
   }
@@ -1317,7 +1320,7 @@ class _FilesPanelState extends State<FilesPanel> {
       files.map((f) => pathOf(directory, f.name)),
     );
     if (files.isEmpty || files.length != frozenSelection.length) {
-      notice(context, '文件列表已改变，请重新选择');
+      notice(context, '文件列表已改变，请重新选择', level: AppNoticeLevel.warning);
       return;
     }
     bool current() =>
@@ -1368,7 +1371,11 @@ class _FilesPanelState extends State<FilesPanel> {
           (entry) => pathOf(directory, entry.value.name) == paths[entry.key],
         );
     if (!current()) {
-      notice(context, '目录或会话已切换，请重新打开菜单；未执行文件操作');
+      notice(
+        context,
+        '目录或会话已切换，请重新打开菜单；未执行文件操作',
+        level: AppNoticeLevel.warning,
+      );
       return;
     }
     if ((action.startsWith('copy-target:') ||
@@ -1377,7 +1384,7 @@ class _FilesPanelState extends State<FilesPanel> {
       if (target.$1.connectionGeneration != target.$2 ||
           target.$1.path != target.$3 ||
           target.$1.disconnected) {
-        notice(context, '目标会话或目录已改变，请重新选择');
+        notice(context, '目标会话或目录已改变，请重新选择', level: AppNoticeLevel.warning);
         return;
       }
       final moving = action.startsWith('move-');
@@ -1410,7 +1417,11 @@ class _FilesPanelState extends State<FilesPanel> {
           allowDirect: true,
         );
         if (mounted) {
-          notice(context, '已加入 ${ids.length} 个${moving ? '移动' : '复制'}任务');
+          notice(
+            context,
+            '已加入 ${ids.length} 个${moving ? '移动' : '复制'}任务',
+            level: AppNoticeLevel.success,
+          );
         }
       } else {
         for (final f in files) {
@@ -1463,7 +1474,7 @@ class _FilesPanelState extends State<FilesPanel> {
               '文件剪贴板：${m.remoteFileClipboardDescription}；粘贴前不会读取正文',
             );
           } catch (error) {
-            notice(context, '文件选择失败：$error');
+            notice(context, '文件选择失败：$error', level: AppNoticeLevel.error);
           }
           break;
         }
@@ -1527,7 +1538,7 @@ class _FilesPanelState extends State<FilesPanel> {
     if (!m.isMock) {
       final description = m.remoteFileClipboardDescription;
       if (description == null) {
-        notice(context, '文件剪贴板为空');
+        notice(context, '文件剪贴板为空', level: AppNoticeLevel.warning);
         return;
       }
       final clipboardRevision = m.remoteFileClipboardRevision;
@@ -1561,13 +1572,15 @@ class _FilesPanelState extends State<FilesPanel> {
             );
           }
         } catch (error) {
-          if (mounted) notice(context, '粘贴未全部入队：$error');
+          if (mounted) {
+            notice(context, '粘贴未全部入队：$error', level: AppNoticeLevel.warning);
+          }
         }
       }
       return;
     }
     if (clipboard.isEmpty) {
-      notice(context, '模拟文件剪贴板为空');
+      notice(context, '模拟文件剪贴板为空', level: AppNoticeLevel.warning);
     } else {
       setState(() {
         for (final f in clipboard) {
@@ -1669,7 +1682,9 @@ class _FilesPanelState extends State<FilesPanel> {
           p.path != directory ||
           p.connectionGeneration != generation ||
           model.isClosing) {
-        if (mounted) notice(context, '目录或会话已改变，未发送路径');
+        if (mounted) {
+          notice(context, '目录或会话已改变，未发送路径', level: AppNoticeLevel.warning);
+        }
         return;
       }
       sendPaths([directory], enterDirectory: cd);
@@ -1795,7 +1810,13 @@ class _FilesPanelState extends State<FilesPanel> {
           _scrollToFile(item.id, source, generation, bottom: true);
         }
       } catch (error) {
-        if (mounted) notice(context, '创建${folder ? '目录' : '文件'}失败：$error');
+        if (mounted) {
+          notice(
+            context,
+            '创建${folder ? '目录' : '文件'}失败：$error',
+            level: AppNoticeLevel.error,
+          );
+        }
       }
     }
   }
@@ -1876,7 +1897,9 @@ class _FilesPanelState extends State<FilesPanel> {
         upload: true,
       );
     } on LocalTransferSubmissionFailure catch (failure) {
-      if (mounted) notice(context, failure.toString());
+      if (mounted) {
+        notice(context, failure.toString(), level: AppNoticeLevel.error);
+      }
     }
   }
 
@@ -1906,7 +1929,7 @@ class _FilesPanelState extends State<FilesPanel> {
     onHover: _explorerHover,
     onDrop: _explorerDrop,
     onFailure: (message) {
-      if (mounted) notice(context, message);
+      if (mounted) notice(context, message, level: AppNoticeLevel.error);
     },
     child: child,
   );
@@ -2152,7 +2175,11 @@ class _FilesPanelState extends State<FilesPanel> {
                                   setState(() => _pathEditing = false);
                                   navigate(value);
                                 } else {
-                                  notice(context, '请输入绝对远端路径');
+                                  notice(
+                                    context,
+                                    '请输入绝对远端路径',
+                                    level: AppNoticeLevel.warning,
+                                  );
                                 }
                               },
                             )

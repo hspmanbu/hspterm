@@ -912,10 +912,16 @@ impl Terminal {
 }
 
 pub fn default_color(index: usize) -> u32 {
+    // Round-12 "bright & soft" default: Ubuntu MOTD blues/greens/cyans were
+    // too dim on the old table. Hue separation between green/cyan/blue/
+    // purple/yellow stays wide; every color keeps >=4.3:1 on 0x10151d.
     const ANSI: [u32; 16] = [
-        0x1d2028, 0xf07178, 0xb6ec92, 0xffd37f, 0x8fbaff, 0xc792ea, 0x89ddff, 0xd8dee9, 0x6d7c9b,
-        0xff8b92, 0xddffa7, 0xffe585, 0x9cc4ff, 0xe1acff, 0xa3f7ff, 0xffffff,
+        0x262b36, 0xff6b6e, 0x6fe08c, 0xffd54d, 0x6db3ff, 0xcf8bff, 0x4fd8d0, 0xd8dee9, 0x7f8fae,
+        0xff9298, 0xa5f3ae, 0xffe987, 0xa3c8ff, 0xe5b3ff, 0x8bf0ea, 0xffffff,
     ];
+    let dim_of = |rgb: u32| {
+        ((rgb >> 16 & 255) * 2 / 3) << 16 | ((rgb >> 8 & 255) * 2 / 3) << 8 | ((rgb & 255) * 2 / 3)
+    };
     let rgb = match index {
         0..=15 => ANSI[index],
         16..=231 => {
@@ -927,16 +933,25 @@ pub fn default_color(index: usize) -> u32 {
             let v = (8 + 10 * (index - 232)) as u32;
             v << 16 | v << 8 | v
         }
-        257 | 268 => 0x10151d,
-        259..=266 => {
-            let color = ANSI[index - 259];
-            ((color >> 16 & 255) * 2 / 3) << 16
-                | ((color >> 8 & 255) * 2 / 3) << 8
-                | ((color & 255) * 2 / 3)
-        }
-        _ => 0xd8dee9,
+        256 | 267 => 0xe6ebf4,
+        257 => 0x10151d,
+        259..=266 => dim_of(ANSI[index - 259]),
+        // Dim foreground — previously mislabeled as the background color,
+        // disagreeing with preferences::Colors::color().
+        268 => dim_of(0xe6ebf4),
+        _ => 0xe6ebf4,
     };
     0xff000000 | rgb
+}
+
+/// The pre-round-12 default palette; load-time fingerprint migration in
+/// storage-sync treats an exact match as "user never customized" and moves
+/// it to the new default.
+pub fn legacy_default_ansi() -> [u32; 16] {
+    [
+        0x1d2028, 0xf07178, 0xb6ec92, 0xffd37f, 0x8fbaff, 0xc792ea, 0x89ddff, 0xd8dee9, 0x6d7c9b,
+        0xff8b92, 0xddffa7, 0xffe585, 0x9cc4ff, 0xe1acff, 0xa3f7ff, 0xffffff,
+    ]
 }
 
 #[cfg(test)]

@@ -100,16 +100,20 @@ void main() {
       await tester.pump();
       expect(backend.queries, 1);
       expect(state.showing, true);
-      expect(state.selected, 0);
+      expect(state.selected, -1, reason: 'a fresh box opens unselected');
+      state.move(1);
+      expect(state.selected, 0, reason: 'first arrow down picks the first row');
       state.move(1);
       expect(state.selected, 1);
+      state.move(-1);
+      expect(state.selected, 0, reason: 'arrows move normally afterwards');
       expect(
         await state.choose(execute: false, expectedTicket: 'old'),
         'Unavailable',
       );
       expect(backend.selected, isEmpty);
       expect(await state.choose(execute: false), 'Applied');
-      expect(backend.selected.single.$4, 1);
+      expect(backend.selected.single.$4, 0);
       expect(backend.selected.single.$5, false);
       state.dispose();
       await closeTerminal(tester, current);
@@ -159,10 +163,27 @@ void main() {
       await tester.pump(const Duration(milliseconds: 30));
       await tester.pump();
       expect(find.text('git status'), findsOneWidget);
+      // Unselected Enter/Tab pass through to the shell untouched.
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      expect(backend.selected, isEmpty);
+      expect(
+        backend.keys.any((key) => key.key == 'Enter' && key.kind == 0),
+        true,
+        reason: 'unselected Enter submits the shell input',
+      );
+      backend.keys.clear();
+      // Bring the box back (Enter above cleared it) and select with arrows.
+      current.shellInputChanges.value++;
+      await tester.pump(const Duration(milliseconds: 30));
+      await tester.pump();
+      expect(find.text('git status'), findsOneWidget);
+      // First arrow down selects row 0; Tab then fills that candidate.
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
-      expect(backend.selected.single.$4, 1);
+      expect(backend.selected.single.$4, 0);
       expect(backend.selected.single.$5, false);
       expect(backend.keys, isEmpty);
       backend.value = choices('two', revision: 2);

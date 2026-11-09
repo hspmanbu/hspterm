@@ -48,13 +48,22 @@ pub(crate) fn platform_history_default() -> u32 {
 }
 pub fn load_with_history_default(v: &Vault, history_lines: u32) -> Result<View> {
     let raw = v.get_bounded(RECORD, 16384)?;
-    let value = match &raw {
+    let mut value = match &raw {
         None => Settings {
             history_lines,
             ..Settings::default()
         },
         Some(b) => serde_json::from_slice::<Settings>(b).map_err(|_| PreferencesError::Format)?,
     };
+    // Round-12 palette upgrade: a stored palette that still equals the
+    // pre-round-12 default byte-for-byte was never customized, so move it
+    // to the new brighter default on read. The record itself is not
+    // rewritten; the next explicit save persists whatever is current. Any
+    // deviation (even one channel) means a real user choice and is kept
+    // untouched.
+    if value.colors == hspterm_term_core::preferences::Colors::legacy_default() {
+        value.colors = hspterm_term_core::preferences::Colors::default();
+    }
     value.validate()?;
     Ok(View {
         vault_scope: v.instance_id().into(),
@@ -168,6 +177,35 @@ mod tests {
         assert!(load(&v).is_err());
         let scope = v.instance_id().to_owned();
         assert!(save(&mut v, &scope, "unknown", settings).is_err());
+    }
+    #[test]
+    fn round12_palette_fingerprint_migration() {
+        use hspterm_term_core::preferences::Colors;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("palette.vault");
+        let mut v = Vault::create(&path, b"synthetic-palette-master").unwrap();
+        // A stored record that still equals the OLD default upgrades on read.
+        let mut legacy = load(&v).unwrap().value;
+        legacy.colors = Colors::legacy_default();
+        let scope = v.instance_id().to_owned();
+        let revision = load(&v).unwrap().revision;
+        save(&mut v, &scope, &revision, legacy).unwrap();
+        let migrated = load(&v).unwrap();
+        assert_eq!(
+            migrated.value.colors,
+            Colors::default(),
+            "an uncustomized legacy palette must upgrade to the new default"
+        );
+        // A customized palette (one channel differs) is never touched.
+        let mut custom = migrated.value.clone();
+        custom.colors.ansi[4] ^= 1;
+        let revision = migrated.revision;
+        save(&mut v, &migrated.vault_scope, &revision, custom.clone()).unwrap();
+        let reloaded = load(&v).unwrap();
+        assert_eq!(
+            reloaded.value.colors, custom.colors,
+            "a user-customized palette must survive the migration untouched"
+        );
     }
 }
 

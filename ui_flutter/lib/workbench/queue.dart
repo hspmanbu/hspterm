@@ -20,6 +20,7 @@ import 'model.dart';
 import 'move_resolution.dart';
 import 'explorer_export.dart';
 import 'explorer_cache_cleanup.dart';
+import '../app_notice.dart';
 
 class LiveTransferQueue extends StatefulWidget {
   const LiveTransferQueue({super.key, required this.model});
@@ -48,6 +49,46 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
 
   void _editsChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// Queue action "close all local-edit sessions": repeatable, waits for
+  /// in-flight uploads, and explains what happens to unsynced drafts.
+  Future<void> _closeAllEdits(List<LocalEditSession> edits) async {
+    final unsynced = edits
+        .where(
+          (e) =>
+              e.status == LocalEditStatus.conflicted ||
+              e.status == LocalEditStatus.failed,
+        )
+        .length;
+    final context = this.context;
+    if (unsynced > 0) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('关闭所有本地编辑会话？'),
+          content: Text(
+            '将关闭全部 ${edits.length} 个编辑会话；其中 $unsynced 个存在未同步的修改，'
+            '对应本地草稿会保留在原位置，不再自动同步。正在上传的任务会先完成或安全停止。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('全部关闭'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    await m.localEdits.closeAllActive();
+    if (context.mounted) {
+      showAppNotice(context, '已关闭全部本地编辑会话', level: AppNoticeLevel.info);
+    }
   }
 
   /// A local-edit task is NOT a download to a user-chosen directory: it is
@@ -136,17 +177,41 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
     );
   }
 
-  /// Reveals the temp copy in the OS file manager (Explorer with the file
-  /// preselected on Windows; xdg-open of the folder elsewhere).
+  /// Reveals the temp copy in the OS file manager. On Windows the shell API
+  /// (via the runner channel) opens the parent folder with the file
+  /// preselected; `explorer /select` is only a fallback because a reused
+  /// Explorer process exits non-zero even on success, and a plain folder
+  /// open is the last resort when selection cannot be done at all.
   Future<void> _revealFile(LocalEditSession edit) async {
-    final dir = edit.localFile.parent.path;
+    final file = edit.localFile;
+    final dir = file.parent.path;
     if (Platform.isWindows) {
-      final result = await Process.run('explorer', [
-        '/select,',
-        edit.localFile.absolute.path,
-      ]);
-      if (result.exitCode != 0) {
-        throw StateError('资源管理器未能打开所在文件夹');
+      if (!file.parent.existsSync()) {
+        throw StateError('本地编辑目录已不存在，无法打开所在文件夹：$dir');
+      }
+      if (!file.existsSync()) {
+        throw StateError('本地文件已不存在，无法定位：${file.path}');
+      }
+      final absolute = file.absolute.path;
+      try {
+        await const MethodChannel('hspterm/prototype_window')
+            .invokeMethod<void>('reveal', {'path': absolute});
+        return;
+      } on MissingPluginException {
+        // Older runner or non-standard embedding; fall through to explorer.
+      } on PlatformException catch (error) {
+        if (error.code == 'reveal') rethrow;
+        // reveal_failed: selection was not possible — open the parent.
+      }
+      try {
+        // Explorer hand the request to its existing process and exits with 1
+        // even when the window opened fine, so the exit code is ignored.
+        await Process.run('explorer.exe', ['/select,$absolute']);
+      } catch (_) {
+        await launchUrl(
+          Uri.directory(dir),
+          mode: LaunchMode.externalApplication,
+        );
       }
       return;
     }
@@ -209,7 +274,9 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       : '${(n / 1048576).toStringAsFixed(1)} MiB';
   void run(Future<void> work) => unawaited(
     work.catchError((Object error) {
-      if (mounted) notice(context, '传输操作失败：$error');
+      if (mounted) {
+        notice(context, '传输操作失败：$error', level: AppNoticeLevel.error);
+      }
     }),
   );
   Future<void> action(
@@ -295,7 +362,11 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       );
     }
     if (unchecked > 0 && mounted) {
-      notice(context, '$unchecked 个移动结果未确认，请单独检查；未重发');
+      notice(
+        context,
+        '$unchecked 个移动结果未确认，请单独检查；未重发',
+        level: AppNoticeLevel.warning,
+      );
     }
   }
 
@@ -785,7 +856,15 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         .toList();
     final rows = <Object>[
       if (edits.isNotEmpty) ...[
-        SectionHeading('本地编辑 · ${edits.length}'),
+        SectionHeading(
+          '本地编辑 · ${edits.length}',
+          trailing: Tool(
+            Icons.layers_clear,
+            '关闭所有本地编辑会话',
+            () => run(_closeAllEdits(edits)),
+            size: 14,
+          ),
+        ),
         ...edits,
       ],
       if (activity.isNotEmpty) ...[

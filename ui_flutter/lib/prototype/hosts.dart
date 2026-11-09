@@ -17,6 +17,7 @@ import '../workbench/typography_settings.dart';
 import '../src/rust/api.dart' as rust;
 import 'model.dart';
 import 'host_connection_test_dialog.dart';
+import '../app_notice.dart';
 
 class HostManager extends StatefulWidget {
   const HostManager({super.key, required this.model});
@@ -376,10 +377,20 @@ class HostManagerState extends State<HostManager> {
               .where((h) => h.id == imported.first.id)
               .firstOrNull;
           if (host != null) setState(() => load(host));
-          notice(context, '已加密导入${imported.length}台主机；请配置凭据后连接。');
+          notice(
+            context,
+            '已加密导入${imported.length}台主机；请配置凭据后连接。',
+            level: AppNoticeLevel.success,
+          );
         }
       } catch (_) {
-        if (mounted) notice(context, '导入已保存，但列表刷新失败；请重新打开主机管理，勿重复导入。');
+        if (mounted) {
+          notice(
+            context,
+            '导入已保存，但列表刷新失败；请重新打开主机管理，勿重复导入。',
+            level: AppNoticeLevel.warning,
+          );
+        }
       }
     } finally {
       if (mounted) setState(() => _importOpen = false);
@@ -427,7 +438,13 @@ class HostManagerState extends State<HostManager> {
         saved = true;
       } on HostOrderingRefreshFailure {
         saved = true;
-        if (mounted) notice(context, '拖放顺序已保存，但主机列表刷新失败；请重新打开主机管理，不要重复操作。');
+        if (mounted) {
+          notice(
+            context,
+            '拖放顺序已保存，但主机列表刷新失败；请重新打开主机管理，不要重复操作。',
+            level: AppNoticeLevel.warning,
+          );
+        }
         return;
       }
       if (mounted) {
@@ -541,7 +558,11 @@ class HostManagerState extends State<HostManager> {
       }
     } catch (error) {
       if (mounted) {
-        notice(context, '${saved ? '排序已保存，但列表刷新失败' : '无法打开排序'}：$error');
+        notice(
+          context,
+          '${saved ? '排序已保存，但列表刷新失败' : '无法打开排序'}：$error',
+          level: AppNoticeLevel.warning,
+        );
       }
     } finally {
       if (mounted) setState(() => _orderingOpen = false);
@@ -614,7 +635,7 @@ class HostManagerState extends State<HostManager> {
         ? null
         : m.recoveredDraft(id) ?? m.hosts.where((h) => h.id == id).firstOrNull;
     if (id != null && current == null) {
-      notice(context, '目标主机或草稿已不存在，请重新选择。');
+      notice(context, '目标主机或草稿已不存在，请重新选择。', level: AppNoticeLevel.warning);
       return;
     }
     setState(() => load(current));
@@ -646,7 +667,9 @@ class HostManagerState extends State<HostManager> {
           });
         }
       } catch (error) {
-        if (mounted) notice(context, '复制失败：$error');
+        if (mounted) {
+          notice(context, '复制失败：$error', level: AppNoticeLevel.error);
+        }
       }
     }
   }
@@ -668,7 +691,9 @@ class HostManagerState extends State<HostManager> {
       try {
         await m.deleteHosts(Set.of(selected));
       } catch (error) {
-        if (mounted) notice(context, '删除失败：$error');
+        if (mounted) {
+          notice(context, '删除失败：$error', level: AppNoticeLevel.error);
+        }
         return;
       }
       if (!mounted) return;
@@ -696,7 +721,11 @@ class HostManagerState extends State<HostManager> {
         }
       } catch (error) {
         if (mounted) {
-          notice(context, '${saved ? '批量修改已保存，但列表刷新失败' : '无法打开批量编辑'}：$error');
+          notice(
+            context,
+            '${saved ? '批量修改已保存，但列表刷新失败' : '无法打开批量编辑'}：$error',
+            level: AppNoticeLevel.warning,
+          );
         }
       } finally {
         if (mounted) setState(() => _bulkOpen = false);
@@ -776,7 +805,9 @@ class HostManagerState extends State<HostManager> {
           favorite: applyFavorite ? targetFavorite : null,
         );
       } catch (error) {
-        if (mounted) notice(context, '批量修改失败：$error');
+        if (mounted) {
+          notice(context, '批量修改失败：$error', level: AppNoticeLevel.error);
+        }
         return;
       }
       if (!mounted) return;
@@ -975,7 +1006,9 @@ class HostManagerState extends State<HostManager> {
         confirmButtonText: confirmButtonText,
       );
     } catch (error) {
-      if (mounted) notice(context, '文件选择器不可用：$error');
+      if (mounted) {
+        notice(context, '文件选择器不可用：$error', level: AppNoticeLevel.error);
+      }
       return null;
     }
   }
@@ -998,7 +1031,9 @@ class HostManagerState extends State<HostManager> {
       try {
         selected = await openFile(confirmButtonText: '导入私钥');
       } catch (error) {
-        if (mounted) notice(context, '文件选择器不可用：$error');
+        if (mounted) {
+          notice(context, '文件选择器不可用：$error', level: AppNoticeLevel.error);
+        }
         return;
       }
       if (selected == null || !mounted) return;
@@ -1046,7 +1081,9 @@ class HostManagerState extends State<HostManager> {
       await _flushDraft();
       result = await m.publicKey(editingId!);
     } catch (error) {
-      if (mounted) notice(context, '无法读取公钥：$error');
+      if (mounted) {
+        notice(context, '无法读取公钥：$error', level: AppNoticeLevel.error);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -1062,7 +1099,7 @@ class HostManagerState extends State<HostManager> {
     if (entered == null || !mounted) return;
     var password = entered;
     if (password.isEmpty) {
-      if (mounted) notice(context, '请输入主密码');
+      if (mounted) notice(context, '请输入主密码', level: AppNoticeLevel.warning);
       return;
     }
     final location = await _saveKeyLocation(
@@ -1079,7 +1116,9 @@ class HostManagerState extends State<HostManager> {
       await m.exportKey(editingId!, location.path, password);
       if (mounted) notice(context, '私钥已保存到所选新文件；未写入剪贴板');
     } catch (error) {
-      if (mounted) notice(context, '私钥导出失败：$error');
+      if (mounted) {
+        notice(context, '私钥导出失败：$error', level: AppNoticeLevel.error);
+      }
     } finally {
       password = '';
       if (mounted) setState(() => _saving = false);
@@ -1583,7 +1622,11 @@ class HostManagerState extends State<HostManager> {
                   if (m.isMock) {
                     notice(context, '原型不保存主机字体；请使用正式工作台。');
                   } else if (_newRecord || dirty) {
-                    notice(context, '请先正式保存主机；字体设置不会自动保存当前修改。');
+                    notice(
+                      context,
+                      '请先正式保存主机；字体设置不会自动保存当前修改。',
+                      level: AppNoticeLevel.warning,
+                    );
                   } else if (m case final LiveWorkbenchModel live) {
                     final host = live.hosts
                         .firstWhere((h) => h.id == editingId)
@@ -1709,7 +1752,11 @@ class HostManagerState extends State<HostManager> {
                   if (m.isMock) {
                     notice(context, '原型不启动真实转发；请从正式工作台管理已保存规则');
                   } else if (_newRecord || dirty) {
-                    notice(context, '请先正式保存主机；打开转发管理不会自动保存当前修改。');
+                    notice(
+                      context,
+                      '请先正式保存主机；打开转发管理不会自动保存当前修改。',
+                      level: AppNoticeLevel.warning,
+                    );
                   } else if (m case final LiveWorkbenchModel live) {
                     final host = live.hosts
                         .firstWhere((h) => h.id == editingId)
@@ -1745,7 +1792,11 @@ class HostManagerState extends State<HostManager> {
         if (m.isMock) {
           notice(context, '模拟连接测试：不会进行真实 TCP、SSH 或 DNS 探测');
         } else if (_newRecord || dirty) {
-          notice(context, '请先点击保存；连接测试仅使用正式保存的配置，不会自动保存修改。');
+          notice(
+            context,
+            '请先点击保存；连接测试仅使用正式保存的配置，不会自动保存修改。',
+            level: AppNoticeLevel.warning,
+          );
         } else {
           final host = m.hosts.firstWhere((h) => h.id == editingId).snapshot();
           await showDialog<void>(
@@ -1765,7 +1816,7 @@ class HostManagerState extends State<HostManager> {
           return;
         }
         if (_newRecord) {
-          notice(context, '请先正式保存主机，再使用本次临时覆盖');
+          notice(context, '请先正式保存主机，再使用本次临时覆盖', level: AppNoticeLevel.warning);
           return;
         }
         if (!await canLeave() || !mounted) return;
@@ -1778,7 +1829,11 @@ class HostManagerState extends State<HostManager> {
       key: const ValueKey('save-host'),
       onPressed: () async {
         if (await save() && mounted) {
-          notice(context, m.isMock ? '模拟配置已保存至内存' : '配置已加密保存');
+          notice(
+            context,
+            m.isMock ? '模拟配置已保存至内存' : '配置已加密保存',
+            level: AppNoticeLevel.success,
+          );
         }
       },
       child: const Text('保存'),

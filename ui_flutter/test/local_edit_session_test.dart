@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -16,6 +17,9 @@ class FakeGateway implements LocalEditGateway {
   final renames = <(String, String)>[];
   Object? uploadError;
   bool refuseUpload = false;
+  // Round-12: when set, uploads never complete (idle-close exemption test).
+  Completer<void>? uploadGate;
+  bool holdUploads = false;
   // Override hooks applied on top of the per-path state.
   int? statSizeOverride;
   int? statMtimeOverride;
@@ -60,6 +64,10 @@ class FakeGateway implements LocalEditGateway {
     if (refuseUpload) throw const SocketException('offline');
     if (uploadError != null) throw uploadError!;
     final bytes = await source.readAsBytes();
+    if (holdUploads) {
+      uploadGate ??= Completer<void>();
+      await uploadGate!.future;
+    }
     uploads.add((path, bytes));
     onProgress?.call(bytes.length, bytes.length);
   }
@@ -584,4 +592,103 @@ void main() {
     expect(saturated.length, 0);
     s.controller.dispose();
   });
+
+  test('idle timeout closes the session but never mid-transfer', () async {
+    final s = await connectedSession();
+    gateway.seed('/dir/idle.txt', utf8Bytes('seed'));
+    final session = await launchFor(s, 'idle.txt');
+    expect(session.status, LocalEditStatus.editing);
+    // Poll-driven idle check with a tiny injected timeout.
+    final shortSessions = <LocalEditSession>[];
+    await LocalEditSession.launch(
+      s,
+      DemoFile(
+        '/dir/idle2.txt',
+        'idle2.txt',
+        kind: '文件',
+        size: '5 B',
+        byteSize: 5,
+      ),
+      gateway: gateway,
+      onNotice: notices.add,
+      rootOverride: root,
+      launchOverride: (_) async => true,
+      onSession: shortSessions.add,
+      idleTimeout: const Duration(milliseconds: 1),
+    );
+    final short = shortSessions.single;
+    // The periodic checker fires on its own within _idleCheckInterval.
+    await Future<void>.delayed(const Duration(seconds: 2));
+    expect(
+      short.status,
+      LocalEditStatus.closed,
+      reason: 'idle timeout must auto-close the session',
+    );
+    // An uploading session is exempt from idle close: start one and keep
+    // the upload pending so the idle check must skip it.
+    final busySessions = <LocalEditSession>[];
+    await LocalEditSession.launch(
+      s,
+      DemoFile(
+        '/dir/busy.txt',
+        'busy.txt',
+        kind: '文件',
+        size: '5 B',
+        byteSize: 5,
+      ),
+      gateway: gateway,
+      onNotice: notices.add,
+      rootOverride: root,
+      launchOverride: (_) async => true,
+      onSession: busySessions.add,
+      idleTimeout: const Duration(milliseconds: 800),
+    );
+    final busy = busySessions.single;
+    // Mark it uploading via a real modification whose upload never lands:
+    gateway.holdUploads = true;
+    await busy.localFile.writeAsString('changed!');
+    final uploadFuture = busy.testStableCheck();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(busy.status, LocalEditStatus.uploading);
+    // The idle clock (800 ms) has long expired by now; the running upload
+    // must keep the session exempt from the auto-close.
+    await Future<void>.delayed(const Duration(seconds: 2));
+    expect(
+      busy.status,
+      LocalEditStatus.uploading,
+      reason: 'an in-flight upload must never be idle-closed',
+    );
+    gateway.uploadGate?.complete();
+    gateway.holdUploads = false;
+    await uploadFuture;
+    await session.dispose();
+    await short.dispose();
+    await busy.dispose();
+    s.controller.dispose();
+  }, timeout: const Timeout(Duration(seconds: 60)));
+
+  test(
+    'closeAllActive closes sessions but keeps the registry usable',
+    () async {
+      final registry = LocalEditRegistry();
+      final s = await connectedSession();
+      final a = await launchFor(s, 'ca1.txt');
+      final b = await launchFor(s, 'ca2.txt');
+      registry.register(a);
+      registry.register(b);
+      expect(registry.length, 2);
+      await registry.closeAllActive();
+      expect(registry.length, 0);
+      expect(a.status, LocalEditStatus.closed);
+      expect(b.status, LocalEditStatus.closed);
+      // The registry is NOT permanently closed: new sessions still register.
+      final c = await launchFor(s, 'ca3.txt');
+      registry.register(c);
+      expect(registry.length, 1);
+      await registry.closeAllActive();
+      expect(registry.length, 0);
+      expect(c.status, LocalEditStatus.closed);
+      s.controller.dispose();
+    },
+  );
 }

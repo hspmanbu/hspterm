@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show AnyhowException;
@@ -13,17 +15,66 @@ String appMessage(Object value) {
   );
 }
 
+/// Explicit feedback levels. Only [warning] and [error] raise the bottom
+/// SnackBar; [info] and [success] appear in the quiet status area instead so
+/// ordinary operations never interrupt the user.
+enum AppNoticeLevel { info, success, warning, error }
+
+/// One quiet status message published by info/success notices.
+class QuietNotice {
+  QuietNotice(this.message, this.level, this.at);
+  final String message;
+  final AppNoticeLevel level;
+  final DateTime at;
+}
+
+/// Process-wide quiet notice stream. The workbench status bar listens and
+/// shows the latest message briefly; nothing is logged or persisted here.
+final quietNoticeNotifier = ValueNotifier<QuietNotice?>(null);
+
+DateTime? _lastPopupAt;
+String? _lastPopupMessage;
+
+/// Test hook: the dedupe window compares wall-clock stamps, which do not
+/// advance under `tester.pump`, so tests that re-show the same notice must
+/// reset the dedupe state explicitly.
+@visibleForTesting
+void resetAppNoticeDedupe() {
+  _lastPopupMessage = null;
+  _lastPopupAt = null;
+}
+
+void _publishQuiet(String message, AppNoticeLevel level) {
+  quietNoticeNotifier.value = QuietNotice(message, level, DateTime.now());
+}
+
 void showAppNotice(
   BuildContext context,
   Object message, {
+  AppNoticeLevel level = AppNoticeLevel.info,
   SnackBarAction? action,
 }) {
+  final text = appMessage(message);
+  if (level != AppNoticeLevel.warning && level != AppNoticeLevel.error) {
+    _publishQuiet(text, level);
+    return;
+  }
+  final now = DateTime.now();
+  if (_lastPopupMessage == text &&
+      _lastPopupAt != null &&
+      now.difference(_lastPopupAt!) < const Duration(seconds: 3)) {
+    return;
+  }
+  _lastPopupMessage = text;
+  _lastPopupAt = now;
   final messenger = ScaffoldMessenger.maybeOf(context);
   if (messenger == null) return;
+  // Errors outrank whatever transient SnackBar is on screen; ordinary quiet
+  // notices never touch the SnackBar at all.
   messenger.hideCurrentSnackBar();
   messenger.showSnackBar(
     SnackBar(
-      content: Text(appMessage(message)),
+      content: Text(text),
       duration: const Duration(seconds: 6),
       showCloseIcon: true,
       persist: false,
@@ -31,4 +82,65 @@ void showAppNotice(
       action: action,
     ),
   );
+}
+
+/// Shows the latest quiet notice in the status area, fading it out after
+/// [visibleFor]. Errors never appear here, so a quiet message cannot cover a
+/// real SnackBar error.
+class QuietNoticeView extends StatefulWidget {
+  const QuietNoticeView({
+    super.key,
+    this.visibleFor = const Duration(seconds: 4),
+  });
+  final Duration visibleFor;
+  @override
+  State<QuietNoticeView> createState() => _QuietNoticeViewState();
+}
+
+class _QuietNoticeViewState extends State<QuietNoticeView> {
+  Timer? _fade;
+  @override
+  void initState() {
+    super.initState();
+    quietNoticeNotifier.addListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    _fade?.cancel();
+    quietNoticeNotifier.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    _fade?.cancel();
+    if (quietNoticeNotifier.value != null) {
+      _fade = Timer(widget.visibleFor, () {
+        if (mounted) setState(() {});
+      });
+    }
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final notice = quietNoticeNotifier.value;
+    if (notice == null ||
+        DateTime.now().difference(notice.at) > widget.visibleFor) {
+      return const SizedBox.shrink();
+    }
+    final scheme = Theme.of(context).colorScheme;
+    final color = notice.level == AppNoticeLevel.success
+        ? scheme.primary
+        : scheme.onSurfaceVariant;
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Text(
+        notice.message,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 12, color: color),
+      ),
+    );
+  }
 }

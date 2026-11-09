@@ -310,7 +310,7 @@ class _FilePropertiesState extends State<FilePropertiesDialog> {
         recursive: recursive,
       );
       if (!mounted) return;
-      showAppNotice(context, '远端属性已保存');
+      showAppNotice(context, '远端属性已保存', level: AppNoticeLevel.success);
       Navigator.pop(context);
     } catch (failure) {
       if (mounted) setState(() => error = appMessage(failure));

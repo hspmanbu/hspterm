@@ -11,12 +11,25 @@ pub struct Colors {
 impl Default for Colors {
     fn default() -> Self {
         Self {
-            foreground: 0xd8dee9,
+            foreground: 0xe6ebf4,
             background: 0x10151d,
-            cursor: 0xd8dee9,
+            cursor: 0xe6ebf4,
             ansi: (0..16)
                 .map(|i| crate::default_color(i) & 0xffffff)
                 .collect(),
+        }
+    }
+}
+impl Colors {
+    /// Exact pre-round-12 default, used by the load-time fingerprint
+    /// migration: a stored palette that matches this byte-for-byte was
+    /// never customized and safely upgrades to the new default.
+    pub fn legacy_default() -> Self {
+        Self {
+            foreground: 0xd8dee9,
+            background: 0x10151d,
+            cursor: 0xd8dee9,
+            ansi: crate::legacy_default_ansi().to_vec(),
         }
     }
 }

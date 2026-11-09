@@ -1,0 +1,97 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:hspterm/prototype/design.dart';
+
+void main() {
+  testWidgets('confirm stays fully visible in a small window', (tester) async {
+    tester.view.physicalSize = const Size(420, 320);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    var confirmed = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => Center(
+              child: FilledButton(
+                onPressed: () async {
+                  confirmed = await confirm(
+                    context,
+                    '删除确认',
+                    '很长的一段正文' * 120,
+                    danger: true,
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    // The dialog exists, its content scrolls, and BOTH action buttons stay
+    // laid out inside the 420x320 window.
+    expect(find.text('删除确认'), findsOneWidget);
+    expect(find.byType(SingleChildScrollView), findsOneWidget);
+    expect(find.text('取消'), findsOneWidget);
+    expect(find.text('确认'), findsOneWidget);
+    final dialog = tester.renderObject<RenderBox>(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(SingleChildScrollView),
+      ),
+    );
+    expect(
+      dialog.size.height,
+      lessThan(320),
+      reason: 'the scrollable body is height-bounded by the viewport',
+    );
+    await tester.tap(find.text('确认'));
+    await tester.pumpAndSettle();
+    expect(confirmed, isTrue);
+  });
+
+  testWidgets('showBoundedDialog constrains oversized custom dialogs', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 300);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => Center(
+              child: TextButton(
+                onPressed: () => showBoundedDialog<void>(
+                  context,
+                  (c) => const AlertDialog(
+                    title: Text('t'),
+                    content: SizedBox(width: 600, height: 800),
+                  ),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    final content = tester.renderObject<RenderBox>(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(SizedBox),
+      ),
+    );
+    expect(
+      content.size.width,
+      lessThan(360),
+      reason: 'the oversized 600px body is squeezed inside the tiny window',
+    );
+    expect(content.size.height, lessThan(300));
+  });
+}

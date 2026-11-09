@@ -13,6 +13,7 @@ import '../src/rust/api.dart' as rust;
 import '../src/rust/editors.dart';
 import 'editor_controller.dart';
 import 'model.dart';
+import '../app_notice.dart';
 
 const editorEncodings = {
   'utf8': 'UTF-8',
@@ -174,7 +175,7 @@ class _RemoteEditorDialogState extends State<RemoteEditorDialog> {
     _asking = true;
     try {
       if (c.composing) {
-        notice(context, '请先确认或取消输入法候选，再关闭编辑文档');
+        notice(context, '请先确认或取消输入法候选，再关闭编辑文档', level: AppNoticeLevel.warning);
         return;
       }
       // A failed/offline load may indicate an unknown journal version. Closing
@@ -256,7 +257,7 @@ class _RemoteEditorDialogState extends State<RemoteEditorDialog> {
         return;
       }
       if (c.composing) {
-        notice(context, '请先确认或取消输入法候选');
+        notice(context, '请先确认或取消输入法候选', level: AppNoticeLevel.warning);
         return;
       }
       FocusScope.of(context).unfocus();
@@ -284,7 +285,7 @@ class _RemoteEditorDialogState extends State<RemoteEditorDialog> {
         ),
       );
     } catch (e) {
-      if (mounted) notice(context, '外部编辑操作未完成：$e');
+      if (mounted) notice(context, '外部编辑操作未完成：$e', level: AppNoticeLevel.error);
     }
   }
 

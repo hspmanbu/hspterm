@@ -98,17 +98,41 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
   Timer? _memorySampler;
   late final RuntimeDiagnostics _diagnostics = RuntimeDiagnostics(() => m);
 
+  void _sampleMemory() {
+    AppRunLog.instance.event(
+      AppLogEvent.memorySample,
+      count: (ProcessInfo.currentRss / 1024).round(),
+      fields: {
+        'bytes': ProcessInfo.currentRss,
+        'maxRssKiB': (ProcessInfo.maxRss / 1024).round(),
+        'kind': 'rssKiB',
+      },
+    );
+  }
+
   @override
   void initState() {
     super.initState();
-    // One bounded sample per minute: current/max RSS only, no payloads.
-    _memorySampler = Timer.periodic(const Duration(minutes: 1), (_) {
-      AppRunLog.instance.event(
-        AppLogEvent.memorySample,
-        count: (ProcessInfo.currentRss / 1024).round(),
-        fields: {'bytes': ProcessInfo.currentRss, 'kind': 'rssKiB'},
-      );
-    });
+    // Memory samples: 10s for the first five minutes (the observed growth
+    // phase), then once per minute. RSS/maxRSS only, no payloads.
+    var fastSamples = 30;
+    _sampleMemory();
+    _memorySampler = Timer.periodic(
+      fastSamples > 0
+          ? const Duration(seconds: 10)
+          : const Duration(minutes: 1),
+      (_) {
+        if (fastSamples == 0) {
+          _memorySampler?.cancel();
+          _memorySampler = Timer.periodic(
+            const Duration(minutes: 1),
+            (_) => _sampleMemory(),
+          );
+        }
+        fastSamples--;
+        _sampleMemory();
+      },
+    );
     // Threshold-gated stall/jank/counts instrumentation (round-8 feedback).
     _diagnostics.start();
     _noticeHub = TerminalNoticeHub(

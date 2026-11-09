@@ -15,7 +15,11 @@ class TerminalSuggestionsController extends ChangeNotifier {
   }
   final TerminalController terminal;
   rust.TerminalSuggestions? view;
-  int selected = 0;
+
+  /// -1 means no candidate is selected: the box opens unselected, Enter/Tab
+  /// keep their normal shell meaning until the user picks something with the
+  /// arrow keys or the mouse.
+  int selected = -1;
   bool busy = false;
   bool _wanted = false, _disposed = false, _running = false, _again = false;
   int _epoch = 0;
@@ -36,7 +40,7 @@ class TerminalSuggestionsController extends ChangeNotifier {
   void _clear() {
     final had = view != null;
     view = null;
-    selected = 0;
+    selected = -1;
     if (had) _notify();
   }
 
@@ -79,7 +83,12 @@ class TerminalSuggestionsController extends ChangeNotifier {
 
   void move(int step) {
     if (!showing) return;
-    selected = (selected + step) % view!.choices.length;
+    final count = view!.choices.length;
+    // The first arrow key from an unselected box jumps to the first (down) or
+    // last (up) candidate; afterwards movement wraps around as before.
+    selected = selected < 0
+        ? (step > 0 ? 0 : count - 1)
+        : (selected + step) % count;
     _notify();
   }
 
@@ -120,7 +129,8 @@ class TerminalSuggestionsController extends ChangeNotifier {
         return;
       }
       view = next;
-      selected = 0;
+      // A fresh candidate list always starts unselected.
+      selected = -1;
       _notify();
     } catch (_) {
       // Optional suggestions fail closed; raw keyboard input still works. Never

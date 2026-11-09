@@ -1,4 +1,5 @@
 import 'operation_notice.dart';
+import '../app_notice.dart';
 import '../run_log.dart';
 import '../terminal/application_keys.dart';
 import 'command_palette.dart';
@@ -168,7 +169,9 @@ class PrototypeAppState extends State<PrototypeApp> {
     try {
       await m.shutdown();
     } catch (error) {
-      if (context.mounted) notice(context, '退出前保存或资源释放失败，未退出：$error');
+      if (context.mounted) {
+        notice(context, '退出前保存或资源释放失败，未退出：$error', level: AppNoticeLevel.error);
+      }
       return AppExitResponse.cancel;
     }
     return AppExitResponse.exit;
@@ -520,6 +523,9 @@ class PrototypeAppState extends State<PrototypeApp> {
                         color: Theme.of(context).colorScheme.primary,
                       ),
                       const SizedBox(width: 6),
+                      // Flexible: a long quiet notice ellipsizes instead of
+                      // widening the fixed-height status row.
+                      const Flexible(child: QuietNoticeView()),
                       Text(
                         m.isMock ? 'UI 原型 · 模拟数据 · 不连接服务器' : 'HSPTerm · SSH',
                         style: TextStyle(fontSize: 10),

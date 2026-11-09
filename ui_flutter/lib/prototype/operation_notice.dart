@@ -20,7 +20,7 @@ class _OperationNoticeState extends State<OperationNotice> {
       _queued = message;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || widget.model.operationError != message) return;
-        showAppNotice(context, message);
+        showAppNotice(context, message, level: AppNoticeLevel.error);
         widget.model.operationError = null;
         _queued = null;
         widget.model.changed();

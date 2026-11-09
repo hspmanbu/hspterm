@@ -60,6 +60,9 @@ enum AppLogEvent {
   uiStall,
   frameJank,
   resourceCount,
+  // Round-12: local-edit idle auto-close (idle minutes and draft outcome
+  // only, never content).
+  editIdleClosed,
 }
 
 /// Current launch only. Accept fixed events/numbers and code locations, never
@@ -87,6 +90,22 @@ class AppRunLog {
     'driftMs',
     'buildMs',
     'rasterMs',
+    // Round-12 frame phases (microseconds) and memory/cache counters.
+    'vsyncToBuildUs',
+    'buildUs',
+    'buildToRasterUs',
+    'rasterUs',
+    'totalUs',
+    'avgTotalUs',
+    'maxTotalUs',
+    'queueShare',
+    'maxRssKiB',
+    'rssKiB',
+    'dirCacheKiB',
+    'dirCacheDirs',
+    'heapUsedKiB',
+    'heapCapacityKiB',
+    'externalKiB',
     'terminals',
     'edits',
     'transfers',

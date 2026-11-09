@@ -2,9 +2,11 @@
 
 #include <optional>
 #include <set>
+#include <algorithm>
 #include <cmath>
 #include <dwmapi.h>
 #include <windowsx.h>
+#include <shlobj.h>
 #include <flutter/standard_method_codec.h>
 #include "utils.h"
 #include "secure_unlock.h"
@@ -16,6 +18,37 @@ struct FontCatalog {
   std::set<std::string> families;
   bool invalid = false;
 };
+
+// Reveals |path| in Explorer via the documented shell API: opens the parent
+// folder with the item preselected, reusing the shell's own window. This is
+// the reliable replacement for `explorer /select,...` whose exit code is
+// meaningless (a reused Explorer process exits with 1 even on success).
+bool RevealInExplorer(const std::wstring& path) {
+  LPITEMIDLIST item = nullptr;
+  SFGAOF attributes = 0;
+  const HRESULT parsed = SHParseDisplayName(path.c_str(), nullptr, &item, 0, &attributes);
+  if (FAILED(parsed) || item == nullptr) return false;
+  // The parent folder is derived from the same PIDL so the selection target
+  // and the opened window can never disagree.
+  LPCITEMIDLIST child = nullptr;
+  LPITEMIDLIST parent = ILCloneFull(item);
+  if (parent == nullptr) {
+    ILFree(item);
+    return false;
+  }
+  // ILRemoveLastID mutates in place, leaving the parent PIDL.
+  if (!ILRemoveLastID(parent)) {
+    ILFree(parent);
+    ILFree(item);
+    return false;
+  }
+  child = ILFindLastID(item);
+  const HRESULT revealed = SHOpenFolderAndSelectItems(parent, 1, &child, 0);
+  ILFree(parent);
+  ILFree(item);
+  return SUCCEEDED(revealed);
+}
+
 int CALLBACK CollectFont(const LOGFONTW* font, const TEXTMETRICW*, DWORD,
                          LPARAM data) {
   auto* catalog = reinterpret_cast<FontCatalog*>(data);
@@ -204,6 +237,80 @@ bool FlutterWindow::OnCreate() {
       // or process exit here: active edits/transfers must finish saving first.
       if (!PostMessage(window, WM_CLOSE, 0, 0)) {
         result->Error("window_close", "无法提交关闭请求；窗口保持打开"); return;
+      }
+    } else if (method == "reveal") {
+      // Open the parent folder with the file preselected through the shell
+      // API (SHOpenFolderAndSelectItems). The Dart side falls back to opening
+      // the folder when selection is not possible.
+      const auto* args = call.arguments();
+      const auto* map = args == nullptr
+          ? nullptr : std::get_if<flutter::EncodableMap>(args);
+      const auto* path = [&]() -> const std::string* {
+        if (map == nullptr) return nullptr;
+        const auto it = map->find(flutter::EncodableValue("path"));
+        if (it == map->end()) return nullptr;
+        return std::get_if<std::string>(&it->second);
+      }();
+      if (path == nullptr || path->empty()) {
+        result->Error("reveal", "未提供要定位的文件路径"); return;
+      }
+      const int wide_size = MultiByteToWideChar(
+          CP_UTF8, MB_ERR_INVALID_CHARS, path->c_str(), -1, nullptr, 0);
+      if (wide_size <= 0) {
+        result->Error("reveal", "文件路径编码无效"); return;
+      }
+      std::wstring wide(static_cast<size_t>(wide_size), L'\0');
+      if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path->c_str(), -1,
+                              wide.data(), wide_size) != wide_size) {
+        result->Error("reveal", "文件路径编码无效"); return;
+      }
+      if (!RevealInExplorer(wide)) {
+        result->Error("reveal_failed", "Shell未能选中文件；回退打开父目录"); return;
+      }
+    } else if (method == "ensureDialogVisible") {
+      // A Flutter dialog is clipped to this window's client area. When the
+      // window hangs off the monitor a centered dialog can end up (partly)
+      // outside the visible screen. Slide the window — size unchanged —
+      // back into the monitor work area so an upcoming dialog is reachable.
+      const auto* args = call.arguments();
+      const auto* map = args == nullptr
+          ? nullptr : std::get_if<flutter::EncodableMap>(args);
+      double min_w = 480, min_h = 400;
+      if (map != nullptr) {
+        const auto read = [&](const char* key, double& into) {
+          const auto it = map->find(flutter::EncodableValue(key));
+          if (it != map->end()) {
+            if (const auto* v = std::get_if<double>(&it->second)) {
+              if (std::isfinite(*v) && *v > 0) into = *v;
+            }
+          }
+        };
+        read("minWidth", min_w);
+        read("minHeight", min_h);
+      }
+      const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+      MONITORINFO info = {};
+      info.cbSize = sizeof(info);
+      RECT wr = {};
+      if (monitor == nullptr || !GetMonitorInfo(monitor, &info) || !GetWindowRect(window, &wr)) {
+        result->Error("dialog_bounds", "无法读取窗口或显示器区域"); return;
+      }
+      const LONG width = wr.right - wr.left, height = wr.bottom - wr.top;
+      const LONG overlap_w = std::min(wr.right, info.rcWork.right) - std::max(wr.left, info.rcWork.left);
+      const LONG overlap_h = std::min(wr.bottom, info.rcWork.bottom) - std::max(wr.top, info.rcWork.top);
+      const bool room_for_dialog =
+          overlap_w >= static_cast<LONG>(min_w) && overlap_h >= static_cast<LONG>(min_h);
+      if (!room_for_dialog) {
+        // Clamp the window origin into the work area, preserving size; DPI
+        // virtualization means these are all in the same coordinate space.
+        const LONG x = std::clamp(wr.left, info.rcWork.left,
+                                  std::max(info.rcWork.left, info.rcWork.right - width));
+        const LONG y = std::clamp(wr.top, info.rcWork.top,
+                                  std::max(info.rcWork.top, info.rcWork.bottom - height));
+        if (!SetWindowPos(window, nullptr, x, y, 0, 0,
+                          SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)) {
+          result->Error("dialog_bounds", "无法将窗口移回可见区域"); return;
+        }
       }
     } else if (method == "maximizeRect") {
       const auto* args = call.arguments();

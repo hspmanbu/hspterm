@@ -545,7 +545,39 @@ class TerminalController extends ChangeNotifier {
         1000000,
       );
     }
-    metadata = frame;
+    // Keep only the frame's scalar state as metadata. The delta rows are
+    // already owned by [rows]; anchoring the original frame here would keep
+    // the whole delta (cell lists included) alive until the next frame,
+    // doubling the resident terminal data and feeding allocator churn.
+    metadata = rust.RenderFrame(
+      revision: frame.revision,
+      contentRevision: frame.contentRevision,
+      outputLines: frame.outputLines,
+      sizeLocked: frame.sizeLocked,
+      sameWordEnabled: frame.sameWordEnabled,
+      sameWordCaseSensitive: frame.sameWordCaseSensitive,
+      decorationsLimited: frame.decorationsLimited,
+      searchRevision: frame.searchRevision,
+      searchSpans: frame.searchSpans,
+      columns: frame.columns,
+      rows: frame.rows,
+      full: frame.full,
+      changedRows: const [],
+      cursorColumn: frame.cursorColumn,
+      cursorRow: frame.cursorRow,
+      cursorVisible: frame.cursorVisible,
+      cursorShape: frame.cursorShape,
+      cursorBlink: frame.cursorBlink,
+      osc52Enabled: frame.osc52Enabled,
+      rightClickPaste: frame.rightClickPaste,
+      copyOnSelection: frame.copyOnSelection,
+      cursorColor: frame.cursorColor,
+      background: frame.background,
+      alternateScreen: frame.alternateScreen,
+      mouseReporting: frame.mouseReporting,
+      historyLines: frame.historyLines,
+      displayOffset: frame.displayOffset,
+    );
     transportInfo.value = (
       rttMicros: transportInfo.value.rttMicros,
       columns: frame.columns,

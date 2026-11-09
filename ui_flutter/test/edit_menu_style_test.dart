@@ -54,9 +54,7 @@ void main() {
       final style = button.style;
       expect(style?.minimumSize, isNotNull, reason: 'styled menu item');
     }
-    final heights = buttons
-        .map((b) => b.style!.minimumSize)
-        .toSet();
+    final heights = buttons.map((b) => b.style!.minimumSize).toSet();
     expect(heights.length, 1, reason: 'one uniform item height');
 
     await tester.pumpWidget(const SizedBox());

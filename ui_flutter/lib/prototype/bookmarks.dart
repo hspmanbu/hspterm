@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'design.dart';
 import 'model.dart';
+import '../app_notice.dart';
 
 Future<void> showDirectoryBookmarks(
   BuildContext context,
@@ -373,7 +374,13 @@ Future<void> showDirectoryBookmarkPopup(
       path: directory,
       global: global,
     );
-    if (context.mounted) notice(context, global ? '已收藏到全局书签' : '已收藏到主机书签');
+    if (context.mounted) {
+      notice(
+        context,
+        global ? '已收藏到全局书签' : '已收藏到主机书签',
+        level: AppNoticeLevel.success,
+      );
+    }
   } else if (result == 'manage') {
     await showDirectoryBookmarks(context, model, source);
   } else {

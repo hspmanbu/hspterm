@@ -27,7 +27,9 @@ void main() {
         ),
       );
       await openColumns(tester);
-      await tester.tap(find.byKey(const ValueKey('configure-file-column-modified')));
+      await tester.tap(
+        find.byKey(const ValueKey('configure-file-column-modified')),
+      );
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
       expect(find.text('修改时间'), findsOneWidget);
@@ -40,7 +42,9 @@ void main() {
             .onChanged,
         isNull,
       );
-      await tester.tap(find.byKey(const ValueKey('configure-file-column-modified')));
+      await tester.tap(
+        find.byKey(const ValueKey('configure-file-column-modified')),
+      );
       await tester.tap(find.text('应用'));
       await tester.pumpAndSettle();
       expect(find.text('修改时间'), findsNothing);
