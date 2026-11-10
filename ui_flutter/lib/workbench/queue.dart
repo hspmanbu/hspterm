@@ -166,7 +166,6 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
                   run(
                     Future<void>(() async {
                       await edit.dispose();
-                      m.localEdits.unregister(edit);
                     }),
                   );
               }

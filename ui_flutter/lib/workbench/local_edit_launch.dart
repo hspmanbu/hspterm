@@ -397,10 +397,14 @@ class LocalEditSession extends ChangeNotifier {
   /// Tracks the running upload so dispose can wait for it instead of racing
   /// a streaming read against file cleanup.
   Future<void> _inFlightUpload = Future.value();
+  Future<void> _initialization = Future.value();
+  Future<void>? _inFlightCheck;
 
   Directory get _home => _file.parent;
   bool get conflicted => _conflicted;
   bool get isDisposed => _disposed;
+  @visibleForTesting
+  bool get hasSessionListeners => hasListeners;
 
   /// Opens [file] from [source] in the system editor with write-back; the
   /// constructed session is handed to [onSession] for registry ownership.
@@ -459,11 +463,11 @@ class LocalEditSession extends ChangeNotifier {
       allowOverwrite,
       idleTimeout,
     );
-    onSession?.call(session);
-    // Round-11 P0: the download streams straight into the temp file; the
-    // stat snapshot is taken after the transfer (the listing size may be
-    // stale by the time the bytes land).
+    final initialization = Completer<void>();
+    session._initialization = initialization.future;
     try {
+      onSession?.call(session);
+      session._requireOpen();
       await gateway.downloadTo(
         native,
         generation,
@@ -471,21 +475,25 @@ class LocalEditSession extends ChangeNotifier {
         local,
         onProgress: (done, total) => session._setProgress(done, total ?? 0),
       );
-    } catch (error) {
-      await session.dispose();
-      rethrow;
-    }
-    final stat = await gateway.stat(native, generation, file.id);
-    session
-      .._originSize = stat.size
-      .._originMtime = stat.mtime;
-    final launch = launchOverride ?? _launchFileUri;
-    try {
-      await session._open(launch);
+      session._requireOpen();
+      final stat = await gateway.stat(native, generation, file.id);
+      session._requireOpen();
+      session
+        .._originSize = stat.size
+        .._originMtime = stat.mtime;
+      await session._open(launchOverride ?? _launchFileUri);
+      session._requireOpen();
     } catch (_) {
+      initialization.complete();
       await session.dispose();
       rethrow;
+    } finally {
+      if (!initialization.isCompleted) initialization.complete();
     }
+  }
+
+  void _requireOpen() {
+    if (_disposeStarted) throw StateError('本地编辑会话已关闭；未继续启动或传输');
   }
 
   static Future<bool> _launchFileUri(Uri uri) {
@@ -495,6 +503,7 @@ class LocalEditSession extends ChangeNotifier {
   Future<void> _open(Future<bool> Function(Uri uri) launch) async {
     _lastModified = await _file.lastModified();
     _lastSyncedDigest = await digestOf(_file);
+    _requireOpen();
     _lastRealChange = DateTime.now();
     _watch = _home.watch().listen((event) {
       if (event.path == _file.path) _scheduleStabilityCheck();
@@ -551,7 +560,14 @@ class LocalEditSession extends ChangeNotifier {
   @visibleForTesting
   Future<void> testStableCheck() => _checkForStableChange();
 
-  Future<void> _checkForStableChange() async {
+  Future<void> _checkForStableChange() {
+    if (_disposed || _uploading) return Future.value();
+    return _inFlightCheck ??= _stableChange().whenComplete(
+      () => _inFlightCheck = null,
+    );
+  }
+
+  Future<void> _stableChange() async {
     if (_disposed || _uploading) return;
     if (!await _file.exists()) return;
     final modified = await _file.lastModified();
@@ -573,6 +589,7 @@ class LocalEditSession extends ChangeNotifier {
   Future<void> retry() => _upload();
 
   Future<void> _upload() {
+    if (_uploading) return _inFlightUpload;
     // Track the in-flight upload so dispose waits instead of deleting the
     // local file under a streaming read.
     return _inFlightUpload = _uploadInner();
@@ -581,6 +598,7 @@ class LocalEditSession extends ChangeNotifier {
   Future<void> _uploadInner() async {
     if (_disposed || _uploading) return;
     _uploading = true;
+    File? snapshot;
     try {
       final current = _session.controller.id == _native
           ? _session.controller.generation
@@ -612,12 +630,15 @@ class LocalEditSession extends ChangeNotifier {
       final parent = slash == 0 ? '/' : _remotePath.substring(0, slash);
       final tempName =
           '$parent/.hspterm-edit-${DateTime.now().microsecondsSinceEpoch}';
+      snapshot = await _snapshotForUpload();
+      final uploadedDigest = await digestOf(snapshot);
+      final uploadedSize = await snapshot.length();
       _setStatus(LocalEditStatus.uploading);
       await _gateway.uploadFrom(
         _native,
         current,
         tempName,
-        _file,
+        snapshot,
         onProgress: _setProgress,
       );
       try {
@@ -698,10 +719,10 @@ class LocalEditSession extends ChangeNotifier {
         }
         rethrow;
       }
-      _originSize = await _file.length();
+      _originSize = uploadedSize;
       final after = await _gateway.stat(_native, current, _remotePath);
       _originMtime = after.mtime;
-      _lastSyncedDigest = await digestOf(_file);
+      _lastSyncedDigest = uploadedDigest;
       // A finished sync is the newest baseline; restart the idle clock.
       _lastRealChange = DateTime.now();
       _conflicted = false;
@@ -720,7 +741,49 @@ class LocalEditSession extends ChangeNotifier {
         error: error,
       );
     } finally {
+      if (snapshot != null) {
+        try {
+          await snapshot.delete();
+        } catch (error) {
+          AppRunLog.instance.event(
+            AppLogEvent.editUploadFailed,
+            error: error,
+            fields: {'kind': 'snapshot-cleanup'},
+          );
+        }
+      }
       _uploading = false;
+    }
+  }
+
+  /// Upload a bounded immutable snapshot, not the file an external editor can
+  /// change while the network is writing. Only its digest certifies syncing.
+  Future<File> _snapshotForUpload() async {
+    final snapshot = File(
+      '${_home.path}/.upload-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    RandomAccessFile? input, output;
+    try {
+      input = await _file.open();
+      output = await snapshot.open(mode: FileMode.writeOnly);
+      var copied = 0;
+      while (true) {
+        final bytes = await input.read(1024 * 1024);
+        if (bytes.isEmpty) break;
+        copied += bytes.length;
+        if (copied > _maxEditBytes) throw StateError('本地编辑超过16MiB；原草稿保留');
+        await output.writeFrom(bytes);
+      }
+      await input.close();
+      input = null;
+      await output.close();
+      output = null;
+      return snapshot;
+    } catch (_) {
+      await input?.close();
+      await output?.close();
+      if (await snapshot.exists()) await snapshot.delete();
+      rethrow;
     }
   }
 
@@ -735,10 +798,33 @@ class LocalEditSession extends ChangeNotifier {
   }
 
   bool _disposeStarted = false;
+  Future<void>? _closeFuture;
+  LocalEditRegistry? _owner;
   @override
-  Future<void> dispose() async {
-    if (_disposeStarted) return;
+  Future<void> dispose() {
+    final existing = _closeFuture;
+    if (existing != null) return existing;
+    final completion = Completer<void>();
+    _closeFuture = completion.future;
     _disposeStarted = true;
+    _owner?._retire(this, completion.future);
+    _owner = null;
+    unawaited(
+      _disposeOwned().then(
+        (_) {
+          super.dispose();
+          completion.complete();
+        },
+        onError: (Object error, StackTrace stack) {
+          super.dispose();
+          completion.completeError(error, stack);
+        },
+      ),
+    );
+    return completion.future;
+  }
+
+  Future<void> _disposeOwned() async {
     // Publish the terminal state before marking disposed: _setStatus ignores
     // calls after _disposed, but the closed transition itself must land.
     _setStatus(LocalEditStatus.closed);
@@ -749,6 +835,8 @@ class LocalEditSession extends ChangeNotifier {
     _idleTimer?.cancel();
     // An in-flight upload streams from the local file; let it finish (or
     // fail) before any cleanup decides whether the file can be deleted.
+    await _initialization;
+    await _inFlightCheck?.catchError((Object _) {});
     await _inFlightUpload.catchError((_) {});
     try {
       // Round-11 requirement: NEVER delete a local file whose content was
@@ -784,7 +872,6 @@ class LocalEditSession extends ChangeNotifier {
     } catch (_) {
       // Best-effort cleanup; the OS temp cleaner owns the rest.
     }
-    super.dispose();
   }
 }
 
@@ -807,53 +894,80 @@ class LocalEditRegistry extends ChangeNotifier {
     _overwriteAllowed.add((native, generation));
   }
 
-  bool get isFull => _sessions.length >= _maxSessionsPerModel;
+  bool get isFull =>
+      _sessions.length + _retiring.length >= _maxSessionsPerModel;
   int get length => _sessions.length;
   List<LocalEditSession> get sessions => List.unmodifiable(_sessions);
 
+  final _retiring = <Future<void>>{};
+  bool _notifierDisposed = false;
+
+  void _changed() {
+    if (!_notifierDisposed) notifyListeners();
+  }
+
   void register(LocalEditSession session) {
-    if (_closed || isFull) {
-      session.dispose();
-      notifyListeners();
+    if (identical(session._owner, this) || session.isDisposed) return;
+    if (session._owner != null) throw StateError('编辑会话已有注册表所有者');
+    session._owner = this;
+    if (_closed || isFull || session._disposeStarted) {
+      unawaited(session.dispose());
       return;
     }
     _sessions.add(session);
-    session.addListener(notifyListeners);
-    notifyListeners();
+    session.addListener(_changed);
+    _changed();
   }
 
+  void _retire(LocalEditSession session, Future<void> closing) {
+    _sessions.remove(session);
+    session.removeListener(_changed);
+    _retiring.add(closing);
+    unawaited(
+      closing.then(
+        (_) {
+          _retiring.remove(closing);
+          _changed();
+        },
+        onError: (Object error, StackTrace stack) {
+          _retiring.remove(closing);
+          _changed();
+        },
+      ),
+    );
+    _changed();
+  }
+
+  /// Compatibility entry: unregister also retires resources, so no caller can
+  /// accidentally detach a live watcher without closing its owning session.
   void unregister(LocalEditSession session) {
-    if (_sessions.remove(session)) {
-      session.removeListener(notifyListeners);
-      notifyListeners();
-    }
+    if (identical(session._owner, this)) unawaited(session.dispose());
   }
 
-  Future<void> disposeAll() async {
+  Future<void> _drain() async {
+    final prior = List<Future<void>>.of(_retiring);
+    final active = List<LocalEditSession>.of(_sessions);
+    await Future.wait([
+      ...prior,
+      for (final session in active) session.dispose(),
+    ]);
+    _changed();
+  }
+
+  Future<void> disposeAll() {
     _closed = true;
-    final pending = List.of(_sessions);
-    for (final session in pending) {
-      session.removeListener(notifyListeners);
-    }
-    _sessions.clear();
-    await Future.wait(pending.map((s) => s.dispose()));
-    notifyListeners();
+    _overwriteAllowed.clear();
+    return _drain();
   }
 
-  /// Closes every active session but keeps the registry open for new ones
-  /// (round-12). Unlike [disposeAll] this is repeatable: the queue's
-  /// "close all sessions" action must not permanently disable editing.
-  /// Unsynced drafts survive per-session dispose rules; in-flight uploads
-  /// are awaited inside each dispose.
-  Future<void> closeAllActive() async {
-    if (_closed) return;
-    final pending = List.of(_sessions);
-    for (final session in pending) {
-      session.removeListener(notifyListeners);
-    }
-    _sessions.clear();
-    await Future.wait(pending.map((s) => s.dispose()));
-    notifyListeners();
+  /// A snapshot close leaves the registry available for later editor sessions.
+  Future<void> closeAllActive() => _drain();
+
+  @override
+  void dispose() {
+    _notifierDisposed = true;
+    unawaited(disposeAll());
+    super.dispose();
   }
 }
 

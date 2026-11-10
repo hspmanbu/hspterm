@@ -16,6 +16,7 @@ class FakeGateway implements LocalEditGateway {
   final uploads = <(String, List<int>)>[];
   final renames = <(String, String)>[];
   Object? uploadError;
+  Completer<void>? downloadGate;
   bool refuseUpload = false;
   // Round-12: when set, uploads never complete (idle-close exemption test).
   Completer<void>? uploadGate;
@@ -37,6 +38,7 @@ class FakeGateway implements LocalEditGateway {
     File target, {
     void Function(int done, int? total)? onProgress,
   }) async {
+    await downloadGate?.future;
     final bytes = List.of(remoteFiles[path] ?? utf8Bytes('hello'));
     onProgress?.call(0, bytes.length);
     await target.writeAsBytes(bytes, flush: true);
@@ -688,6 +690,109 @@ void main() {
       await registry.closeAllActive();
       expect(registry.length, 0);
       expect(c.status, LocalEditStatus.closed);
+      s.controller.dispose();
+    },
+  );
+  test(
+    'idle close unregisters ownership and frees the registry slot',
+    () async {
+      final registry = LocalEditRegistry(), s = await connectedSession();
+      await LocalEditSession.launch(
+        s,
+        DemoFile('/dir/auto.txt', 'auto.txt'),
+        gateway: gateway,
+        rootOverride: root,
+        idleTimeout: const Duration(milliseconds: 30),
+        launchOverride: (_) async => true,
+        onSession: (edit) {
+          created.add(edit);
+          registry.register(edit);
+        },
+      );
+      final edit = created.single;
+      await Future<void>.delayed(const Duration(milliseconds: 160));
+      await edit.dispose();
+      expect(registry.length, 0);
+      expect(registry.isFull, false);
+      expect(edit.hasSessionListeners, false);
+      final next = await launchFor(s, 'next.txt');
+      registry.register(next);
+      expect(registry.length, 1);
+      await registry.disposeAll();
+      registry.dispose();
+      s.controller.dispose();
+    },
+  );
+
+  test(
+    'manual and batch close join one pending upload and preserve a newer draft',
+    () async {
+      final registry = LocalEditRegistry(), s = await connectedSession();
+      final edit = await launchFor(s, 'during.txt');
+      registry.register(edit);
+      await edit.localFile.writeAsString('first save');
+      gateway.holdUploads = true;
+      final upload = edit.testStableCheck();
+      while (gateway.uploadGate == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      await edit.localFile.writeAsString('newer unsynced draft');
+      final close = edit.dispose();
+      expect(identical(close, edit.dispose()), true);
+      expect(registry.length, 0);
+      var drained = false;
+      final batch = registry.disposeAll().then((_) => drained = true);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(drained, false);
+      gateway.uploadGate!.complete();
+      await upload;
+      await close;
+      await batch;
+      expect(await edit.localFile.readAsString(), 'newer unsynced draft');
+      expect(
+        String.fromCharCodes(gateway.remoteFiles['/dir/during.txt']!),
+        'first save',
+      );
+      expect(edit.hasSessionListeners, false);
+      registry.dispose();
+      s.controller.dispose();
+    },
+  );
+
+  test(
+    'closing during initial download drains it without launching an editor',
+    () async {
+      final registry = LocalEditRegistry(), s = await connectedSession();
+      gateway.downloadGate = Completer<void>();
+      var opened = 0;
+      final launching = LocalEditSession.launch(
+        s,
+        DemoFile('/dir/loading.txt', 'loading.txt'),
+        gateway: gateway,
+        rootOverride: root,
+        launchOverride: (_) async {
+          opened++;
+          return true;
+        },
+        onSession: (edit) {
+          created.add(edit);
+          registry.register(edit);
+        },
+      );
+      final rejected = expectLater(launching, throwsStateError);
+      final close = created.single.dispose();
+      var drained = false;
+      final batch = registry.disposeAll().then((_) => drained = true);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(drained, false);
+      gateway.downloadGate!.complete();
+      await rejected;
+      await close;
+      await batch;
+      expect(opened, 0);
+      expect(registry.length, 0);
+      expect(created.single.hasSessionListeners, false);
+      registry.dispose();
       s.controller.dispose();
     },
   );
