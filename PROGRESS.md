@@ -3,7 +3,7 @@
 - run42963332377 的 Release 编译、桥接一致性及 Clippy 成功；恢复的并发历史测试暴露 Windows access denied(5)，不能视为验收通过。上一轮 ERROR_LOCK_VIOLATION(33) 修复已生效，活跃目录清理测试通过。
 - 根因：创建/扫描受 registry 锁保护，但正常析构的目录移除未参与该锁，Windows 枚举可能读到正在删除的 owner.lock。新增目录生命周期守卫，析构取得同一 registry 锁后依次关闭 owner、删除临时目录、释放 registry；若无法取得锁，保留加密残留供下次正常清理，不并发删除。
 - Ubuntu 历史3项通过，term-core all-targets 严格 Clippy 通过，格式及 git diff --check 通过。Windows 并发行为仍须新 CI 确认。CI 中独立 Flutter/原生启动检查在构建成功后均执行，任一失败仍令整体失败，不再被 Rust 测试失败全部遮住。
-- 下一步：推送本次修复并启动分支 Windows x64 Release CI，记录新 run 和产物；不重复启动旧 run，不恢复第三阶段性能工作。用户原始日志及未跟踪目录保留。
+- 修复已提交并推送2d51234；新 Windows x64 Release CI：https://github.com/hspmanbu/hspterm/actions/runs/42966641743 （正在运行，恢复时先查，不重复dispatch）。Ubuntu term-core完整47项通过。下一步确认新run全部检查和产物；不恢复第三阶段性能工作。用户原始日志及未跟踪目录保留。
 
 ## 2026-11-11 CI 恢复修复（基于447050f，第三阶段优化继续暂停）
 
