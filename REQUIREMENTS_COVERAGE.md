@@ -1,3 +1,17 @@
+## 2026-11-11 第十四轮用户反馈增量（源码3033b1f）
+
+以下为此前已交付能力的修正，不新增第三阶段性能项目。当前静态检查通过；Windows CI run42986704180正在执行，新增运行测试尚未确认。
+
+| 反馈 | 实际实现 | 检查与边界 |
+| --- | --- | --- |
+| 首次/闲置后路径编辑 | prototype/cached_path_field.dart挂载后聚焦全选、外点退出 | sftp_feedback_ui_test新增首次/闲置用例；保留自动补全TapRegion |
+| 资源栏靠右及截断 | prototype/app.dart固定提示位+填满剩余区域；connection_status.dart独立资源横向视口 | connection_status_test覆盖宽/窄区域靠右，完整内容tooltip |
+| 同文件本地编辑替换 | LocalEditRegistry.registerReplacing按传输身份/代次/路径串行关闭旧会话 | local_edit_session_test保留旧草稿与唯一活动条目；不同标签独立 |
+| 图片上传队列 | ssh-core upload_observed连续ACK，FRB小型进度快照，Dart图片条目 | 原代次/唯一临时源文件隔离；clipboard_image_test队列进度及位置；完成可清理 |
+| 多行预览编辑 | terminal/paste_editor.dart本地行号、调高、选区/滚动条与字体协调 | paste_preview_ui_test；发送仍为确认的原编辑正文，无合成行号 |
+| 消息精简 | app_notice.dart首短句/18字符展示，全文tooltip；警告错误保留全文 | 不截断日志/真正错误，不改变通知分级 |
+| HTTP WebDAV | 设置、审阅、目标校验和实际客户端支持HTTP(S) | 原ETag/加密/代理/不重定向保持；Drive/OAuth仍HTTPS；公开HTTP构造器线级测试加入CI |
+
 # V1.4 全量需求覆盖清单
 
 2026-11-05 用户反馈增量：Shell resize 后路径发送修复对应 term-core::resize / ssh-core::integration / terminal_paths；当前启动日志与 `.log` 导出对应 frb-bridge::run_log / ui_flutter::run_log / workbench::diagnostics；设置留白对应 SettingsField；Windows 边缘命中与本机窗口几何对应 runner/flutter_window.cpp。适用测试结果见 PROGRESS 最新节。新增日志导出及窗口记忆以 V1.4 末尾用户修订为准；Windows 交互实测仍单列，Android 暂停。
