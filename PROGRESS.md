@@ -17,6 +17,12 @@
 - 原始分支基线10a5c9a已在独立detached工作树/tmp/hspterm-r13-baseline-10a5c9a构建Linux Release真实SSH19场景，日志/tmp/hspterm-r13-baseline-build.log及*-perf.log；开发分支不变。Windows同平台Release对照将在最终CI执行，Ubuntu结果不冒称Windows结果。
 # HSPTerm 开发进度
 
+## 2026-11-09 第十二轮第三批（源码ff2eacf，CI待记；第二批e6ab150成功run42598050452）
+
+- 前两阶段10项复核确认完成（1编辑生命周期/2历史管理/3弹窗通知/4 SFTP流水线+平滑速度/5队列打开/6一次拖出已提交；7图片粘贴/8编辑进度百分比/9资源栏按主机持久化/10面包屑编辑区在工作区补齐后随本批提交）。任务10测试修复：无效地址提交后失焦退出编辑属合法恢复路径，断言放宽为两态。
+- 第三阶段（内存）：图片上传流式经传输引擎（无整图驻留，64MiB上限）；基线固定=CI windows-startup-memory artifact+已部署诊断字段（frameAgg queueShare/maxRss/dirCache）供Release实机归因；WorkingSet/PrivateBytes同平台Release对比需实机，未虚构。SSH重连释放/SFTP channel生命周期已有监督（transfer_channels/session retire）沿用。任务7/9的快捷键与开关入偏好指纹。
+- 验证：Analyze 0；native_bridge/local_edit_queue/sftp_feedback(5项含修复的面包屑)/terminal_suggestions 全过；Rust fmt/clippy 干净、storage-sync 224+ssh-core 全过。
+
 ## 2026-11-09 第十二轮第二批（源码e6ab150，分支Windows CI成功 run 42598050452）
 
 - 四项：Rust帧链路快照churn修复(P0内存)、历史命令管理（设置页搜索/单条与批量删除+同步墓碑语义）、候选框内删除历史按钮、任务七拖放与任务九图片粘贴**仍未实施**（分析方案已归档，下轮继续）。
