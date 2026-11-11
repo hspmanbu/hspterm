@@ -1,3 +1,8 @@
+## 2026-11-11 第十四轮收尾CI（产品源码2f4540a）
+
+- 已推送2f4540a（包含1c52f59的重连/关闭补充），Windows run42991233929运行中：https://github.com/hspmanbu/hspterm/actions/runs/42991233929 。恢复时先查此run，不重复dispatch；前一run42986704180不是完成版本。
+- 下一步确认Windows编译/133项Rust及新增Flutter回归/原生启动几何，修复实际失败后记录最终产物。Ubuntu仅静态复核，第三阶段仍暂停；原始日志/截图未提交。
+
 ## 2026-11-11 第十四轮首轮CI收尾修正（待最终CI）
 
 - run42986704180（3033b1f）完成：Release/FRB一致性/全workspace严格Clippy/Analyze/原生启动退出和窗口几何成功；Rust78+47+WebDAV7+provider边界1共133项通过；Flutter179通过、2失败，不能视为验收完成。步骤证据见validation/windows-feedback-round14-2026-11-11/first-ci-jobs.json。
