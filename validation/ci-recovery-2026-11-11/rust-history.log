@@ -26,4 +26,3 @@ test history::tests::encrypted_round_trip_tamper_fails_closed_and_files_are_remo
 test history::tests::concurrent_creation_never_cleans_a_live_run ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 44 filtered out; finished in 0.59s
-

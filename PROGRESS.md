@@ -4,7 +4,7 @@
 - 统一弹窗适配改为Flutter目标平台判断，使Windows适配能够在Ubuntu显式平台变体下测试。组件测试显式提供窗口几何通道替身；补上Windows目标的无几何/有物理几何两条路径及2倍DPI可见区验证，保留所有原弹窗断言。测试替身不会进入正式程序，真实Windows runner与窗口定位检查保留。
 - 资源栏测试用1ms推进假时钟触发已排程的零延迟采样；不改变正式5秒采样周期，不改变终端刷新率。
 - 修复历史冷存储的Windows锁冲突分类：fs2的ERROR_LOCK_VIOLATION(33)在Rust中不是WouldBlock，使用fs2提供的跨平台冲突错误识别活跃owner锁。恢复144afa2临时限制为Unix的两项并发/残留清理测试，交给Windows CI重新执行，不通过跳过测试掩盖该错误。本项为确定性Windows错误修复，未开展内存/性能优化。
-- 当前环境：与Windows workflow相同26个Flutter测试文件158项全过；定向弹窗/资源13项全过；Rust历史3项全过（包括恢复的两项并发测试）；Analyze零问题、term-core严格Clippy通过；格式、264个API契约与259个公共错误边界静态检查通过。CI待推送后触发，运行ID和最终产物会补在本节。
+- 当前环境：与Windows workflow相同26个Flutter测试文件158项全过；定向弹窗/资源13项全过；Rust历史3项全过（包括恢复的两项并发测试）；Analyze零问题、term-core严格Clippy通过；格式、264个API契约与259个公共错误边界静态检查通过。修复代码已提交并推送19a864b；即将触发新CI，运行ID和最终产物会补在本节。
 - 仍待：Windows11真实Explorer拖出/图片剪贴板/多显示器DPI交互；图片与大目录等同平台内存对照属于暂停的第三阶段，不能标记完成。保留用户原始日志、ssh-screen/及未跟踪文件，不提交凭据或用户截图。
 
 ## 2026-11-11 综合修复任务（基线10a5c9a，分支fix/round7-windows-feedback）
