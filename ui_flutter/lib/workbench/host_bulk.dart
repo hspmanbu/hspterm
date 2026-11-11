@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -31,7 +33,7 @@ Future<HostBulkResult?> showHostBulk(
   BuildContext context,
   LiveWorkbenchModel model,
   Set<String> ids,
-) => showDialog<HostBulkResult>(
+) => showAppDialog<HostBulkResult>(
   context: context,
   barrierDismissible: false,
   builder: (_) => HostBulkDialog(
@@ -249,9 +251,10 @@ class _HostBulkDialogState extends State<HostBulkDialog> {
       _error = null;
     });
     try {
-      final answer = await showDialog<bool>(
+      final answer = await showAppDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
+          scrollable: true,
           title: Text('保存 $affected 台主机的批量修改？'),
           content: const Text(
             '仅应用已勾选并在预览中列出的字段，不会重连 SSH 或重启传输。网络与连接后打开 SFTP 仅下次连接生效；OSC7 跟随偏好可影响现有会话后续目录报告。',

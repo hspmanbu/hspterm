@@ -63,9 +63,10 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         .length;
     final context = this.context;
     if (unsynced > 0) {
-      final confirmed = await showDialog<bool>(
+      final confirmed = await showAppDialog<bool>(
         context: context,
         builder: (dialog) => AlertDialog(
+          scrollable: true,
           title: const Text('关闭所有本地编辑会话？'),
           content: Text(
             '将关闭全部 ${edits.length} 个编辑会话；其中 $unsynced 个存在未同步的修改，'
@@ -447,7 +448,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   }
 
   Future<void> resolveBatch(jobs.TransferTaskView t) async {
-    final command = await showDialog<String>(
+    final command = await showAppDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
         constraints: const BoxConstraints(maxWidth: 560),
@@ -500,9 +501,10 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       }
       return;
     }
-    final command = await showDialog<String>(
+    final command = await showAppDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
+        scrollable: true,
         title: Text(failure.conflict ? '目标已存在' : '文件传输失败'),
         content: SelectableText(
           '${failure.path}\n${failure.error}\n\n普通重试按已确认偏移继续。选择从头覆盖将替换已有目标文件内容。',
@@ -535,7 +537,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
     if (command == null || !mounted) return;
     String? name;
     if (command == 'rename') {
-      name = await showDialog<String>(
+      name = await showAppDialog<String>(
         context: context,
         builder: (_) => _DestinationName(initial: failure.path.split('/').last),
       );
@@ -1034,6 +1036,7 @@ class _DestinationNameState extends State<_DestinationName> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: const Text('目标新文件名'),
     content: SizedBox(
       width: 330,

@@ -363,7 +363,7 @@ class HostManagerState extends State<HostManager> {
     if (m is! LiveWorkbenchModel || !await canLeave() || !mounted) return;
     setState(() => _importOpen = true);
     try {
-      final imported = await showDialog<List<rust.HostConfig>>(
+      final imported = await showAppDialog<List<rust.HostConfig>>(
         context: context,
         barrierDismissible: false,
         builder: (_) => const OpenSshImportDialog(),
@@ -579,9 +579,10 @@ class HostManagerState extends State<HostManager> {
       return false;
     }
     if (!dirty) return true;
-    final answer = await showDialog<String>(
+    final answer = await showAppDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
+        scrollable: true,
         title: const Text('保留未保存的修改？'),
         content: SizedBox(
           width: 370,
@@ -736,10 +737,11 @@ class HostManagerState extends State<HostManager> {
     var targetGroup = m.hostGroups.contains('开发环境')
         ? '开发环境'
         : m.hostGroups.first;
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, update) => AlertDialog(
+          scrollable: true,
           title: Text('批量编辑 ${selected.length} 台主机'),
           content: SizedBox(
             width: 410,
@@ -943,9 +945,10 @@ class HostManagerState extends State<HostManager> {
     await _draftTail;
   }
 
-  Future<void> _showPublicKey(KeyDetails key) => showDialog<void>(
+  Future<void> _showPublicKey(KeyDetails key) => showAppDialog<void>(
     context: context,
     builder: (c) => AlertDialog(
+      scrollable: true,
       title: Text('${key.algorithm} 公钥'),
       content: SizedBox(
         width: 520,
@@ -1092,7 +1095,7 @@ class HostManagerState extends State<HostManager> {
 
   Future<void> _exportKey() async {
     if (_saving) return;
-    final entered = await showDialog<String>(
+    final entered = await showAppDialog<String>(
       context: context,
       builder: (_) => const _KeyExportPasswordDialog(),
     );
@@ -1631,9 +1634,10 @@ class HostManagerState extends State<HostManager> {
                     final host = live.hosts
                         .firstWhere((h) => h.id == editingId)
                         .snapshot();
-                    await showDialog<void>(
+                    await showAppDialog<void>(
                       context: context,
                       builder: (context) => AlertDialog(
+                        scrollable: true,
                         title: const Text('本机主机字体与排版'),
                         content: SizedBox(
                           width: 620,
@@ -1799,7 +1803,7 @@ class HostManagerState extends State<HostManager> {
           );
         } else {
           final host = m.hosts.firstWhere((h) => h.id == editingId).snapshot();
-          await showDialog<void>(
+          await showAppDialog<void>(
             context: context,
             barrierDismissible: false,
             builder: (_) => HostConnectionTestDialog(model: m, host: host),
@@ -2363,6 +2367,7 @@ class _KeyExportPasswordDialogState extends State<_KeyExportPasswordDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: const Text('导出私钥：重新验证主密码'),
     content: SizedBox(
       width: 420,

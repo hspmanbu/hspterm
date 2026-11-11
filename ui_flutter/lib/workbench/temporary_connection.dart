@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 // Single-use inputs; only non-secret target metadata survives reconnect.
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -35,7 +37,7 @@ Future<TemporaryConnectionInput?> showTemporaryConnection(
   DemoHost host, {
   TemporaryTarget? previous,
   Future<String?> Function()? pickKey,
-}) => showDialog<TemporaryConnectionInput>(
+}) => showAppDialog<TemporaryConnectionInput>(
   context: context,
   builder: (_) =>
       _TemporaryDialog(host: host, previous: previous, pickKey: pickKey),

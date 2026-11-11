@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'package:flutter/material.dart';
 
 import 'dart:io';
@@ -181,9 +183,10 @@ class _DiagnosticsPanelState extends State<DiagnosticsPanel> {
     });
     var acknowledged = false;
     try {
-      final accepted = await showDialog<bool>(
+      final accepted = await showAppDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
+          scrollable: true,
           title: const Text('清空本次运行诊断？'),
           content: const Text('清空全部终端的内存诊断，包括确认期间新增的记录。不影响终端滚动历史、命令历史、配置或传输。'),
           actions: [

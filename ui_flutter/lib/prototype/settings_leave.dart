@@ -1,3 +1,6 @@
+import '../app_notice.dart';
+import 'design.dart';
+
 import 'package:flutter/material.dart';
 
 /// Tracks only dirty/busy booleans and labels. Draft text, passwords and
@@ -65,8 +68,11 @@ class SettingsLeaveRegistry {
       return true;
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.maybeOf(context)
-            ?.showSnackBar(SnackBar(content: Text('$error。已确认保存的设置保持生效。')));
+        showAppNotice(
+          context,
+          '$error。已确认保存的设置保持生效。',
+          level: AppNoticeLevel.error,
+        );
       }
       return false;
     } finally {
@@ -77,8 +83,11 @@ class SettingsLeaveRegistry {
   Future<bool> canLeave(BuildContext context) async {
     if (_checking) return false;
     if (busy) {
-      ScaffoldMessenger.maybeOf(context)
-          ?.showSnackBar(const SnackBar(content: Text('设置保存尚未结束，请等待确认后再离开。')));
+      showAppNotice(
+        context,
+        '设置保存尚未结束，请等待确认后再离开。',
+        level: AppNoticeLevel.warning,
+      );
       return false;
     }
     final changed = _editors.entries
@@ -88,7 +97,7 @@ class SettingsLeaveRegistry {
     if (changed.isEmpty) return true;
     _checking = true;
     try {
-      return await showDialog<bool>(
+      return await showAppDialog<bool>(
             context: context,
             builder: (dialog) => AlertDialog(
               scrollable: true,

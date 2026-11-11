@@ -19,7 +19,7 @@ Future<void> showExplorerCacheCleanup(
       notice(context, '本批没有可清理的孤立导出副本；活动、可恢复及旧版无归属缓存均保留');
       return;
     }
-    final accepted = await showDialog<bool>(
+    final accepted = await showAppDialog<bool>(
       context: context,
       builder: (_) => ExplorerCacheCleanupConfirmation(names: review.names),
     );

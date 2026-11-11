@@ -135,7 +135,7 @@ Future<void> showFileProperties(
   LiveWorkbenchModel model,
   LiveTerminalSession source,
   DemoFile file,
-) => showDialog<void>(
+) => showAppDialog<void>(
   context: context,
   builder: (_) => FilePropertiesDialog(
     gateway: NativeFilePropertiesGateway(model, source, file),
@@ -468,6 +468,7 @@ class _FilePropertiesState extends State<FilePropertiesDialog> {
     }
 
     return AlertDialog(
+      scrollable: true,
       title: Row(
         children: [
           Icon(

@@ -76,7 +76,7 @@ Future<void> terminalTabMenu(
   );
   if (!context.mounted || model.tabById(t.id) == null) return;
   if (value == 'rename') {
-    final name = await showDialog<String>(
+    final name = await showAppDialog<String>(
       context: context,
       builder: (_) => _RenameTab(t.name),
     );
@@ -372,6 +372,7 @@ class _RenameTabState extends State<_RenameTab> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: const Text('重命名终端'),
     content: TextField(
       controller: name,

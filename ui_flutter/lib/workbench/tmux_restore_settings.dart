@@ -1,3 +1,6 @@
+import '../app_notice.dart';
+import '../prototype/design.dart';
+
 import 'package:flutter/material.dart';
 
 import '../src/rust/api.dart' as rust;
@@ -21,9 +24,10 @@ Future<void> showTmuxRestoreSettings(
       () => rust.terminalTmuxRestoreEnabled(id: id, generation: generation),
     );
     if (!context.mounted || !current()) return;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         title: const Text('当前终端的 tmux 重连恢复'),
         content: Text(
           enabled
@@ -48,8 +52,10 @@ Future<void> showTmuxRestoreSettings(
       () => rust.forgetTerminalTmuxRestore(id: id, generation: generation),
     );
     if (context.mounted && current()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已关闭此终端的 tmux 重连恢复；当前会话保持。')),
+      showAppNotice(
+        context,
+        '已关闭此终端的 tmux 重连恢复；当前会话保持。',
+        level: AppNoticeLevel.success,
       );
     }
   } catch (_) {

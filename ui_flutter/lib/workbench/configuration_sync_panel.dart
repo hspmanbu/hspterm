@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'package:flutter/material.dart';
 
 import 'configuration_sync.dart';
@@ -10,7 +12,7 @@ Future<void> showConfigurationSyncReview(
   final original = controller.state;
   if (original?.review == null || !controller.available) return;
   if (original!.review!.references) {
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (_) => ConfigurationSyncReferencesDialog(
         controller: controller,
@@ -24,7 +26,7 @@ Future<void> showConfigurationSyncReview(
     }
     return;
   }
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     builder: (ctx) => AnimatedBuilder(
       animation: controller,
@@ -36,6 +38,7 @@ Future<void> showConfigurationSyncReview(
             current?.operation == original.operation &&
             current?.review?.token == review.token;
         return AlertDialog(
+          scrollable: true,
           title: const Text('审阅配置同步'),
           content: SingleChildScrollView(
             child: ConstrainedBox(

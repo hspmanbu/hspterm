@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -36,7 +38,7 @@ Future<void> openTerminalLink(
   if (remotePath != null) {
     String? target = remotePath.path;
     if (remotePath.requiresChoice) {
-      target = await showDialog<String>(
+      target = await showAppDialog<String>(
         context: context,
         builder: (dialog) => AlertDialog(
           scrollable: true,
@@ -71,7 +73,7 @@ Future<void> openTerminalLink(
     return;
   }
   if (!forward && (link.uri == null || link.loopback)) return;
-  final accepted = await showDialog<bool>(
+  final accepted = await showAppDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
       scrollable: true,
@@ -109,9 +111,10 @@ Future<void> openTerminalLink(
       if (url != null) {
         url = url.replace(host: '127.0.0.1', port: port);
       } else if (context.mounted) {
-        await showDialog<void>(
+        await showAppDialog<void>(
           context: context,
           builder: (context) => AlertDialog(
+            scrollable: true,
             title: const Text('临时转发已建立'),
             content: SelectableText('127.0.0.1:$port\n可在当前终端的端口转发面板停止。'),
             actions: [

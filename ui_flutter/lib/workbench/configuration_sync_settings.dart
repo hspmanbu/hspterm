@@ -1,3 +1,4 @@
+import '../prototype/design.dart';
 import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
@@ -295,9 +296,10 @@ class _ConfigurationSyncSettingsPanelState
     ..._secrets,
   ].any((c) => c.value.composing.isValid && !c.value.composing.isCollapsed);
   Future<bool> _confirmSwitch() async =>
-      await showDialog<bool>(
+      await showAppDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
+          scrollable: true,
           title: const Text('更换同步目标'),
           content: const SingleChildScrollView(
             child: Text(

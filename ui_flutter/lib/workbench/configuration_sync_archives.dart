@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -180,9 +182,10 @@ class _ConfigurationSyncArchivesPanelState
       _error = _notice = null;
     });
     try {
-      final confirmed = await showDialog<bool>(
+      final confirmed = await showAppDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
+          scrollable: true,
           title: Text('删除 ${ids.length} 份本机同步基线归档'),
           content: const Text(
             '将永久移除所选旧目标的本机合并基线及其中的删除标记。再次切回该目标时需要重新合并，可能重新出现冲突。当前正式配置和云端文件均不删除。确认仅清理这些本机归档？',

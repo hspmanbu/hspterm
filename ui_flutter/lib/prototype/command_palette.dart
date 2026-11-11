@@ -1,3 +1,4 @@
+import 'design.dart';
 import '../terminal/application_keys.dart';
 
 import 'dart:async';
@@ -104,7 +105,7 @@ Future<AppCommand?> showAppCommandPalette(
   required List<AppCommand> commands,
   required RecentAppCommands recent,
   required Listenable changes,
-}) => showDialog<AppCommand>(
+}) => showAppDialog<AppCommand>(
   context: context,
   builder: (_) =>
       AppCommandPalette(commands: commands, recent: recent, changes: changes),

@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -24,11 +26,19 @@ Future<DemoFile?> showRemoteFileSearch(
         terminal.generation == generation &&
         terminal.connected,
   );
-  final route = DialogRoute<rust.RemoteFile>(
+  final route = await createAppDialogRoute<rust.RemoteFile>(
     context: context,
     barrierDismissible: false,
     builder: (_) => RemoteFileSearchDialog(controller: controller),
   );
+  if (route == null || !context.mounted) {
+    try {
+      await controller.close();
+    } finally {
+      controller.dispose();
+    }
+    return null;
+  }
   try {
     final result = await Navigator.of(context).push(route);
     await route.completed;
@@ -86,6 +96,7 @@ class _RemoteFileSearchDialogState extends State<RemoteFileSearchDialog> {
         if (!didPop) unawaited(_finish());
       },
       child: AlertDialog(
+        scrollable: true,
         title: const Text('递归查找文件'),
         content: SizedBox(
           width: 760,

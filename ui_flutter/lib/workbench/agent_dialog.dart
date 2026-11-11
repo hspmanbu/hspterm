@@ -1,3 +1,6 @@
+import '../app_notice.dart';
+import '../prototype/design.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -74,8 +77,11 @@ Future<void> showTerminalAgent(
 ) async {
   final native = session.controller.id;
   if (native == null) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('终端仍在初始化，请稍后打开 Agent 管理')));
+    showAppNotice(
+      context,
+      '终端仍在初始化，请稍后打开 Agent 管理',
+      level: AppNoticeLevel.warning,
+    );
     return;
   }
   final generation = session.controller.generation;
@@ -91,7 +97,7 @@ Future<void> showTerminalAgent(
     lifecycle: Listenable.merge([session.controller, model]),
     updates: session.controller.agentChanges,
   );
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     builder: (_) => AgentDialog(source: source),
   );
@@ -207,7 +213,7 @@ class _AgentDialogState extends State<AgentDialog> {
       if (!mounted || !source.current()) return;
       var acceptedRisk = false;
       setState(() => _confirming = true);
-      final approved = await showDialog<bool>(
+      final approved = await showAppDialog<bool>(
         context: context,
         builder: (context) => ValueListenableBuilder<bool>(
           valueListenable: _valid,

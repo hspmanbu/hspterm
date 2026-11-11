@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'package:flutter/material.dart';
 
 import '../src/rust/transfers.dart' as jobs;
@@ -44,7 +46,7 @@ Future<TransferConnections?> showTransferConnections(
   var target = initial(targets, task.terminalId, task.terminalGeneration);
   // A changed generation requires an explicit choice; do not silently adopt the
   // old tab's new SSH connection or guess a source/target pair from one focus.
-  return showDialog<TransferConnections>(
+  return showAppDialog<TransferConnections>(
     context: context,
     builder: (dialog) => StatefulBuilder(
       builder: (context, setLocal) => AnimatedBuilder(

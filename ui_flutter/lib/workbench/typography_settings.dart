@@ -1,3 +1,4 @@
+import '../prototype/design.dart';
 import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
@@ -134,7 +135,7 @@ class _TypographySettingsPanelState extends State<TypographySettingsPanel> {
   }
 
   Future<bool> _confirm(String title, String body) async =>
-      await showDialog<bool>(
+      await showAppDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: Text(title),

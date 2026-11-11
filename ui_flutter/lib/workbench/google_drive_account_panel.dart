@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'package:flutter/material.dart';
 
 import 'google_drive_account.dart';
@@ -51,9 +53,10 @@ class _GoogleDriveAccountPanelState extends State<GoogleDriveAccountPanel> {
   }
 
   Future<bool> _confirm(String title, String text) async =>
-      await showDialog<bool>(
+      await showAppDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
+          scrollable: true,
           title: Text(title),
           content: Text(text),
           actions: [

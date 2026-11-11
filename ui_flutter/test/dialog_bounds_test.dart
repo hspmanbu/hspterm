@@ -68,6 +68,7 @@ void main() {
                 onPressed: () => showBoundedDialog<void>(
                   context,
                   (c) => const AlertDialog(
+                    scrollable: true,
                     title: Text('t'),
                     content: SizedBox(width: 600, height: 800),
                   ),
@@ -92,6 +93,40 @@ void main() {
       lessThan(360),
       reason: 'the oversized 600px body is squeezed inside the tiny window',
     );
-    expect(content.size.height, lessThan(300));
+    expect(
+      tester.getSize(find.byType(SingleChildScrollView)).height,
+      lessThan(300),
+    );
+    expect(tester.takeException(), isNull);
   });
+  testWidgets(
+    'offscreen client area keeps scaled actions inside the visible monitor',
+    (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      const visible = Rect.fromLTWH(260, 120, 530, 360);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
+            child: DialogViewport(
+              visibleArea: visible,
+              builder: (_) => AlertDialog(
+                scrollable: true,
+                title: const Text('Visible dialog'),
+                content: Text('long text ' * 300),
+                actions: [
+                  TextButton(onPressed: () {}, child: const Text('Confirm')),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(visible.contains(tester.getCenter(find.text('Confirm'))), true);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -87,7 +89,7 @@ Future<void> showFilePreview(
     await rust.cancelFilePreview(token: token);
     return;
   }
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => FilePreviewDialog(

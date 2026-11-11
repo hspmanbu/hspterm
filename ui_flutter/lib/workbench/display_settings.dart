@@ -1,3 +1,4 @@
+import '../prototype/design.dart';
 import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
@@ -139,9 +140,10 @@ class _DisplaySettingsPanelState extends State<DisplaySettingsPanel> {
 
   Future<void> _select(String? next) async {
     if (dirty) {
-      final discard = await showDialog<bool>(
+      final discard = await showAppDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
+          scrollable: true,
           title: const Text('丢弃未保存的显示设置？'),
           content: const Text('更改尚未生效；切换范围将重新载入已保存设置。'),
           actions: [
@@ -200,7 +202,7 @@ class _DisplaySettingsPanelState extends State<DisplaySettingsPanel> {
   Future<void> _edit([int? index]) async {
     final c = config;
     if (c == null) return;
-    final rule = await showDialog<DisplayRule>(
+    final rule = await showAppDialog<DisplayRule>(
       context: context,
       builder: (_) => DisplayRuleEditor(
         initial: index == null ? null : c.rules[index],
@@ -218,7 +220,7 @@ class _DisplaySettingsPanelState extends State<DisplaySettingsPanel> {
   }
 
   Future<void> _import() async {
-    final rules = await showDialog<List<DisplayRule>>(
+    final rules = await showAppDialog<List<DisplayRule>>(
       context: context,
       builder: (_) => _RuleImportDialog(gateway: widget.gateway),
     );

@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -35,12 +37,14 @@ Future<tmx.TmuxSelection?> showTmuxChoice(
     }
   }
 
-  route = DialogRoute<tmx.TmuxSelection>(
+  final prepared = await createAppDialogRoute<tmx.TmuxSelection>(
     context: context,
     barrierDismissible: false,
     builder: (_) =>
         _TmuxChoice(controller: c, prompt: prompt, label: c.connectionLabel),
   );
+  if (prepared == null || !context.mounted || !current()) return null;
+  route = prepared;
   c.addListener(changed);
   c.closingChanges.addListener(changed);
   try {

@@ -22,10 +22,11 @@ enum AppNoticeLevel { info, success, warning, error }
 
 /// One quiet status message published by info/success notices.
 class QuietNotice {
-  QuietNotice(this.message, this.level, this.at);
+  QuietNotice(this.message, this.level, this.at, this.action);
   final String message;
   final AppNoticeLevel level;
   final DateTime at;
+  final SnackBarAction? action;
 }
 
 /// Process-wide quiet notice stream. The workbench status bar listens and
@@ -44,8 +45,17 @@ void resetAppNoticeDedupe() {
   _lastPopupAt = null;
 }
 
-void _publishQuiet(String message, AppNoticeLevel level) {
-  quietNoticeNotifier.value = QuietNotice(message, level, DateTime.now());
+void _publishQuiet(
+  String message,
+  AppNoticeLevel level,
+  SnackBarAction? action,
+) {
+  quietNoticeNotifier.value = QuietNotice(
+    message,
+    level,
+    DateTime.now(),
+    action,
+  );
 }
 
 void showAppNotice(
@@ -56,7 +66,7 @@ void showAppNotice(
 }) {
   final text = appMessage(message);
   if (level != AppNoticeLevel.warning && level != AppNoticeLevel.error) {
-    _publishQuiet(text, level);
+    _publishQuiet(text, level, action);
     return;
   }
   final now = DateTime.now();
@@ -109,6 +119,8 @@ class _QuietNoticeViewState extends State<QuietNoticeView> {
   void dispose() {
     _fade?.cancel();
     quietNoticeNotifier.removeListener(_changed);
+    // Release action closures referencing closed SSH sessions.
+    quietNoticeNotifier.value = null;
     super.dispose();
   }
 
@@ -116,7 +128,9 @@ class _QuietNoticeViewState extends State<QuietNoticeView> {
     _fade?.cancel();
     if (quietNoticeNotifier.value != null) {
       _fade = Timer(widget.visibleFor, () {
-        if (mounted) setState(() {});
+        if (mounted) {
+          quietNoticeNotifier.value = null;
+        }
       });
     }
     setState(() {});
@@ -135,11 +149,20 @@ class _QuietNoticeViewState extends State<QuietNoticeView> {
         : scheme.onSurfaceVariant;
     return Padding(
       padding: const EdgeInsets.only(left: 8),
-      child: Text(
-        notice.message,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 12, color: color),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              notice.message,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: color),
+            ),
+          ),
+          if (notice.action case final action?)
+            TextButton(onPressed: action.onPressed, child: Text(action.label)),
+        ],
       ),
     );
   }

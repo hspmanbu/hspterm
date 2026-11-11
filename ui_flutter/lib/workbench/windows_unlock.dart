@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -160,7 +162,7 @@ class _WindowsUnlockSettingsPanelState
       _status = null;
     });
     try {
-      final password = await showDialog<String>(
+      final password = await showAppDialog<String>(
         context: context,
         builder: (_) => const _WindowsUnlockConsent(),
       );
@@ -205,9 +207,10 @@ class _WindowsUnlockSettingsPanelState
       _status = null;
     });
     try {
-      final accepted = await showDialog<bool>(
+      final accepted = await showAppDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
+          scrollable: true,
           title: const Text('关闭 Windows 账户解锁？'),
           content: const Text('仅删除当前配置库对应的本机保护缓存。加密配置库和主机凭据保留，下次仍可手动输入主密码。'),
           actions: [

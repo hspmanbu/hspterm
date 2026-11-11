@@ -10,7 +10,7 @@ Future<void> showDirectoryBookmarks(
   BuildContext context,
   WorkbenchModel model,
   TerminalSession source,
-) => showDialog<void>(
+) => showAppDialog<void>(
   context: context,
   builder: (_) => DirectoryBookmarks(model: model, source: source),
 );
@@ -69,7 +69,7 @@ class _DirectoryBookmarksState extends State<DirectoryBookmarks> {
   }
 
   Future<void> _edit([PathBookmark? bookmark]) async {
-    final saved = await showDialog<bool>(
+    final saved = await showAppDialog<bool>(
       context: context,
       builder: (_) => _BookmarkEditor(
         model: widget.model,

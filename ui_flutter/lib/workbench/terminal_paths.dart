@@ -1,3 +1,6 @@
+import '../app_notice.dart';
+import '../prototype/design.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -151,48 +154,46 @@ Future<void> sendSessionPaths(
     'TemporaryConnection' => '临时连接未启用集成。',
     _ => '',
   };
-  ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
-  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-    SnackBar(
-      duration: const Duration(seconds: 6),
-      showCloseIcon: true,
-      persist: false,
-      behavior: SnackBarBehavior.floating,
-      content: Text(detail.isEmpty ? message : '$detail $message'),
-      action: result == 'Unavailable'
-          ? SnackBarAction(
-              label: '发送说明',
-              onPressed: () {
-                if (!context.mounted) return;
-                showDialog<void>(
-                  context: context,
-                  builder: (dialog) => AlertDialog(
-                    title: const Text('将路径填入关联终端'),
-                    content: const Text(
-                      '在“主机管理 → 终端”启用“可选 Bash Shell 集成”，保存后手动重新连接此标签。\n\n集成支持 Bash 5.1+，用于确认输入位置。Vim、Codex、密码提示、tmux 内层或集成未就绪时只复制路径，避免误输入。仅填入路径不会执行命令。',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(dialog),
-                        child: const Text('关闭'),
-                      ),
-                      if (model.hosts.any((host) => host.id == source.host.id))
-                        FilledButton(
-                          onPressed: () {
-                            Navigator.pop(dialog);
-                            model.editHostSettings(
-                              source.host.id,
-                              category: '终端',
-                            );
-                          },
-                          child: const Text('配置此主机'),
-                        ),
-                    ],
+  showAppNotice(
+    context,
+    detail.isEmpty ? message : '$detail $message',
+    level: result == 'Applied' || directPasted
+        ? AppNoticeLevel.success
+        : AppNoticeLevel.warning,
+    action: result == 'Unavailable'
+        ? SnackBarAction(
+            label: '发送说明',
+            onPressed: () {
+              if (!context.mounted) return;
+              showAppDialog<void>(
+                context: context,
+                builder: (dialog) => AlertDialog(
+                  scrollable: true,
+                  title: const Text('将路径填入关联终端'),
+                  content: const Text(
+                    '在“主机管理 → 终端”启用“可选 Bash Shell 集成”，保存后手动重新连接此标签。\n\n集成支持 Bash 5.1+，用于确认输入位置。Vim、Codex、密码提示、tmux 内层或集成未就绪时只复制路径，避免误输入。仅填入路径不会执行命令。',
                   ),
-                );
-              },
-            )
-          : null,
-    ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialog),
+                      child: const Text('关闭'),
+                    ),
+                    if (model.hosts.any((host) => host.id == source.host.id))
+                      FilledButton(
+                        onPressed: () {
+                          Navigator.pop(dialog);
+                          model.editHostSettings(
+                            source.host.id,
+                            category: '终端',
+                          );
+                        },
+                        child: const Text('配置此主机'),
+                      ),
+                  ],
+                ),
+              );
+            },
+          )
+        : null,
   );
 }

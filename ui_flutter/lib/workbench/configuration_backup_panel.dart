@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
@@ -67,7 +69,7 @@ class _ConfigurationBackupPanelState extends State<ConfigurationBackupPanel> {
     super.dispose();
   }
 
-  Future<_Passwords?> _passwords(String kind) => showDialog<_Passwords>(
+  Future<_Passwords?> _passwords(String kind) => showAppDialog<_Passwords>(
     context: context,
     builder: (_) => _BackupPasswordDialog(kind: kind),
   );
@@ -124,7 +126,7 @@ class _ConfigurationBackupPanelState extends State<ConfigurationBackupPanel> {
         .length;
     setState(() => _dialog = true);
     try {
-      final accepted = await showDialog<bool>(
+      final accepted = await showAppDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('原子恢复所选配置？'),

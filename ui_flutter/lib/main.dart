@@ -1,3 +1,4 @@
+import 'prototype/design.dart';
 import 'runtime_errors.dart';
 import 'terminal/font_licenses.dart';
 import 'workbench/tmux_choice.dart';
@@ -90,10 +91,11 @@ class _TerminalPageState extends State<TerminalPage> {
 
   Future<bool> _hostKey(rust.BridgeEvent event) async =>
       mounted &&
-      (await showDialog<bool>(
+      (await showAppDialog<bool>(
             context: context,
             barrierDismissible: false,
             builder: (context) => AlertDialog(
+              scrollable: true,
               title: const Text('首次连接：确认 SSH 主机指纹'),
               content: SelectableText(
                 '${event.detail}\n\n${event.text}\n\n请通过可信途径核对。确认后加密保存，后续指纹变化将阻止连接。',
@@ -118,10 +120,11 @@ class _TerminalPageState extends State<TerminalPage> {
     if (!mounted) return;
     final password = TextEditingController();
     final confirmation = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, change) => AlertDialog(
+          scrollable: true,
           title: Text(exists ? '解锁加密配置' : '创建加密配置库'),
           content: SizedBox(
             width: 380,
@@ -199,10 +202,11 @@ class _TerminalPageState extends State<TerminalPage> {
         secret = TextEditingController(),
         passphrase = TextEditingController();
     var privateKey = false;
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, change) => AlertDialog(
+          scrollable: true,
           title: const Text('保存 SSH 主机'),
           content: SizedBox(
             width: 500,

@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'package:flutter/material.dart';
 
 import '../prototype/model.dart';
@@ -34,7 +36,7 @@ Future<void> showRemoteDestination(
       .map(RemoteDestinationTarget.new)
       .toList(growable: false);
   if (targets.isEmpty) throw StateError('没有已连接的目标会话；不会自动连接');
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => RemoteDestinationDialog(
@@ -180,6 +182,7 @@ class _RemoteDestinationDialogState extends State<RemoteDestinationDialog> {
   Widget build(BuildContext context) => PopScope(
     canPop: !_busy,
     child: AlertDialog(
+      scrollable: true,
       title: Text(_selection.cut ? '移动到…' : '复制到…'),
       content: SizedBox(
         width: 600,

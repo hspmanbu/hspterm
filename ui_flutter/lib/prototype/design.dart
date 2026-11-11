@@ -5,52 +5,121 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Round-12 dialog visibility guard. A Flutter dialog cannot leave its
-/// window's client area, so when the window itself hangs off the monitor a
-/// centered dialog is unreachable. On Windows the runner slides the window
-/// back into the monitor work area (size unchanged) before the dialog
-/// opens; elsewhere this is a no-op. The dialog body is also height-bounded
-/// and scrollable so long text can never push the buttons off-window.
+/// Returns the visible client rectangle in physical pixels after the runner
+/// has brought a minimally usable area onto the nearest monitor.
+Future<Rect?> _visibleDialogArea() async {
+  if (!Platform.isWindows) return null;
+  try {
+    final bounds = await const MethodChannel('hspterm/prototype_window')
+        .invokeListMethod<double>('ensureDialogVisible', {
+          'minWidth': 480.0,
+          'minHeight': 400.0,
+        });
+    if (bounds != null &&
+        bounds.length == 4 &&
+        bounds.every((v) => v.isFinite) &&
+        bounds[2] > 0 &&
+        bounds[3] > 0) {
+      return Rect.fromLTWH(bounds[0], bounds[1], bounds[2], bounds[3]);
+    }
+  } on MissingPluginException {
+    // Unit tests and alternative embeddings have no native geometry channel.
+  } on PlatformException {
+    // Geometry failures must not hide the actual operation's dialog.
+  }
+  return null;
+}
+
 Future<void> ensureDialogHostVisible(
   BuildContext context, {
   double minWidth = 480,
   double minHeight = 400,
 }) async {
-  if (!Platform.isWindows) return;
-  try {
-    await const MethodChannel('hspterm/prototype_window').invokeMethod<void>(
-      'ensureDialogVisible',
-      {'minWidth': minWidth, 'minHeight': minHeight},
-    );
-  } on MissingPluginException {
-    // Non-standard embedding (tests, older runner): the dialog keeps its
-    // ordinary in-window centering.
-  } on PlatformException {
-    // Window geometry unavailable; never block the dialog on this.
-  }
+  await _visibleDialogArea();
 }
 
-/// showDialog with screen-bounds awareness (round-12): the host window is
-/// first made dialog-visible, and the dialog itself is constrained to the
-/// available size with a scrollable body so title/buttons stay reachable.
+/// The only business-dialog route. Native geometry uses physical pixels;
+/// layout uses the current view's scale after any monitor/DPI move.
+Future<T?> showAppDialog<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+}) async {
+  final route = await createAppDialogRoute<T>(
+    context: context,
+    builder: builder,
+    barrierDismissible: barrierDismissible,
+  );
+  if (route == null || !context.mounted) return null;
+  return Navigator.of(context, rootNavigator: true).push(route);
+}
+
+/// For owners that must wait for route.completed before disposing controllers
+/// or remove a route when its original SSH session closes.
+Future<DialogRoute<T>?> createAppDialogRoute<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+}) async {
+  final physicalArea = await _visibleDialogArea();
+  if (!context.mounted) return null;
+  if (physicalArea != null) {
+    await WidgetsBinding.instance.endOfFrame;
+    if (!context.mounted) return null;
+  }
+  final scale = View.of(context).devicePixelRatio;
+  final area = physicalArea == null
+      ? null
+      : Rect.fromLTRB(
+          physicalArea.left / scale,
+          physicalArea.top / scale,
+          physicalArea.right / scale,
+          physicalArea.bottom / scale,
+        );
+  return DialogRoute<T>(
+    context: context,
+    barrierDismissible: barrierDismissible,
+    builder: (_) => DialogViewport(visibleArea: area, builder: builder),
+  );
+}
+
+/// Keeps all dialog layout (including MediaQuery-driven panels) inside the
+/// visible portion of the client area, without shrinking desktop panels to a
+/// phone-sized fixed width. The barrier still covers the whole window.
+class DialogViewport extends StatelessWidget {
+  const DialogViewport({super.key, this.visibleArea, required this.builder});
+  final Rect? visibleArea;
+  final WidgetBuilder builder;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      final full = Offset.zero & box.biggest;
+      final area = visibleArea?.intersect(full) ?? full;
+      final usable = area.isEmpty ? full : area;
+      return Stack(
+        children: [
+          Positioned.fromRect(
+            rect: usable,
+            child: MediaQuery(
+              data: MediaQuery.of(context).copyWith(size: usable.size),
+              child: Builder(builder: builder),
+            ),
+          ),
+        ],
+      );
+    },
+  );
+}
+
 Future<T?> showBoundedDialog<T>(
   BuildContext context,
   WidgetBuilder builder, {
   bool barrierDismissible = true,
-}) {
-  final size = MediaQuery.sizeOf(context);
-  return showDialog<T>(
-    context: context,
-    barrierDismissible: barrierDismissible,
-    builder: (c) => ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: size.width < 560 ? size.width - 24 : 536,
-        maxHeight: size.height - 48,
-      ),
-      child: builder(c),
-    ),
-  );
-}
+}) => showAppDialog<T>(
+  context: context,
+  builder: builder,
+  barrierDismissible: barrierDismissible,
+);
 
 abstract final class Desk {
   static const accent = Color(0xff70cbb2);
@@ -257,16 +326,12 @@ Future<bool> confirm(
   String accept = '确认',
   bool danger = false,
 }) async {
-  await ensureDialogHostVisible(context);
-  if (!context.mounted) return false;
   return await showBoundedDialog<bool>(
         context,
         (c) => AlertDialog(
+          scrollable: true,
           title: Text(title, style: const TextStyle(fontSize: 17)),
-          content: SizedBox(
-            width: 380,
-            child: SingleChildScrollView(child: Text(body)),
-          ),
+          content: SizedBox(width: 380, child: Text(body)),
           actions: [
             TextButton(
               autofocus: true,

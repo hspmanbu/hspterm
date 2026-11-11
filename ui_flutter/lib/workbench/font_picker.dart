@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -10,7 +12,7 @@ Future<String?> showTerminalFontPicker(
   required String selected,
   required Map<String, String> choices,
   required Future<List<String>> Function() systemFamilies,
-}) => showDialog<String>(
+}) => showAppDialog<String>(
   context: context,
   builder: (_) => _FontPicker(
     selected: selected,
@@ -82,6 +84,7 @@ class _FontPickerState extends State<_FontPicker> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: const Text('选择终端字体'),
     content: SizedBox(
       width: 520,

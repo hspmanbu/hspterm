@@ -312,6 +312,26 @@ bool FlutterWindow::OnCreate() {
           result->Error("dialog_bounds", "无法将窗口移回可见区域"); return;
         }
       }
+      // A large window can have enough overlap while its center is still
+      // off-screen. Return the visible CLIENT intersection, rather than
+      // letting Flutter center a dialog in the entire oversized window.
+      RECT client = {};
+      POINT origin = {0, 0};
+      if (!GetClientRect(window, &client) || !ClientToScreen(window, &origin)) {
+        result->Error("dialog_bounds", "无法读取客户区"); return;
+      }
+      RECT screen_client = {origin.x, origin.y,
+          origin.x + client.right, origin.y + client.bottom};
+      RECT visible = {};
+      if (!IntersectRect(&visible, &screen_client, &info.rcWork)) {
+        result->Error("dialog_bounds", "窗口没有可见客户区"); return;
+      }
+      result->Success(flutter::EncodableValue(flutter::EncodableList{
+          flutter::EncodableValue(static_cast<double>(visible.left - origin.x)),
+          flutter::EncodableValue(static_cast<double>(visible.top - origin.y)),
+          flutter::EncodableValue(static_cast<double>(visible.right - visible.left)),
+          flutter::EncodableValue(static_cast<double>(visible.bottom - visible.top))}));
+      return;
     } else if (method == "maximizeRect") {
       const auto* args = call.arguments();
       const auto* list = args == nullptr ? nullptr : std::get_if<flutter::EncodableList>(args);

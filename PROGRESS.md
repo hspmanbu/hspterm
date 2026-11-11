@@ -2,6 +2,8 @@
 
 按用户最新顺序：1 编辑生命周期；2 历史管理/墓碑；3 业务弹窗/静默通知；4 有界SFTP流水线/3秒速度；5 下载打开；6 首次直接拖出；7 图片剪贴板上传；8 编辑进度；9 资源栏持久化/前台采样；10 面包屑；最后同平台Release内存/CPU/缓存回归及Windows CI。每项相关测试后独立提交。Flutter/Rust/FRB不变，Android暂停；不切旧main。
 
+- 第3项弹窗/通知完成：所有业务showDialog统一showAppDialog，需显式等待route.completed的搜索/编辑/tmux选择复用createAppDialogRoute；Windows原生返回当前显示器工作区与客户区交集，按当前DPI约束弹窗，修复“有重叠但弹窗中心在屏外”。长AlertDialog正文滚动，保留桌面大面板宽度。普通成功/信息改为quiet状态，失败/警告统一6秒可关闭SnackBar；终端通知的“查看终端”动作保留在quiet状态。Analyze零问题；小窗口/DPI可见区/大字体以及业务对话框回归78项通过，历史/转发/属性/通知36项通过。全部Flutter回归在途，不虚报全过；Windows多屏原生效果待CI/Win11复测。
+
 - 第2项历史管理完成：停用记录仍可管理旧记录；设置按(hostId, text)精确选择/删除；切换设置分类清理明文及拒绝迟到结果；加载的Vault作用域在Rust锁内复核。候选删除仅悬停/选中/聚焦显示。墓碑不再截断或被新执行抹除，容量不足明确报错，避免旧同步复活删除命令。Rust历史18项、Flutter组件15项及真实OpenSSH/加密库桥接1项通过；严格Clippy(storage-sync/frb-bridge)和Analyze零问题；正规FRB已重生成并重建Native。
 
 - 初始Git跟踪文件无修改；三份用户.log、ssh-screen/、tools/AGENTS.md、benchmark/screenshot.py为用户未跟踪内容，保留、不提交。AGENTS顶部旧11月5日记录不是分支最新状态，实际源码/本节优先。

@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -8,7 +10,7 @@ import 'staging_cleanup_port.dart';
 Future<void> showStagingCleanup(
   BuildContext context,
   StagingCleanupPort port,
-) => showDialog<void>(
+) => showAppDialog<void>(
   context: context,
   barrierDismissible: false,
   builder: (_) => StagingCleanupDialog(port: port),
@@ -126,9 +128,10 @@ class _StagingCleanupDialogState extends State<StagingCleanupDialog> {
   Future<bool> _confirmLocalEnd(Map<String, dynamic> review) async {
     setState(() => _awaitingConsent = true);
     try {
-      return await showDialog<bool>(
+      return await showAppDialog<bool>(
             context: context,
             builder: (c) => AlertDialog(
+              scrollable: true,
               title: const Text('仅结束本机等待'),
               content: SingleChildScrollView(
                 child: Text(
@@ -204,6 +207,7 @@ class _StagingCleanupDialogState extends State<StagingCleanupDialog> {
     return PopScope(
       canPop: !_busy,
       child: AlertDialog(
+        scrollable: true,
         title: const Text('远端暂存清理'),
         content: SizedBox(
           width: 680,

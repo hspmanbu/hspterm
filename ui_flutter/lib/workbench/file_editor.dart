@@ -46,7 +46,7 @@ Future<void> showRemoteFileEditor(
   if (file.folder) throw StateError('请选择需要编辑的文本文件');
   String? inputEncoding;
   if (chooseEncoding) {
-    inputEncoding = await showDialog<String>(
+    inputEncoding = await showAppDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
         title: const Text('选择原文件编码'),
@@ -117,11 +117,12 @@ Future<void> showRemoteEditorDialog(
   LiveWorkbenchModel? model,
 }) async {
   final navigator = Navigator.of(context, rootNavigator: true);
-  final route = DialogRoute<void>(
+  final route = await createAppDialogRoute<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => RemoteEditorDialog(controller: controller, model: model),
   );
+  if (route == null || !context.mounted) return;
   await navigator.push(route);
   await route.completed;
 }
@@ -192,9 +193,10 @@ class _RemoteEditorDialogState extends State<RemoteEditorDialog> {
         }
         keep = true;
       } else if (c.dirty) {
-        final choice = await showDialog<String>(
+        final choice = await showAppDialog<String>(
           context: context,
           builder: (context) => AlertDialog(
+            scrollable: true,
             title: const Text('尚有未保存到远端的修改'),
             content: const Text(
               '保留草稿会在本机加密保存，不上传、不自动重连。丢弃将删除本机草稿；若刚才保存中断，远端可能已有部分写入。',
@@ -730,7 +732,7 @@ Future<void> showEditorDrafts(
   BuildContext context,
   LiveWorkbenchModel model,
 ) async {
-  final draft = await showDialog<String>(
+  final draft = await showAppDialog<String>(
     context: context,
     builder: (_) => const _EditorDraftsDialog(),
   );
@@ -797,6 +799,7 @@ class _EditorDraftsDialogState extends State<_EditorDraftsDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: const Text('本机加密编辑草稿'),
     content: SizedBox(
       width: 720,

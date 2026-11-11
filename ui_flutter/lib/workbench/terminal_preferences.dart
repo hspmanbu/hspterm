@@ -1,3 +1,4 @@
+import '../prototype/design.dart';
 import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
 
@@ -429,7 +430,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
               !(value.notifications.preview &&
                   !source.value.notifications.preview)
           ? true
-          : await showDialog<bool>(
+          : await showAppDialog<bool>(
               context: context,
               builder: (context) => AlertDialog(
                 scrollable: true,

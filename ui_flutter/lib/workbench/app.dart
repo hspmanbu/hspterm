@@ -1,3 +1,4 @@
+import '../app_notice.dart';
 import '../run_log.dart';
 import 'palette_settings.dart';
 import 'typography_settings.dart';
@@ -139,28 +140,20 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
       inline: (notice, activate) {
         final context = _navigator.currentContext;
         if (!mounted || context == null) return;
-        final messenger = ScaffoldMessenger.maybeOf(context);
-        messenger?.hideCurrentSnackBar();
-        messenger?.showSnackBar(
-          SnackBar(
-            content: Text(
-              [
-                notice.summary,
-                notice.title,
-                notice.body,
-              ].where((s) => s.isNotEmpty).join(' · '),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-            action: SnackBarAction(label: '查看终端', onPressed: activate),
-          ),
+        showAppNotice(
+          context,
+          [
+            notice.summary,
+            notice.title,
+            notice.body,
+          ].where((s) => s.isNotEmpty).join(' · '),
+          action: SnackBarAction(label: '查看终端', onPressed: activate),
         );
       },
       failure: (message) {
         final context = _navigator.currentContext;
         if (!mounted || context == null) return;
-        ScaffoldMessenger.maybeOf(context)
-            ?.showSnackBar(SnackBar(content: Text(message)));
+        showAppNotice(context, message, level: AppNoticeLevel.error);
       },
     );
     _retireNotices = _noticeHub.shutdown;
@@ -231,7 +224,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
               result.complete(false);
               return;
             }
-            final answer = await showDialog<bool>(
+            final answer = await showAppDialog<bool>(
               context: context,
               barrierDismissible: false,
               builder: (context) => AlertDialog(
@@ -315,8 +308,10 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
     } catch (_) {
       final context = _navigator.currentContext;
       if (context != null && context.mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          const SnackBar(content: Text('终端已定位，但窗口激活未获确认；请从任务栏打开HSPTerm。')),
+        showAppNotice(
+          context,
+          '终端已定位，但窗口激活未获确认；请从任务栏打开HSPTerm。',
+          level: AppNoticeLevel.warning,
         );
       }
     }

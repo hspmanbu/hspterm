@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -159,7 +161,7 @@ class HostOrderingResult {
 Future<HostOrderingResult?> showHostOrdering(
   BuildContext context,
   LiveWorkbenchModel model,
-) => showDialog<HostOrderingResult>(
+) => showAppDialog<HostOrderingResult>(
   context: context,
   barrierDismissible: false,
   builder: (_) => HostOrderingDialog(gateway: NativeHostOrderingGateway(model)),
@@ -229,9 +231,10 @@ class _HostOrderingDialogState extends State<HostOrderingDialog> {
 
   Future<bool> _discard() async =>
       !(draft?.dirty ?? false) ||
-      await showDialog<bool>(
+      await showAppDialog<bool>(
             context: context,
             builder: (c) => AlertDialog(
+              scrollable: true,
               title: const Text('放弃未保存的排序修改？'),
               content: const Text('当前分组、收藏及排序还没有保存。'),
               actions: [
@@ -267,9 +270,10 @@ class _HostOrderingDialogState extends State<HostOrderingDialog> {
       error = null;
     });
     try {
-      final accepted = await showDialog<bool>(
+      final accepted = await showAppDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
+          scrollable: true,
           title: const Text('保存分组与排序？'),
           content: Text(
             '分组顺序：${d.groupOrderChanged ? '已调整' : '保持'}\n主机顺序：${d.hostOrderChanged ? '已调整' : '保持'}\n修改分组 ${d.moved} 台 · 修改收藏 ${d.starred} 台\n\n现有 SSH 会话继续运行；本次只保存显示顺序、分组与收藏。',

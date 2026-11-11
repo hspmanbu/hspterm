@@ -258,10 +258,11 @@ class _FilesPanelState extends State<FilesPanel> {
   Future<void> configureColumns() async {
     final order = List<String>.of(_columnOrder),
         hidden = Set<String>.of(_hiddenColumns);
-    final result = await showDialog<bool>(
+    final result = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => StatefulBuilder(
         builder: (dialog, update) => AlertDialog(
+          scrollable: true,
           title: const Text('文件列表列'),
           content: SizedBox(
             width: 320,
@@ -657,9 +658,10 @@ class _FilesPanelState extends State<FilesPanel> {
         }
         return;
       }
-      showDialog<void>(
+      showAppDialog<void>(
         context: context,
         builder: (c) => AlertDialog(
+          scrollable: true,
           title: Text(f.name),
           content: const SizedBox(
             width: 380,
@@ -740,7 +742,7 @@ class _FilesPanelState extends State<FilesPanel> {
     final target = p;
     final generation = p.connectionGeneration;
     final directory = target.path;
-    final folder = await showDialog<bool>(
+    final folder = await showAppDialog<bool>(
       context: context,
       builder: (c) => SimpleDialog(
         title: const Text('上传到当前 SFTP 目录'),
@@ -1515,9 +1517,10 @@ class _FilesPanelState extends State<FilesPanel> {
             row,
           );
         } else if (row != null) {
-          await showDialog<void>(
+          await showAppDialog<void>(
             context: context,
             builder: (c) => AlertDialog(
+              scrollable: true,
               title: const Text('模拟文件属性'),
               content: Text(
                 '${row.name}\n${p.path}\n${row.kind} · ${row.folder ? '未计算' : row.size}',
@@ -1744,9 +1747,10 @@ class _FilesPanelState extends State<FilesPanel> {
     final native = source is LiveTerminalSession ? source.controller.id : null;
     final directory = source.path;
     final controller = TextEditingController();
-    final name = await showDialog<String>(
+    final name = await showAppDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
+        scrollable: true,
         title: Text('${m.isMock ? '模拟：' : ''}新建${folder ? '文件夹' : '文件'}'),
         content: TextField(
           controller: controller,

@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'package:flutter/material.dart';
 
 import 'model.dart';
@@ -6,7 +8,7 @@ import 'remote_inspection.dart';
 Future<void> showRemoteInspection(
   BuildContext context,
   LiveTerminalSession session,
-) => showDialog<void>(
+) => showAppDialog<void>(
   context: context,
   builder: (_) => RemoteInspectionPanel(
     controller: session.inspection,
@@ -40,7 +42,7 @@ class _RemoteInspectionPanelState extends State<RemoteInspectionPanel> {
   }
 
   Future<void> _terminate(RemoteProcessList list, RemoteProcess process) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         scrollable: true,
@@ -72,6 +74,7 @@ class _RemoteInspectionPanelState extends State<RemoteInspectionPanel> {
     builder: (context, _) {
       final c = widget.controller, list = c.processList;
       return AlertDialog(
+        scrollable: true,
         title: Text('远端资源与进程 · ${widget.label}'),
         content: SizedBox(
           width: 760,

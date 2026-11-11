@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -87,9 +89,10 @@ class _GoogleDriveObjectsPanelState extends State<GoogleDriveObjectsPanel> {
     try {
       if (switching) {
         final confirmed =
-            await showDialog<bool>(
+            await showAppDialog<bool>(
               context: context,
               builder: (ctx) => AlertDialog(
+                scrollable: true,
                 title: const Text('更换唯一同步目标'),
                 content: Text(
                   '将使用集合 ${object.collection} 的对象 ${object.id}。原云端文件不会删除；本机保存原目标基线。此次仅保存选择，不上传配置。确认更换？',
@@ -173,9 +176,10 @@ class _GoogleDriveObjectsPanelState extends State<GoogleDriveObjectsPanel> {
   }
 
   Future<bool> _confirm(String title, String text) async =>
-      await showDialog<bool>(
+      await showAppDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
+          scrollable: true,
           title: Text(title),
           content: Text(text),
           actions: [

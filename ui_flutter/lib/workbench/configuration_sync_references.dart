@@ -103,6 +103,7 @@ class _ConfigurationSyncReferencesDialogState
   Widget build(BuildContext context) {
     final enabled = _valid && !_loading && !widget.controller.busy;
     return AlertDialog(
+      scrollable: true,
       title: const Text('解决同步引用冲突'),
       content: SizedBox(
         width: 720,

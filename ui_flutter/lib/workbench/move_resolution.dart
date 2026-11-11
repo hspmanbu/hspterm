@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:convert';
 import 'dart:async';
 
@@ -11,7 +13,7 @@ Future<void> showMoveResolution(
   BuildContext context,
   LiveWorkbenchModel model,
   TransferTaskView task,
-) => showDialog<void>(
+) => showAppDialog<void>(
   context: context,
   barrierDismissible: false,
   builder: (_) => MoveResolutionDialog(model: model, task: task),
@@ -139,6 +141,7 @@ class _MoveResolutionDialogState extends State<MoveResolutionDialog> {
     return PopScope(
       canPop: !_saving,
       child: AlertDialog(
+        scrollable: true,
         title: Text(
           widget.task.remoteOperation == 'relocate' ? '检查未确认的来源删除' : '检查未确认移动',
         ),

@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 //! Double-click "open in local editor with write-back" sessions.
 //!
 //! Downloads the remote file to a temp copy (sanitized name, extension kept),
@@ -1006,9 +1008,10 @@ Future<void> openLocalEdit(
         // Three-way decision (round-11); the server lacks POSIX-rename so
         // the replace moves the original aside to a backup first and rolls
         // back on failure — nothing is deleted outright.
-        return showDialog<LocalEditConflictDecision>(
+        return showAppDialog<LocalEditConflictDecision>(
           context: context,
           builder: (dialog) => AlertDialog(
+            scrollable: true,
             title: const Text('替换远端文件？'),
             content: Text(
               '保存需要替换远端同名文件「$name」；服务器不支持原子覆盖，'

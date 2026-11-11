@@ -1,3 +1,4 @@
+import '../prototype/design.dart';
 import '../prototype/settings_style.dart';
 
 import 'dart:async';
@@ -196,7 +197,7 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
       _status = null;
     });
     try {
-      final accepted = await showDialog<bool>(
+      final accepted = await showAppDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           scrollable: true,

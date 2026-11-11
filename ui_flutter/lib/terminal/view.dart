@@ -1,3 +1,4 @@
+import '../prototype/design.dart';
 import 'application_keys.dart';
 import 'ime_buffer.dart';
 import '../app_notice.dart';
@@ -247,15 +248,7 @@ class TerminalViewState extends State<TerminalView>
   Future<void> _deleteSuggestion(int index, String ticket) async {
     final deleted = await _suggestions.deleteCandidate(index);
     if (!mounted || !deleted) return;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      SnackBar(
-        duration: const Duration(seconds: 4),
-        showCloseIcon: true,
-        persist: false,
-        behavior: SnackBarBehavior.floating,
-        content: const Text('已删除该历史记录'),
-      ),
-    );
+    showAppNotice(context, '已删除该历史记录', level: AppNoticeLevel.success);
   }
 
   Future<void> _chooseSuggestion(
@@ -269,18 +262,12 @@ class TerminalViewState extends State<TerminalView>
       expectedTicket: ticket,
     );
     if (!mounted || result == 'Applied') return;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      SnackBar(
-        duration: const Duration(seconds: 6),
-        showCloseIcon: true,
-        persist: false,
-        behavior: SnackBarBehavior.floating,
-        content: Text(
-          result == 'Unavailable'
-              ? '普通Shell输入状态已改变，未发送候选。请继续正常输入。'
-              : '候选提交结果未确认，请检查终端；未自动重试。',
-        ),
-      ),
+    showAppNotice(
+      context,
+      result == 'Unavailable'
+          ? '普通Shell输入状态已改变，未发送候选。请继续正常输入。'
+          : '候选提交结果未确认，请检查终端；未自动重试。',
+      level: AppNoticeLevel.warning,
     );
   }
 
@@ -639,7 +626,7 @@ class TerminalViewState extends State<TerminalView>
     if (!mounted || !current() || data?.text == null) return;
     final result = await source.paste(data!.text!, false);
     if (!mounted || !result.needsConfirmation || !current()) return;
-    final confirmed = await showDialog<String>(
+    final confirmed = await showAppDialog<String>(
       context: context,
       builder: (_) => TerminalPastePreview(
         text: data.text!,
@@ -863,9 +850,10 @@ class TerminalViewState extends State<TerminalView>
 
   Future<void> exportHistory() async {
     final editor = TextEditingController();
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Text('导出当前终端历史'),
         content: TextField(
           controller: editor,

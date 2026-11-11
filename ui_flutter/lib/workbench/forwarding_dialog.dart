@@ -1,3 +1,5 @@
+import '../prototype/design.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -44,7 +46,7 @@ Future<void> showSavedForwardings(
       ),
     );
   }
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     builder: (_) => ForwardingDialog(
       hostId: host.id,
@@ -275,7 +277,7 @@ class _ForwardingDialogState extends State<ForwardingDialog> {
       // indeterminate progress bar alive would redraw continuously.
       setState(() => _busy = false);
       if (draft.fields != null) {
-        final choice = await showDialog<String>(
+        final choice = await showAppDialog<String>(
           context: context,
           builder: (context) => AlertDialog(
             scrollable: true,
@@ -307,7 +309,7 @@ class _ForwardingDialogState extends State<ForwardingDialog> {
         }
       }
       if (!mounted) return;
-      final value = await showDialog<List<RuleConfig>>(
+      final value = await showAppDialog<List<RuleConfig>>(
         context: context,
         barrierDismissible: false,
         builder: (_) => _RuleEditor(
@@ -327,9 +329,10 @@ class _ForwardingDialogState extends State<ForwardingDialog> {
   }
 
   Future<void> _remove(RuleConfig rule) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Text('删除转发规则？'),
         content: Text('删除“${rule.name}”只修改保存配置，不会停止当前正在运行的实例。'),
         actions: [
@@ -360,9 +363,10 @@ class _ForwardingDialogState extends State<ForwardingDialog> {
     if (session == null || !session.current) return;
     final bind = InternetAddress.tryParse(rule.bindAddress);
     if (bind != null && !bind.isLoopback) {
-      final confirmed = await showDialog<bool>(
+      final confirmed = await showAppDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
+          scrollable: true,
           title: const Text('启动非回环监听？'),
           content: Text(
             '请求监听 ${rule.bindAddress}。其他设备可能访问此转发；动态 SOCKS5 不提供认证。远端实际绑定范围由 SSH 服务器策略决定。',
@@ -836,7 +840,7 @@ class _RuleEditorState extends State<_RuleEditor> {
       await _close();
       return;
     }
-    final choice = await showDialog<String>(
+    final choice = await showAppDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         scrollable: true,
@@ -909,9 +913,10 @@ class _RuleEditorState extends State<_RuleEditor> {
     if (_busy) return;
     if (!form.currentState!.validate()) return;
     if (restore && !InternetAddress(bind.text).isLoopback) {
-      final accepted = await showDialog<bool>(
+      final accepted = await showAppDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
+          scrollable: true,
           title: const Text('允许重连后恢复非回环监听？'),
           content: const Text(
             '每次明确手动重连成功后，此规则会尝试启动，可能允许其他设备访问。远端 R 的实际暴露范围还取决于服务器 GatewayPorts 策略；动态 D 没有 SOCKS 认证。',
