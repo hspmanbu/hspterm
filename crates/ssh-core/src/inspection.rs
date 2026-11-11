@@ -451,6 +451,7 @@ async fn collect(
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod dir_size_tests {
     // Runs the shipped script exactly as sshd would (`python3 -I -S -c ...`)
     // against a synthetic tree with a symlink and nested directories.

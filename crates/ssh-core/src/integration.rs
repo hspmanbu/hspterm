@@ -116,6 +116,7 @@ const PROBE_COMMAND: &str = concat!(
 mod tests {
     use super::*;
     #[test]
+    #[cfg(unix)]
     fn probe_prints_nothing_and_decides_by_distinctive_exit_status_only() {
         // The script must not print: it runs on the interactive PTY channel and
         // its bytes are relayed verbatim into the terminal stream.
