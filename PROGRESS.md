@@ -1,3 +1,10 @@
+## 2026-11-11 第十四轮首轮CI收尾修正（待最终CI）
+
+- run42986704180（3033b1f）完成：Release/FRB一致性/全workspace严格Clippy/Analyze/原生启动退出和窗口几何成功；Rust78+47+WebDAV7+provider边界1共133项通过；Flutter179通过、2失败，不能视为验收完成。步骤证据见validation/windows-feedback-round14-2026-11-11/first-ci-jobs.json。
+- 已定位并静态修正：路径TextField的onTapOutside立即unfocus会覆盖文件行pointer-down刚提出的焦点请求，退出编辑后F2无法进入重命名。改为立即通知父级退出编辑，下一帧仅对仍聚焦的存活字段兜底unfocus，保留点击目标的正常焦点。
+- 下载关闭测试原先将“注册完成”视为“已经进入下载”，异步替换注册后会在下载前正确快速取消；夹具增加downloadStarted屏障，确保测试真正验证等待在途下载，不删除断言或跳过测试。
+- 同时包含1c52f59的同标签重连替换、注册表关闭排空等待重开请求。静态Analyze零问题，未在Ubuntu编译/运行测试。下一步推送并dispatch最终源码CI，保存run后再验收；第三阶段仍暂停。
+
 ## 2026-11-11 第十四轮编辑替换静态补充（待新CI）
 
 - 3033b1f的Windows run42986704180已通过Release及FRB一致性，剩余检查仍在运行；其产物尚不包含本节补充。

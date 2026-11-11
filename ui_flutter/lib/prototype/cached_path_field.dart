@@ -210,8 +210,13 @@ class _CachedPathFieldState extends State<CachedPathField> {
           // Entering edit moves the keyboard focus straight into the field.
           autofocus: false,
           onTapOutside: (_) {
-            _focus.unfocus();
             widget.onFocusLost?.call();
+            // A file row requests focus on pointer-down. Do not overwrite that
+            // pending request with an immediate scope unfocus from TapRegion.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _focus.hasPrimaryFocus) _focus.unfocus();
+            });
+            WidgetsBinding.instance.ensureVisualUpdate();
           },
           style: const TextStyle(fontSize: 11, fontFamily: 'JetBrainsMono'),
           // Keep the themed filled/bordered box and its symmetric padding so the

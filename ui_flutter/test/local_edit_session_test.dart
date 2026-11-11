@@ -17,6 +17,7 @@ class FakeGateway implements LocalEditGateway {
   final renames = <(String, String)>[];
   Object? uploadError;
   Completer<void>? downloadGate;
+  Completer<void>? downloadStarted;
   bool refuseUpload = false;
   // Round-12: when set, uploads never complete (idle-close exemption test).
   Completer<void>? uploadGate;
@@ -38,6 +39,9 @@ class FakeGateway implements LocalEditGateway {
     File target, {
     void Function(int done, int? total)? onProgress,
   }) async {
+    if (downloadStarted != null && !downloadStarted!.isCompleted) {
+      downloadStarted!.complete();
+    }
     await downloadGate?.future;
     final bytes = List.of(remoteFiles[path] ?? utf8Bytes('hello'));
     onProgress?.call(0, bytes.length);
@@ -838,6 +842,7 @@ void main() {
     () async {
       final registry = LocalEditRegistry(), s = await connectedSession();
       gateway.downloadGate = Completer<void>();
+      gateway.downloadStarted = Completer<void>();
       var opened = 0;
       final launching = LocalEditSession.launch(
         s,
@@ -854,6 +859,7 @@ void main() {
         },
       );
       final rejected = expectLater(launching, throwsStateError);
+      await gateway.downloadStarted!.future;
       final close = created.single.dispose();
       var drained = false;
       final batch = registry.disposeAll().then((_) => drained = true);
