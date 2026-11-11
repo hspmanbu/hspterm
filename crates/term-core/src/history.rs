@@ -38,10 +38,36 @@ pub struct HistoryStats {
     pub resident_history_cells: usize,
     pub retained_rows: usize,
 }
+// Keep removal in the same registry critical section as discovery/creation.
+// Field order closes the owner before deleting the directory, and releases
+// the registry last. Windows directory enumeration otherwise races delete-pending
+// owner files even though the owner itself remains exclusively locked.
+struct RunDirectory {
+    _owner: File,
+    directory: Option<TempDir>,
+    registry: File,
+}
+impl RunDirectory {
+    fn path(&self) -> &Path {
+        self.directory
+            .as_ref()
+            .expect("live history directory")
+            .path()
+    }
+}
+impl Drop for RunDirectory {
+    fn drop(&mut self) {
+        if self.registry.lock_exclusive().is_err() {
+            // Leave encrypted remnants for the next successful stale cleanup
+            // rather than removing them concurrently with registry discovery.
+            if let Some(directory) = self.directory.take() {
+                let _ = directory.keep();
+            }
+        }
+    }
+}
 struct Run {
-    // Drop the lock handle before deleting the directory (Windows).
-    _lock: File,
-    directory: TempDir,
+    directory: RunDirectory,
     key: Zeroizing<[u8; 32]>,
     fault: Mutex<Option<String>>,
     bytes: AtomicU64,
@@ -294,12 +320,18 @@ impl HistoryPager {
             .create_new(true)
             .open(directory.path().join("owner.lock"))?;
         lock.lock_exclusive()?;
+        let cleanup_registry = registry.try_clone()?;
+        // The retained descriptor must be unlocked before its drop guard exists.
+        FileExt::unlock(&registry)?;
         drop(registry);
         let mut key = Zeroizing::new([0; 32]);
         OsRng.fill_bytes(key.as_mut());
         let run = Arc::new(Run {
-            _lock: lock,
-            directory,
+            directory: RunDirectory {
+                _owner: lock,
+                directory: Some(directory),
+                registry: cleanup_registry,
+            },
             key,
             fault: Mutex::new(None),
             bytes: AtomicU64::new(0),
