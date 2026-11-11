@@ -338,7 +338,8 @@ class LocalEditSession extends ChangeNotifier {
   /// Queue-task surface (round-9): lifecycle state and byte progress for
   /// the download/upload phases. Purely derived UI metadata.
   LocalEditStatus status = LocalEditStatus.downloading;
-  int progressDone = 0, progressTotal = 0;
+  int progressDone = 0;
+  int? progressTotal;
   String get displayName => _remotePath.split('/').last;
   String get hostLabel => _session.host.name;
   String get remotePath => _remotePath;
@@ -351,7 +352,7 @@ class LocalEditSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _setProgress(int done, int total) {
+  void _setProgress(int done, int? total) {
     progressDone = done;
     progressTotal = total;
     notifyListeners();
@@ -475,7 +476,7 @@ class LocalEditSession extends ChangeNotifier {
         generation,
         file.id,
         local,
-        onProgress: (done, total) => session._setProgress(done, total ?? 0),
+        onProgress: (done, total) => session._setProgress(done, total),
       );
       session._requireOpen();
       final stat = await gateway.stat(native, generation, file.id);

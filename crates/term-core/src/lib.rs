@@ -118,6 +118,7 @@ pub struct Snapshot {
     pub osc52_enabled: bool,
     pub right_click_paste: bool,
     pub copy_on_selection: bool,
+    pub image_paste_shortcut: String,
     pub palette: Vec<Option<[u8; 3]>>,
     pub mouse_reporting: bool,
     pub alternate_screen: bool,
@@ -290,6 +291,7 @@ pub struct Terminal {
     user_colors: Option<preferences::Colors>,
     right_click_paste: bool,
     copy_on_selection: bool,
+    image_paste_shortcut: String,
 }
 impl Terminal {
     pub fn new(size: Size, history_lines: usize) -> Result<Self, TerminalError> {
@@ -328,6 +330,7 @@ impl Terminal {
             user_colors: None,
             right_click_paste: false,
             copy_on_selection: false,
+            image_paste_shortcut: r#"{"enabled":true,"key":"KeyV","modifiers":6}"#.into(),
         })
     }
 
@@ -706,6 +709,8 @@ impl Terminal {
         self.user_colors = Some(value.colors.clone());
         self.right_click_paste = value.right_click_paste;
         self.copy_on_selection = value.copy_on_selection;
+        self.image_paste_shortcut = serde_json::to_string(&value.image_paste_shortcut)
+            .expect("validated shortcut is serializable");
         self.set_osc52_enabled(value.osc52);
         self.revision = self.revision.wrapping_add(1);
     }
@@ -935,6 +940,9 @@ impl Terminal {
         );
         fnv(&mut content, u64::from(self.right_click_paste as u8));
         fnv(&mut content, u64::from(self.copy_on_selection as u8));
+        for byte in self.image_paste_shortcut.bytes() {
+            fnv(&mut content, u64::from(byte));
+        }
         fnv(
             &mut content,
             u64::from(self.term.mode().intersects(TermMode::MOUSE_MODE) as u8),
@@ -1045,6 +1053,7 @@ impl Terminal {
             osc52_enabled: self.events.0.lock().osc52_enabled,
             right_click_paste: self.right_click_paste,
             copy_on_selection: self.copy_on_selection,
+            image_paste_shortcut: self.image_paste_shortcut.clone(),
             palette: (0..269)
                 .map(|i| {
                     self.term.colors()[i].map(|v| [v.r, v.g, v.b]).or_else(|| {

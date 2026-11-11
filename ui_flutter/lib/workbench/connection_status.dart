@@ -35,6 +35,9 @@ class _WorkbenchConnectionStatusState extends State<WorkbenchConnectionStatus>
   @override
   void initState() {
     super.initState();
+    _foreground =
+        WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
     model.addListener(_syncLater);
     _syncLater();
@@ -103,7 +106,7 @@ class _WorkbenchConnectionStatusState extends State<WorkbenchConnectionStatus>
         key: const ValueKey('workbench-connection-status'),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 10, color: Theme.of(context).hintColor),
+        style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
       ),
     );
     final source = model.focus;

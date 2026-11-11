@@ -6,6 +6,25 @@ import 'package:flutter/foundation.dart';
 import '../src/rust/api.dart' as rust;
 import '../terminal/controller.dart';
 
+abstract interface class ResourceBarPreference {
+  Future<bool> load();
+  Future<void> save(bool enabled);
+}
+
+class NativeResourceBarPreference implements ResourceBarPreference {
+  NativeResourceBarPreference(this.scope, this.host);
+  final String scope, host;
+  @override
+  Future<bool> load() =>
+      rust.loadResourceBarPreference(scope: scope, host: host);
+  @override
+  Future<void> save(bool enabled) => rust.saveResourceBarPreference(
+    scope: scope,
+    host: host,
+    enabled: enabled,
+  );
+}
+
 class InspectionSource {
   const InspectionSource(this.id, this.generation);
   final int id, generation;
@@ -256,12 +275,56 @@ class RemoteInspectionController extends ChangeNotifier {
     this.terminal, {
     this.gateway = const NativeRemoteInspectionGateway(),
     this.interval = const Duration(seconds: 5),
+    this.preference,
   }) {
     terminal.addListener(_sessionChanged);
+    _preferenceWork = _loadPreference();
   }
   final TerminalController terminal;
   final RemoteInspectionGateway gateway;
   final Duration interval;
+  final ResourceBarPreference? preference;
+  late final Future<void> _preferenceWork;
+  bool _desiredMetrics = false;
+  int? _restoreTriedGeneration;
+  Future<void> ready() async {
+    await _preferenceWork;
+    await _configuration;
+  }
+
+  Future<void> _loadPreference() async {
+    if (preference == null) return;
+    try {
+      _desiredMetrics = await preference!.load();
+      if (!_disposed && !_closing) _maybeRestore();
+    } catch (_) {
+      if (!_disposed && !_closing) {
+        error = '资源栏偏好读取失败；请手动启用或重试。';
+        _notify();
+      }
+    }
+  }
+
+  void _maybeRestore() {
+    if (!_desiredMetrics ||
+        _disposed ||
+        _closing ||
+        !terminal.connected ||
+        _source != null ||
+        _configuration != null ||
+        _restoreTriedGeneration == terminal.generation) {
+      return;
+    }
+    _restoreTriedGeneration = terminal.generation;
+    unawaited(
+      configure(
+        metrics: true,
+        processes: false,
+        persist: false,
+      ).catchError((Object _) {}),
+    );
+  }
+
   InspectionSource? _source;
   bool metrics = false, processesAllowed = false, active = false;
   bool _closing = false, _disposed = false;
@@ -286,7 +349,11 @@ class RemoteInspectionController extends ChangeNotifier {
 
   void _sessionChanged() {
     final s = _source;
-    if (s == null || _current(s)) return;
+    if (s == null) {
+      _maybeRestore();
+      return;
+    }
+    if (_current(s)) return;
     ++_epoch;
     _timer?.cancel();
     _timer = null;
@@ -296,8 +363,9 @@ class RemoteInspectionController extends ChangeNotifier {
     summary = null;
     processList = null;
     result = null;
-    error = '原终端已断开或重连；远端检查需重新启用。';
+    error = '原终端已断开；进程授权已清除。';
     _notify();
+    _maybeRestore();
   }
 
   void _notify() {
@@ -331,7 +399,11 @@ class RemoteInspectionController extends ChangeNotifier {
     });
   }
 
-  Future<void> configure({required bool metrics, required bool processes}) {
+  Future<void> configure({
+    required bool metrics,
+    required bool processes,
+    bool persist = true,
+  }) {
     final source = _capture();
     if (_configuration != null) return Future.error(StateError('正在修改原终端检查授权'));
     final done = Completer<void>();
@@ -351,15 +423,21 @@ class RemoteInspectionController extends ChangeNotifier {
     _notify();
     unawaited(() async {
       try {
+        if (persist) await _preferenceWork;
+        if (!_current(source) || _closing) throw StateError('原终端已改变，未修改资源授权');
         await gateway.configure(source, metrics, processes);
         if (_current(source) && epoch == _epoch && !_closing) {
           this.metrics = metrics;
           processesAllowed = processes;
+          if (persist) {
+            await preference?.save(metrics);
+            _desiredMetrics = metrics;
+          }
         }
         done.complete();
       } catch (e, stack) {
         if (_current(source) && epoch == _epoch) {
-          error = '远端检查授权回执未确认，请重新操作；不会自动探测。';
+          error = '远端检查或偏好保存未获确认，请检查当前开关后重试。';
         }
         done.completeError(e, stack);
       } finally {
@@ -447,6 +525,7 @@ class RemoteInspectionController extends ChangeNotifier {
   Future<void> shutdown() async {
     if (_disposed) return;
     _closing = true;
+    await _preferenceWork;
     ++_epoch;
     _timer?.cancel();
     _timer = null;

@@ -30,8 +30,10 @@ class TerminalView extends StatefulWidget {
     this.typography,
     this.onLocatePath,
     this.onOpenLink,
+    this.onPasteImage,
   });
   final TerminalController controller;
+  final Future<void> Function()? onPasteImage;
   final double fontSize;
   final TerminalTypography? typography;
   final Future<void> Function(String)? onLocatePath;
@@ -506,6 +508,15 @@ class TerminalViewState extends State<TerminalView>
     }
     if (down && !_isModifier(key)) _suggestions.inputChanged();
     if (composing && mods & 6 == 0) return KeyEventResult.ignored;
+    if (!composing &&
+        widget.onPasteImage != null &&
+        c.imagePasteBinding.matches(event)) {
+      if (event is KeyDownEvent) {
+        ApplicationKeyScope.claim(context, event);
+        _run(widget.onPasteImage!());
+      }
+      return KeyEventResult.handled;
+    }
     if (mods & 4 != 0 &&
             mods & 1 != 0 &&
             (key == LogicalKeyboardKey.keyC ||
@@ -731,6 +742,8 @@ class TerminalViewState extends State<TerminalView>
         items: [
           const PopupMenuItem(value: 'copy', child: Text('复制')),
           const PopupMenuItem(value: 'paste', child: Text('粘贴')),
+          if (widget.onPasteImage != null && c.connected)
+            const PopupMenuItem(value: 'paste-image', child: Text('粘贴图片')),
           const PopupMenuItem(value: 'search', child: Text('搜索终端历史')),
           if (c.commandOperationsAvailable && commandFrame != null) ...[
             const PopupMenuItem(
@@ -793,6 +806,9 @@ class TerminalViewState extends State<TerminalView>
         if (v == 'search') showSearch();
         if (v == 'copy') _run(copy());
         if (v == 'paste') _run(paste());
+        if (v == 'paste-image' && widget.onPasteImage != null) {
+          _run(widget.onPasteImage!());
+        }
         if (commandFrame != null && commandRow != null) {
           if (v == 'commandCopy') {
             _run(() async {

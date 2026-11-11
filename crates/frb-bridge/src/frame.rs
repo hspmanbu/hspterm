@@ -82,6 +82,7 @@ pub(crate) fn delta(
         osc52_enabled: Some(snapshot.osc52_enabled),
         right_click_paste: Some(snapshot.right_click_paste),
         copy_on_selection: Some(snapshot.copy_on_selection),
+        image_paste_shortcut: Some(snapshot.image_paste_shortcut.clone()),
         cursor_color: palette(snapshot, 258),
         background: palette(snapshot, 257),
         alternate_screen: snapshot.alternate_screen,

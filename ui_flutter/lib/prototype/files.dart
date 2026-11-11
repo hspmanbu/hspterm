@@ -619,6 +619,15 @@ class _FilesPanelState extends State<FilesPanel> {
     return true;
   }
 
+  void _editPath() {
+    _path.text = p.path;
+    _path.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _path.text.length,
+    );
+    setState(() => _pathEditing = true);
+  }
+
   void navigate(String path) =>
       run(_navigateDirectory(path).then<void>((_) {}));
 
@@ -2169,11 +2178,13 @@ class _FilesPanelState extends State<FilesPanel> {
                               cache: p.directories,
                               contextMenuExtras: pathMenu,
                               onFocusLost: () {
+                                _path.text = p.path;
                                 if (_pathEditing) {
                                   setState(() => _pathEditing = false);
                                 }
                               },
                               onSubmitted: (value) {
+                                _path.text = p.path;
                                 if (value.startsWith('/') &&
                                     !value.contains('\u0000')) {
                                   setState(() => _pathEditing = false);
@@ -2187,62 +2198,77 @@ class _FilesPanelState extends State<FilesPanel> {
                                 }
                               },
                             )
-                          : GestureDetector(
-                              // The whole breadcrumb strip enters path editing;
-                              // breadcrumb segments still navigate themselves.
-                              key: const ValueKey('sftp-path-bar'),
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => setState(() => _pathEditing = true),
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    InkWell(
-                                      onTap: () => navigate('/'),
-                                      child: const Padding(
-                                        padding: EdgeInsets.symmetric(
-                                          horizontal: 7,
-                                          vertical: 8,
-                                        ),
-                                        child: Text('/'),
+                          : Row(
+                              children: [
+                                Expanded(
+                                  child: GestureDetector(
+                                    // The whole breadcrumb strip enters path editing;
+                                    // breadcrumb segments still navigate themselves.
+                                    key: const ValueKey('sftp-path-bar'),
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: _editPath,
+                                    child: SingleChildScrollView(
+                                      scrollDirection: Axis.horizontal,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          InkWell(
+                                            onTap: () => navigate('/'),
+                                            child: const Padding(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: 7,
+                                                vertical: 8,
+                                              ),
+                                              child: Text('/'),
+                                            ),
+                                          ),
+                                          for (
+                                            var i = 0;
+                                            i <
+                                                p.path
+                                                    .split('/')
+                                                    .where((s) => s.isNotEmpty)
+                                                    .length;
+                                            i++
+                                          ) ...[
+                                            const Icon(
+                                              Icons.chevron_right,
+                                              size: 13,
+                                            ),
+                                            Builder(
+                                              builder: (context) {
+                                                final parts = p.path
+                                                    .split('/')
+                                                    .where((s) => s.isNotEmpty)
+                                                    .toList();
+                                                return InkWell(
+                                                  onTap: () => navigate(
+                                                    '/${parts.take(i + 1).join('/')}',
+                                                  ),
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 5,
+                                                          vertical: 8,
+                                                        ),
+                                                    child: Text(parts[i]),
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          ],
+                                        ],
                                       ),
                                     ),
-                                    for (
-                                      var i = 0;
-                                      i <
-                                          p.path
-                                              .split('/')
-                                              .where((s) => s.isNotEmpty)
-                                              .length;
-                                      i++
-                                    ) ...[
-                                      const Icon(Icons.chevron_right, size: 13),
-                                      Builder(
-                                        builder: (context) {
-                                          final parts = p.path
-                                              .split('/')
-                                              .where((s) => s.isNotEmpty)
-                                              .toList();
-                                          return InkWell(
-                                            onTap: () => navigate(
-                                              '/${parts.take(i + 1).join('/')}',
-                                            ),
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 5,
-                                                    vertical: 8,
-                                                  ),
-                                              child: Text(parts[i]),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                  ],
+                                  ),
                                 ),
-                              ),
+                                GestureDetector(
+                                  key: const ValueKey('sftp-path-edit-space'),
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: _editPath,
+                                  child: const SizedBox(width: 28, height: 36),
+                                ),
+                              ],
                             ),
                     ),
                   ),

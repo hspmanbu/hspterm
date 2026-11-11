@@ -20,6 +20,49 @@ Future<void> mount(WidgetTester tester, WorkbenchModel model) async {
 
 void main() {
   testWidgets(
+    'deep breadcrumbs reserve an edit hit zone and discard an invalid address',
+    (tester) async {
+      final model = WorkbenchModel()..demo();
+      model.focus!.path = '/root/${List.filled(24, 'deep').join('/')}';
+      final loaded = model.focus!.path;
+      await mount(tester, model);
+      final space = find.byKey(const ValueKey('sftp-path-edit-space'));
+      expect(tester.getSize(space).width, 28);
+      await tester.tap(space);
+      await tester.pumpAndSettle();
+      // ignore: avoid_print
+      print('EDITING=${find.byKey(const ValueKey('remote-path')).evaluate().length} BAR=${find.byKey(const ValueKey('sftp-path-bar')).evaluate().length} TF=${find.byType(TextField).evaluate().length}');
+      final tfs = tester.widgetList<TextField>(find.byType(TextField));
+      // ignore: avoid_print
+      for (final tf in tfs) {
+        // ignore: avoid_print
+        print('TF_TEXT=[${tf.controller?.text}] LOADED=[$loaded] SAME=${tf.controller?.text == loaded}');
+      }
+      final address = find.byWidgetPredicate(
+        (w) => w is TextField && w.controller?.text == loaded,
+      );
+      expect(address, findsOneWidget);
+      await tester.enterText(address, 'bad-relative-path');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      // Either still editing with the address restored to the loaded path,
+      // or focus loss already left edit mode with the breadcrumb restored —
+      // both discard the invalid address and keep the loaded path.
+      final restored = find.byWidgetPredicate(
+        (w) => w is TextField && w.controller?.text == loaded,
+      );
+      final breadcrumbBack = find.byKey(const ValueKey('sftp-path-bar'));
+      expect(
+        restored.evaluate().isNotEmpty || breadcrumbBack.evaluate().isNotEmpty,
+        isTrue,
+      );
+      expect(model.focus!.path, loaded);
+      await tester.pumpWidget(const SizedBox());
+      model.dispose();
+    },
+  );
+
+  testWidgets(
     'parent placeholder navigates without entering the real file list',
     (tester) async {
       final m = WorkbenchModel()..demo();

@@ -105,6 +105,7 @@ pub struct RenderFrame {
     pub osc52_enabled: Option<bool>,
     pub right_click_paste: Option<bool>,
     pub copy_on_selection: Option<bool>,
+    pub image_paste_shortcut: Option<String>,
     pub cursor_color: u32,
     pub background: u32,
     pub alternate_screen: bool,
@@ -137,6 +138,7 @@ struct TerminalCloseState {
     forwardings: bool,
     editors: bool,
     previews: bool,
+    images: bool,
     directories: bool,
     searches: bool,
     transfers: bool,
@@ -181,6 +183,7 @@ struct Entry {
     closed: AtomicBool,
     close_state: tokio::sync::Mutex<TerminalCloseState>,
     clipboard_enabled: AtomicBool,
+    image_uploads: crate::clipboard_images::Uploads,
     frame_pulls: AtomicU64,
     cells_sent: AtomicU64,
     rows_sent: AtomicU64,
@@ -483,6 +486,7 @@ pub async fn create_terminal(columns: u16, rows: u16, history_lines: u32) -> Res
             closed: AtomicBool::new(false),
             close_state: tokio::sync::Mutex::new(TerminalCloseState::default()),
             clipboard_enabled: AtomicBool::new(true),
+            image_uploads: crate::clipboard_images::Uploads::default(),
             frame_pulls: AtomicU64::new(0),
             cells_sent: AtomicU64::new(0),
             rows_sent: AtomicU64::new(0),
@@ -685,6 +689,7 @@ async fn close_terminal_owned(
     };
     retire_once!(editors, crate::editors::stop_terminal(id).await);
     retire_once!(previews, crate::previews::stop_terminal(id).await);
+    retire_once!(images, entry.image_uploads.stop().await);
     retire_once!(directories, entry.directories.close_all().await);
     retire_once!(searches, entry.file_searches.close_all().await);
     retire_once!(transfers, crate::transfers::stop_terminal(id).await);
@@ -3439,6 +3444,7 @@ pub async fn disconnect_terminal(id: u32) -> Result<()> {
         let agent_operations = e.agents.wait_operations().await;
         let forwarded = e.forwardings.stop_all().await;
         let disconnected: Result<()> = async {
+            let images_stopped = e.image_uploads.stop().await;
             let editors_stopped = crate::editors::stop_terminal(id).await;
             let previews_closed = crate::previews::stop_terminal(id).await;
             let directory_closed = e.directories.close_all().await;
@@ -3458,6 +3464,7 @@ pub async fn disconnect_terminal(id: u32) -> Result<()> {
             searches_closed?;
             previews_closed?;
             editors_stopped?;
+            images_stopped?;
             Ok(())
         }
         .await;
@@ -4643,6 +4650,94 @@ pub async fn sftp_close_file_search(id: u32, generation: u64, request: u64) -> R
     .await;
     crate::public_errors::finish(outcome)
 }
+/// Explicit user image paste: stream a local PNG through a dedicated channel
+/// into a private remote temporary directory. Never sends terminal input.
+pub async fn paste_clipboard_image_path(id: u32, generation: u64, path: String) -> Result<()> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        ensure!(
+            path.starts_with('/') && path.len() <= 4096 && !path.chars().any(char::is_control),
+            "图片路径无效，未输入"
+        );
+        let text = format!("'{}'", path.replace('\'', "'\\''"));
+        ensure!(
+            matches!(
+                entry(id)?
+                    .session
+                    .input_generation(
+                        generation,
+                        TerminalInput::Paste {
+                            text,
+                            confirmed: false
+                        }
+                    )
+                    .await?,
+                InputOutcome::Sent
+            ),
+            "图片路径粘贴未确认，未自动重试"
+        );
+        Ok(())
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+pub async fn load_resource_bar_preference(scope: String, host: String) -> Result<bool> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(move || {
+            with_vault(|v| {
+                Ok(hspterm_storage_sync::resource_bar_preferences::load(
+                    v, &scope, &host,
+                )?)
+            })
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+pub async fn save_resource_bar_preference(
+    scope: String,
+    host: String,
+    enabled: bool,
+) -> Result<()> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(move || {
+            with_vault(|v| {
+                Ok(hspterm_storage_sync::resource_bar_preferences::save(
+                    v, &scope, &host, enabled,
+                )?)
+            })
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+pub async fn upload_clipboard_image(
+    id: u32,
+    generation: u64,
+    local_path: String,
+) -> Result<String> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        let e = entry(id)?;
+        e.image_uploads
+            .upload(
+                &e.session,
+                generation,
+                &e.transfer_closing,
+                std::path::Path::new(&local_path),
+            )
+            .await
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
 pub async fn sftp_create_directory(
     id: u32,
     path: String,

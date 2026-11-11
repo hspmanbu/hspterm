@@ -3,6 +3,7 @@
 mod agents;
 pub mod api;
 mod backups;
+mod clipboard_images;
 mod configuration_sync;
 mod connections;
 pub mod diagnostics;

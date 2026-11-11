@@ -1103,6 +1103,46 @@ Future<void> sftpCloseFileSearch({
   request: request,
 );
 
+/// Explicit user image paste: stream a local PNG through a dedicated channel
+/// into a private remote temporary directory. Never sends terminal input.
+Future<void> pasteClipboardImagePath({
+  required int id,
+  required int generation,
+  required String path,
+}) => RustLib.instance.api.crateApiPasteClipboardImagePath(
+  id: id,
+  generation: generation,
+  path: path,
+);
+
+Future<bool> loadResourceBarPreference({
+  required String scope,
+  required String host,
+}) => RustLib.instance.api.crateApiLoadResourceBarPreference(
+  scope: scope,
+  host: host,
+);
+
+Future<void> saveResourceBarPreference({
+  required String scope,
+  required String host,
+  required bool enabled,
+}) => RustLib.instance.api.crateApiSaveResourceBarPreference(
+  scope: scope,
+  host: host,
+  enabled: enabled,
+);
+
+Future<String> uploadClipboardImage({
+  required int id,
+  required int generation,
+  required String localPath,
+}) => RustLib.instance.api.crateApiUploadClipboardImage(
+  id: id,
+  generation: generation,
+  localPath: localPath,
+);
+
 Future<void> sftpCreateDirectory({
   required int id,
   required String path,
@@ -2775,6 +2815,7 @@ class RenderFrame {
   final bool? osc52Enabled;
   final bool? rightClickPaste;
   final bool? copyOnSelection;
+  final String? imagePasteShortcut;
   final int cursorColor;
   final int background;
   final bool alternateScreen;
@@ -2804,6 +2845,7 @@ class RenderFrame {
     this.osc52Enabled,
     this.rightClickPaste,
     this.copyOnSelection,
+    this.imagePasteShortcut,
     required this.cursorColor,
     required this.background,
     required this.alternateScreen,
@@ -2835,6 +2877,7 @@ class RenderFrame {
       osc52Enabled.hashCode ^
       rightClickPaste.hashCode ^
       copyOnSelection.hashCode ^
+      imagePasteShortcut.hashCode ^
       cursorColor.hashCode ^
       background.hashCode ^
       alternateScreen.hashCode ^
@@ -2868,6 +2911,7 @@ class RenderFrame {
           osc52Enabled == other.osc52Enabled &&
           rightClickPaste == other.rightClickPaste &&
           copyOnSelection == other.copyOnSelection &&
+          imagePasteShortcut == other.imagePasteShortcut &&
           cursorColor == other.cursorColor &&
           background == other.background &&
           alternateScreen == other.alternateScreen &&

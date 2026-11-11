@@ -22,9 +22,11 @@ class LiveTerminalSurface extends StatefulWidget {
     this.retryTypography,
     this.onLocatePath,
     this.onOpenLink,
+    this.onPasteImage,
     this.onDropPaths,
   });
   final LiveTerminalSession session;
+  final Future<void> Function()? onPasteImage;
   final bool focused;
   final double fontSize;
   final TerminalTypography? typography;
@@ -174,6 +176,7 @@ class _LiveTerminalSurfaceState extends State<LiveTerminalSurface> {
                   typography: widget.typography,
                   onLocatePath: widget.onLocatePath,
                   onOpenLink: widget.onOpenLink,
+                  onPasteImage: widget.onPasteImage,
                 ),
               ),
             ),

@@ -1,3 +1,4 @@
+import '../terminal/image_paste_binding.dart';
 import '../prototype/design.dart';
 import '../prototype/settings_style.dart';
 import '../prototype/settings_leave.dart';
@@ -21,6 +22,7 @@ class TerminalPreferencesValue {
     required this.rightPaste,
     this.copySelection = false,
     this.pastePaths = true,
+    this.imagePaste = const ImagePasteBinding(),
     required this.foreground,
     required this.background,
     required this.cursor,
@@ -32,6 +34,7 @@ class TerminalPreferencesValue {
   final int historyLines, foreground, background, cursor;
   final String shape;
   final bool blink, osc52, rightPaste, copySelection, pastePaths;
+  final ImagePasteBinding imagePaste;
   final List<int> ansi;
   final TerminalNotificationSettings notifications;
 
@@ -103,6 +106,7 @@ class TerminalPreferencesValue {
     'right_click_paste': rightPaste,
     'copy_on_selection': copySelection,
     'paste_paths_direct': pastePaths,
+    'image_paste_shortcut': imagePaste.toJson(),
     'colors': {
       'foreground': foreground,
       'background': background,
@@ -124,6 +128,7 @@ class TerminalPreferencesValue {
           'right_click_paste',
           if (value.containsKey('copy_on_selection')) 'copy_on_selection',
           if (value.containsKey('paste_paths_direct')) 'paste_paths_direct',
+          if (value.containsKey('image_paste_shortcut')) 'image_paste_shortcut',
           'colors',
           if (value.containsKey('notifications')) 'notifications',
           if (value.containsKey('typography')) 'typography',
@@ -160,6 +165,11 @@ class TerminalPreferencesValue {
       rightPaste: value['right_click_paste'] as bool,
       copySelection: value['copy_on_selection'] as bool? ?? false,
       pastePaths: value['paste_paths_direct'] as bool? ?? true,
+      imagePaste: value['image_paste_shortcut'] == null
+          ? const ImagePasteBinding()
+          : ImagePasteBinding.parse(
+              value['image_paste_shortcut'] as Map<String, dynamic>,
+            ),
       foreground: colors['foreground'] as int,
       background: colors['background'] as int,
       cursor: colors['cursor'] as int,
@@ -265,6 +275,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
   String _shape = 'block';
   bool _copySelection = false;
   bool _pastePaths = true;
+  ImagePasteBinding _imagePaste = const ImagePasteBinding();
   final _history = TextEditingController();
   final _colors = List.generate(19, (_) => TextEditingController());
   final _notificationEditor = GlobalKey<TerminalNotificationEditorState>();
@@ -295,6 +306,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
     _right = v.rightPaste;
     _copySelection = v.copySelection;
     _pastePaths = v.pastePaths;
+    _imagePaste = v.imagePaste;
     final colors = [v.foreground, v.background, v.cursor, ...v.ansi];
     for (var i = 0; i < colors.length; i++) {
       _colors[i].text = colors[i]
@@ -329,6 +341,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
   }
 
   TerminalPreferencesValue _read() {
+    ImagePasteBinding.parse(_imagePaste.toJson());
     final count = int.tryParse(_history.text.trim());
     if (count == null || count < 0 || count > 1000000) {
       throw const FormatException('历史行数须为0–1000000的整数');
@@ -347,6 +360,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
       rightPaste: _right,
       copySelection: _copySelection,
       pastePaths: _pastePaths,
+      imagePaste: _imagePaste,
       foreground: colors[0],
       background: colors[1],
       cursor: colors[2],
@@ -538,6 +552,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
               const SizedBox(height: 12),
               SettingsField(
                 child: DropdownButtonFormField<String>(
+                  isExpanded: true,
                   key: ValueKey('terminal-cursor-$_shape'),
                   initialValue: _shape,
                   decoration: const InputDecoration(labelText: '默认光标'),
@@ -599,6 +614,92 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
                   onChanged: (v) => setState(() => _pastePaths = v),
                 ),
               ),
+              const SizedBox(height: 12),
+              CompactSettingsToggle(
+                child: SwitchListTile(
+                  key: const ValueKey('image-paste-enabled'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('图片粘贴快捷键'),
+                  subtitle: const Text('上传至远端私有临时目录，填入路径，不按回车。普通文本粘贴不变。'),
+                  value: _imagePaste.enabled,
+                  onChanged: (v) => setState(
+                    () => _imagePaste = ImagePasteBinding(
+                      enabled: v,
+                      key: _imagePaste.key,
+                      modifiers: _imagePaste.modifiers,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  SizedBox(
+                    width: 170,
+                    child: DropdownButtonFormField<int>(
+                      isExpanded: true,
+                      key: ValueKey(
+                        'image-paste-mods-${_imagePaste.modifiers}',
+                      ),
+                      decoration: const InputDecoration(labelText: '修饰键'),
+                      initialValue: _imagePaste.modifiers,
+                      items: const [
+                        DropdownMenuItem(value: 6, child: Text('Ctrl + Alt')),
+                        DropdownMenuItem(value: 5, child: Text('Ctrl + Shift')),
+                        DropdownMenuItem(
+                          value: 7,
+                          child: Text(
+                            'Ctrl + Alt + Shift',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) {
+                          setState(
+                            () => _imagePaste = ImagePasteBinding(
+                              enabled: _imagePaste.enabled,
+                              key: _imagePaste.key,
+                              modifiers: v,
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                  SizedBox(
+                    width: 130,
+                    child: DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      key: ValueKey('image-paste-key-${_imagePaste.key}'),
+                      decoration: const InputDecoration(labelText: '按键'),
+                      initialValue: _imagePaste.key,
+                      items: [
+                        for (final key in ImagePasteBinding.keys.keys)
+                          DropdownMenuItem(
+                            value: key,
+                            child: Text(key.replaceFirst('Key', '')),
+                          ),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) {
+                          setState(
+                            () => _imagePaste = ImagePasteBinding(
+                              enabled: _imagePaste.enabled,
+                              key: v,
+                              modifiers: _imagePaste.modifiers,
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               const Text('多行粘贴预览始终保留；不提供关闭安全确认或清空终端历史的按钮。'),
               if (source != null)
                 TerminalNotificationEditor(

@@ -522,3 +522,5 @@ mod tests {
 }
 
 pub mod shortcut_settings;
+
+pub mod resource_bar_preferences;

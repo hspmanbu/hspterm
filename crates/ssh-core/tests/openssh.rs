@@ -3821,3 +3821,95 @@ async fn batch_rename_reserves_task_names_preserves_old_files_and_refuses_late_r
     }
     sftp.close().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn clipboard_image_upload_is_private_exclusive_and_never_executes_shell_input() {
+    use base64::Engine;
+    use hspterm_ssh_core::{bandwidth::BandwidthLimiter, clipboard_image};
+    use std::os::unix::fs::PermissionsExt;
+    let server = Server::start().await;
+    let connection = server.connect().await;
+    let remote = connection.open_sftp().await.unwrap();
+    let source = server.dir.path().join("clipboard.png");
+    let png = base64::engine::general_purpose::STANDARD.decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=").unwrap();
+    fs::write(&source, &png).unwrap();
+    let nonce = server
+        .dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .bytes()
+        .chain(std::process::id().to_le_bytes())
+        .cycle()
+        .take(16)
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    // Test fixture nonce differs per isolated server; production uses OS CSPRNG.
+    let path = clipboard_image::upload(
+        &remote,
+        &source,
+        &nonce,
+        &CancellationToken::new(),
+        &BandwidthLimiter::default(),
+    )
+    .await
+    .unwrap();
+    let root = Path::new(&path).parent().unwrap();
+    assert_eq!(fs::read(&path).unwrap(), png);
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        fs::metadata(root).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert!(
+        clipboard_image::upload(
+            &remote,
+            &source,
+            &nonce,
+            &CancellationToken::new(),
+            &BandwidthLimiter::default()
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        png,
+        "collision never overwrites or deletes original image"
+    );
+    fs::remove_file(&path).unwrap();
+    fs::remove_dir(root).unwrap();
+    fs::write(&source, b"not an image").unwrap();
+    assert!(
+        clipboard_image::upload(
+            &remote,
+            &source,
+            &nonce,
+            &CancellationToken::new(),
+            &BandwidthLimiter::default()
+        )
+        .await
+        .is_err()
+    );
+    assert!(!root.exists());
+    let stop = CancellationToken::new();
+    stop.cancel();
+    assert!(
+        clipboard_image::upload(
+            &remote,
+            &source,
+            &nonce,
+            &stop,
+            &BandwidthLimiter::default()
+        )
+        .await
+        .is_err()
+    );
+    assert!(!root.exists());
+    remote.close().await.unwrap();
+}

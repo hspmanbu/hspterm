@@ -91,6 +91,45 @@ impl Typography {
         Ok(())
     }
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImagePasteShortcut {
+    pub enabled: bool,
+    pub key: String,
+    pub modifiers: u8,
+}
+impl Default for ImagePasteShortcut {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            key: "KeyV".into(),
+            modifiers: 6,
+        }
+    }
+}
+impl ImagePasteShortcut {
+    fn validate(&self) -> Result<(), PreferencesError> {
+        let key = self
+            .key
+            .strip_prefix("Key")
+            .is_some_and(|k| k.len() == 1 && k.bytes().all(|b| b.is_ascii_uppercase()))
+            || self
+                .key
+                .strip_prefix('F')
+                .and_then(|k| k.parse::<u8>().ok())
+                .is_some_and(|n| (1..=12).contains(&n) && self.key == format!("F{n}"));
+        // Require an explicit Ctrl+Alt or Ctrl+Shift chord. Ordinary typing,
+        // text paste/copy and terminal search keep their established keys.
+        if !key
+            || !matches!(self.modifiers, 5..=7)
+            || self.modifiers == 5 && matches!(self.key.as_str(), "KeyV" | "KeyC" | "KeyF")
+        {
+            return Err(PreferencesError);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
@@ -109,6 +148,8 @@ pub struct Settings {
     /// (round-8); old records without the key keep the default.
     #[serde(default = "default_paste_paths_direct")]
     pub paste_paths_direct: bool,
+    #[serde(default)]
+    pub image_paste_shortcut: ImagePasteShortcut,
     pub colors: Colors,
     #[serde(default)]
     pub notifications: crate::notifications::Settings,
@@ -130,6 +171,7 @@ impl Default for Settings {
             right_click_paste: false,
             copy_on_selection: false,
             paste_paths_direct: true,
+            image_paste_shortcut: ImagePasteShortcut::default(),
             colors: Colors::default(),
             notifications: crate::notifications::Settings::default(),
             typography: None,
@@ -154,6 +196,7 @@ impl Settings {
         Ok(Validated(self.clone(), self.notifications.prepare()?))
     }
     pub fn validate(&self) -> Result<(), PreferencesError> {
+        self.image_paste_shortcut.validate()?;
         if let Some(value) = &self.typography {
             value.validate()?;
         }
@@ -326,5 +369,29 @@ mod tests {
             .filter_map(|e| t.protocol_reply(e))
             .collect();
         assert!(replies.iter().any(|s| s.contains("1111/2222/3333")));
+    }
+    #[test]
+    fn image_shortcut_defaults_migrate_and_invalid_chords_do_not_change_terminal() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("image_paste_shortcut");
+        let settings: Settings = serde_json::from_value(value).unwrap();
+        assert_eq!(settings.image_paste_shortcut, ImagePasteShortcut::default());
+        let mut terminal = Terminal::new(Size::new(20, 4).unwrap(), 100).unwrap();
+        terminal.set_preferences(&settings).unwrap();
+        let before = terminal.snapshot().image_paste_shortcut;
+        for key in ["KeyV", "KeyC", "KeyF", "F01", "Enter"] {
+            let mut invalid = settings.clone();
+            invalid.image_paste_shortcut.key = key.into();
+            invalid.image_paste_shortcut.modifiers = 5;
+            assert!(terminal.set_preferences(&invalid).is_err());
+            assert_eq!(terminal.snapshot().image_paste_shortcut, before);
+        }
+        let mut changed = settings;
+        changed.image_paste_shortcut.key = "F12".into();
+        terminal.set_preferences(&changed).unwrap();
+        assert!(terminal.snapshot().image_paste_shortcut.contains("F12"));
     }
 }

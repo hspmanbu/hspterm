@@ -98,19 +98,22 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   /// transfer engine.
   Widget _editTile(LocalEditSession edit) {
     final statusText = switch (edit.status) {
-      LocalEditStatus.downloading =>
-        edit.progressTotal > 0
-            ? '下载中 ${edit.progressDone}/${edit.progressTotal} B'
-            : '下载中',
+      LocalEditStatus.downloading => '下载中',
       LocalEditStatus.editing => '正在本地编辑 · 保存后自动回传',
-      LocalEditStatus.uploading =>
-        edit.progressTotal > 0
-            ? '正在上传 ${edit.progressDone}/${edit.progressTotal} B'
-            : '正在上传',
+      LocalEditStatus.uploading => '正在上传',
       LocalEditStatus.conflicted => '远端已变化 · 未覆盖，请处理后重试',
       LocalEditStatus.failed => '上传失败 · 修改已保留，可重试',
       LocalEditStatus.closed => '已关闭',
     };
+    final transferring =
+        edit.status == LocalEditStatus.downloading ||
+        edit.status == LocalEditStatus.uploading;
+    final total = edit.progressTotal;
+    final progress = total == null
+        ? null
+        : total == 0
+        ? 1.0
+        : (edit.progressDone / total).clamp(0.0, 1.0);
     final failed =
         edit.status == LocalEditStatus.failed ||
         edit.status == LocalEditStatus.conflicted;
@@ -123,11 +126,29 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 12),
       ),
-      subtitle: Text(
-        '${edit.hostLabel} · $statusText · 远端 ${edit.remotePath}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 10),
+      subtitle: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '${edit.hostLabel} · $statusText · 远端 ${edit.remotePath}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 10),
+          ),
+          if (transferring) ...[
+            const SizedBox(height: 5),
+            LinearProgressIndicator(value: progress, minHeight: 3),
+            const SizedBox(height: 4),
+            Text(
+              '${progress == null ? '进度 —' : '${(progress * 100).round()}%'} · '
+              '${bytes(edit.progressDone)} / ${total == null ? '未知大小' : bytes(total)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10),
+            ),
+          ],
+        ],
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -189,6 +210,10 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   /// open is the last resort when selection cannot be done at all.
   Future<void> _revealFile(File file) async {
     final dir = file.parent.path;
+    if (widget.launchLocal != null) {
+      await _launchLocal(Uri.directory(dir));
+      return;
+    }
     if (Platform.isWindows) {
       if (!file.parent.existsSync()) {
         throw StateError('本地编辑目录已不存在，无法打开所在文件夹：$dir');

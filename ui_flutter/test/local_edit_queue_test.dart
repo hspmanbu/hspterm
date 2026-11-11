@@ -132,6 +132,46 @@ void main() {
     return created;
   }
 
+  testWidgets(
+    'edit transfer progress handles upload download unknown totals and empty files',
+    (tester) async {
+      final source = (await tester.runAsync(connectedSession))!;
+      final edit = (await tester.runAsync(
+        () => launchEdit(source, 'progress.txt'),
+      ))!;
+      Future<void> render(LocalEditStatus status, int done, int? total) async {
+        edit.status = status;
+        edit.progressDone = done;
+        edit.progressTotal = total;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(body: LiveTransferQueue(model: model)),
+          ),
+        );
+        await tester.pump();
+      }
+
+      await render(LocalEditStatus.downloading, 1024, 2048);
+      expect(find.text('50% · 1.0 KiB / 2.0 KiB'), findsOneWidget);
+      await render(LocalEditStatus.uploading, 1048576, 2097152);
+      expect(find.text('50% · 1.0 MiB / 2.0 MiB'), findsOneWidget);
+      await render(LocalEditStatus.downloading, 10, null);
+      expect(
+        tester
+            .widget<LinearProgressIndicator>(
+              find.byType(LinearProgressIndicator),
+            )
+            .value,
+        null,
+      );
+      await render(LocalEditStatus.uploading, 0, 0);
+      expect(find.text('100% · 0 B / 0 B'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      source.controller.dispose();
+    },
+  );
+
   testWidgets('edit task renders its own queue section and tile', (
     tester,
   ) async {

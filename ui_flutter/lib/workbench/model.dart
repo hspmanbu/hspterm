@@ -108,18 +108,28 @@ class RemoteFileSubmissionFailure implements Exception {
 
 /// A stable session owns the controller. Flutter display nodes never own SSH.
 class LiveTerminalSession extends TerminalSession {
-  LiveTerminalSession(super.id, super.host, TerminalBackend backend)
-    : controller = TerminalController(backend),
-      super(disconnected: true) {
+  LiveTerminalSession(
+    super.id,
+    super.host,
+    TerminalBackend backend, {
+    this.preferenceScope,
+  }) : controller = TerminalController(backend),
+       super(disconnected: true) {
     path = '.';
     sftpEnabled = false;
     controller.visible = false;
     controller.profileId = host.id;
   }
   final TerminalController controller;
+  final String? preferenceScope;
   RemoteInspectionController? _inspection;
   RemoteInspectionController get inspection =>
-      _inspection ??= RemoteInspectionController(controller);
+      _inspection ??= RemoteInspectionController(
+        controller,
+        preference: preferenceScope == null || temporaryConnection
+            ? null
+            : NativeResourceBarPreference(preferenceScope!, host.id),
+      );
   Future<void> stopInspection() => _inspection?.shutdown() ?? Future.value();
   void disposeInspection() => _inspection?.dispose();
 
@@ -234,6 +244,10 @@ LiveTerminalSession? chooseTransferConnection(
 }
 
 class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
+  final _imagePastes = <String>{};
+  bool beginImagePaste(String session) =>
+      !isClosing && _imagePastes.add(session);
+  void endImagePaste(String session) => _imagePastes.remove(session);
   @override
   bool get isClosing => _disposed || _shutdown != null;
   Future<tmx.TmuxSelection?> Function(LiveTerminalSession, tmx.TmuxPrompt)?
@@ -1717,6 +1731,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   }
 
   int _catalogEpoch = 0;
+  String? _catalogScope;
   Future<void> load() {
     if (isClosing) return Future.error(StateError('应用正在关闭，不能载入主机目录'));
     final work = _loadCatalog(++_catalogEpoch);
@@ -1744,6 +1759,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         atomic.vaultScope != _paletteShortcut!.vaultScope) {
       throw StateError('读取期间配置库已改变，未发布旧主机目录');
     }
+    _catalogScope = atomic?.vaultScope ?? _paletteShortcut?.vaultScope;
     for (final s in sessions.cast<LiveTerminalSession>()) {
       final next = records.where((h) => h.id == s.host.id).firstOrNull;
       if ((next?.followOsc7 ?? false) &&
@@ -1818,7 +1834,12 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   String nextId() => store.newId();
   @override
   TerminalSession createSession(String id, DemoHost host) =>
-      LiveTerminalSession(id, host.snapshot(), backendFactory());
+      LiveTerminalSession(
+        id,
+        host.snapshot(),
+        backendFactory(),
+        preferenceScope: _catalogScope,
+      );
   @override
   void openHost(DemoHost host) => _openHost(host);
 

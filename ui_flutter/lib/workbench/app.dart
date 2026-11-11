@@ -1,3 +1,4 @@
+import 'clipboard_image.dart';
 import '../app_notice.dart';
 import '../run_log.dart';
 import 'palette_settings.dart';
@@ -529,6 +530,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
           retryTypography: () =>
               unawaited(m.typography.ensureHost(session.host.id, retry: true)),
           onLocatePath: (text) => m.locateTerminalPath(session, text),
+          onPasteImage: () => pasteClipboardImage(context, m, session),
           onOpenLink: (link) => openTerminalLink(context, m, session, link),
           onDropPaths: (paths, generation) => sendSessionPaths(
             context,

@@ -160,6 +160,14 @@ impl SftpSession {
             .map(|_| ())
     }
 
+    /// Create with permissions in the initial MKDIR request, without a
+    /// world-readable interval before a later SETSTAT.
+    pub async fn create_dir_with_attributes<T: Into<String>>(
+        &self, path: T, attributes: FileAttributes,
+    ) -> SftpResult<()> {
+        self.session.mkdir(path, attributes).await.map(|_| ())
+    }
+
     /// Reads the contents of a file located at the specified path to the end.
     pub async fn read<P: Into<String>>(&self, path: P) -> SftpResult<Vec<u8>> {
         let mut file = self.open(path).await?;

@@ -8,13 +8,21 @@ import 'remote_inspection.dart';
 Future<void> showRemoteInspection(
   BuildContext context,
   LiveTerminalSession session,
-) => showAppDialog<void>(
-  context: context,
-  builder: (_) => RemoteInspectionPanel(
-    controller: session.inspection,
-    label: session.host.name,
-  ),
-);
+) async {
+  try {
+    await session.inspection.ready();
+  } catch (_) {
+    /* The controller retains the authorization/persistence error for the panel. */
+  }
+  if (!context.mounted) return;
+  await showAppDialog<void>(
+    context: context,
+    builder: (_) => RemoteInspectionPanel(
+      controller: session.inspection,
+      label: session.host.name,
+    ),
+  );
+}
 
 class RemoteInspectionPanel extends StatefulWidget {
   const RemoteInspectionPanel({
@@ -86,7 +94,7 @@ class _RemoteInspectionPanelState extends State<RemoteInspectionPanel> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text(
-                      '可选功能，仅本终端本次连接有效。需要远端 Linux procfs 与 Python 3，通过独立 SSH exec 读取，不改变终端输入。未启用不探测；后台或非焦点终端不自动采样。数据仅在内存，不进日志、备份或云同步。',
+                      '资源展示按主机在本机加密保存，重连自动恢复；进程授权仅本次连接有效。需要远端 Linux procfs 与 Python 3，通过独立 SSH exec 读取，不改变终端输入。未启用不探测；后台或非焦点终端不自动采样。数据仅在内存，不进日志、备份或云同步。',
                       style: TextStyle(fontSize: 12),
                     ),
                     CheckboxListTile(

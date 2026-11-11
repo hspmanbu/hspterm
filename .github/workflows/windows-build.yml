@@ -105,13 +105,29 @@ jobs:
         id: build
         run: ./tools/build_windows.ps1 -CreateArchive
 
+      - name: Verify generated bridge consistency and Rust formatting
+        run: |
+          cargo fmt --all
+          if ($LASTEXITCODE -ne 0) { throw 'Rust formatting failed' }
+          git diff --exit-code -- crates/frb-bridge/src/frb_generated.rs ui_flutter/lib/src/rust
+          if ($LASTEXITCODE -ne 0) { throw 'Generated bridge differs from committed sources' }
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE -ne 0) { throw 'Rust formatting check failed' }
+
+      - name: Check Rust warnings and unit tests
+        run: |
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Rust Clippy failed' }
+          cargo test --workspace --lib --locked -- --test-threads=2
+          if ($LASTEXITCODE -ne 0) { throw 'Rust library tests failed' }
+
       - name: Analyze Flutter
         working-directory: ui_flutter
         run: flutter analyze --no-pub
 
       - name: Test font settings and navigation
         working-directory: ui_flutter
-        run: flutter test --no-pub test/typography_settings_test.dart test/host_typography_test.dart test/settings_leave_guard_test.dart test/widget_test.dart test/directory_reader_test.dart test/terminal_paths_send_test.dart test/run_log_test.dart test/diagnostics_test.dart test/ime_buffer_test.dart test/app_notice_test.dart test/minimized_terminal_test.dart test/file_properties_dialog_test.dart test/sftp_feedback_ui_test.dart test/terminal_feedback_test.dart --reporter expanded
+        run: flutter test --no-pub test/typography_settings_test.dart test/host_typography_test.dart test/settings_leave_guard_test.dart test/widget_test.dart test/directory_reader_test.dart test/terminal_paths_send_test.dart test/run_log_test.dart test/diagnostics_test.dart test/ime_buffer_test.dart test/app_notice_test.dart test/minimized_terminal_test.dart test/file_properties_dialog_test.dart test/sftp_feedback_ui_test.dart test/terminal_feedback_test.dart test/dialog_bounds_test.dart test/history_controls_test.dart test/terminal_suggestions_test.dart test/clipboard_image_test.dart test/explorer_drag_handoff_test.dart test/explorer_export_test.dart test/local_edit_queue_test.dart test/local_edit_session_test.dart test/transfer_rate_test.dart test/transfer_queue_test.dart test/remote_inspection_test.dart test/connection_status_test.dart --reporter expanded
 
       - name: Check native Windows startup and normal exit
         run: |

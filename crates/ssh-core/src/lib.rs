@@ -1233,3 +1233,5 @@ mod peer_identity_tests {
         assert!(receive.try_recv().is_err());
     }
 }
+
+pub mod clipboard_image;

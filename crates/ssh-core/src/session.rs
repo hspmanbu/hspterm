@@ -468,6 +468,18 @@ impl ManagedSession {
     }
     pub async fn input(&self, input: TerminalInput) -> Result<InputOutcome, SshError> {
         let generation = self.active_generation()?;
+        self.input_generation(generation, input).await
+    }
+
+    /// A deferred local action must never target a later reconnected PTY.
+    pub async fn input_generation(
+        &self,
+        generation: u64,
+        input: TerminalInput,
+    ) -> Result<InputOutcome, SshError> {
+        if self.active_generation()? != generation {
+            return Err(SshError::Disconnected);
+        }
         let (reply, response) = oneshot::channel();
         self.commands
             .send(Command::Input {

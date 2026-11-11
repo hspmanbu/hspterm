@@ -1,6 +1,8 @@
+import 'image_paste_binding.dart';
 import '../run_log.dart';
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -104,6 +106,7 @@ class TerminalController extends ChangeNotifier {
   bool osc52Enabled = true;
   bool rightClickPaste = false;
   bool copyOnSelection = false;
+  ImagePasteBinding imagePasteBinding = const ImagePasteBinding();
   int newOutputLines = 0;
   (int, int, int, int)? _desiredSize;
   Future<bool> Function(rust.BridgeEvent)? confirmHostKey;
@@ -505,6 +508,11 @@ class TerminalController extends ChangeNotifier {
     if (frame.osc52Enabled != null) osc52Enabled = frame.osc52Enabled!;
     if (frame.rightClickPaste != null) rightClickPaste = frame.rightClickPaste!;
     if (frame.copyOnSelection != null) copyOnSelection = frame.copyOnSelection!;
+    if (frame.imagePasteShortcut != null) {
+      imagePasteBinding = ImagePasteBinding.parse(
+        jsonDecode(frame.imagePasteShortcut!) as Map<String, dynamic>,
+      );
+    }
     if (!_selectionUnchanged(frame)) selectionStart = selectionEnd = null;
     if (frame.full ||
         rows.length != frame.rows ||
@@ -571,6 +579,7 @@ class TerminalController extends ChangeNotifier {
       osc52Enabled: frame.osc52Enabled,
       rightClickPaste: frame.rightClickPaste,
       copyOnSelection: frame.copyOnSelection,
+      imagePasteShortcut: frame.imagePasteShortcut,
       cursorColor: frame.cursorColor,
       background: frame.background,
       alternateScreen: frame.alternateScreen,
@@ -674,6 +683,30 @@ class TerminalController extends ChangeNotifier {
         report(failure);
       }
     }
+  }
+
+  /// Serializes a deferred upload-path insertion with ordinary terminal input.
+  Future<void> enqueueImagePath(
+    int expectedGeneration,
+    Future<void> Function() send,
+  ) {
+    final result = Completer<void>();
+    final value = id;
+    _inputTail = _inputTail
+        .then((_) async {
+          if (_disposed ||
+              !connected ||
+              id != value ||
+              generation != expectedGeneration) {
+            throw StateError('图片粘贴所属连接已改变，未输入');
+          }
+          await send();
+          result.complete();
+        })
+        .catchError((Object error, StackTrace stack) {
+          if (!result.isCompleted) result.completeError(error, stack);
+        });
+    return result.future;
   }
 
   Future<rust.PasteResult> paste(String text, bool confirmed) {

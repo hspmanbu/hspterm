@@ -1,3 +1,4 @@
+import 'package:hspterm/app_notice.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -205,7 +206,8 @@ void main() {
     );
     expect(backend.pastes.single.$2, isFalse);
     expect(clipboard, isEmpty, reason: 'no clipboard fallback when pasted');
-    expect(find.textContaining('普通终端粘贴'), findsOneWidget);
+    expect(quietNoticeNotifier.value?.message, contains('普通终端粘贴'));
+    expect(find.byType(SnackBar), findsNothing);
   });
 
   testWidgets('direct paste disabled keeps the clipboard-only fallback', (

@@ -507,8 +507,11 @@ class PrototypeAppState extends State<PrototypeApp> {
                   },
                 ),
                 Container(
-                  height: 24,
-                  padding: const EdgeInsets.symmetric(horizontal: 11),
+                  height: 34,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surface,
                     border: Border(

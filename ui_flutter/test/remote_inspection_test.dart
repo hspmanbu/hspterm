@@ -107,7 +107,57 @@ Future<void> _close(
   await closeTerminal(tester, terminal);
 }
 
+class _ResourcePreference implements ResourceBarPreference {
+  bool enabled = true;
+  final writes = <bool>[];
+  @override
+  Future<bool> load() async => enabled;
+  @override
+  Future<void> save(bool value) async {
+    enabled = value;
+    writes.add(value);
+  }
+}
+
 void main() {
+  testWidgets(
+    'saved resource visibility restores without process consent or background sampling',
+    (tester) async {
+      final terminal = TerminalController(FakeBackend());
+      await terminal.start();
+      terminal.phase = 'Connected';
+      terminal.generation = 7;
+      final gateway = _Gateway(), preference = _ResourcePreference();
+      final c = RemoteInspectionController(
+        terminal,
+        gateway: gateway,
+        preference: preference,
+      );
+      await c.ready();
+      expect(c.metrics, true);
+      expect(c.processesAllowed, false);
+      expect(gateway.samples, 0);
+      c.setActive(true);
+      await tester.pump();
+      expect(gateway.samples, 1);
+      c.setActive(false);
+      await c.configure(metrics: true, processes: true);
+      terminal.phase = 'Disconnected';
+      terminal.applyFrame(fixture());
+      terminal.phase = 'Connected';
+      terminal.generation = 8;
+      terminal.applyFrame(fixture());
+      await c.ready();
+      expect(gateway.configurations.last, (terminal.id!, 8, true, false));
+      expect(c.processesAllowed, false);
+      await tester.pump(const Duration(seconds: 10));
+      expect(gateway.samples, 1);
+      await c.configure(metrics: false, processes: false);
+      expect(preference.writes.last, false);
+      await _close(tester, terminal, c);
+    },
+  );
+
   testWidgets(
     'shutdown revokes first and waits for the actual in-flight request',
     (tester) async {
