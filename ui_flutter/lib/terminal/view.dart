@@ -688,7 +688,13 @@ class TerminalViewState extends State<TerminalView>
       _run(paste());
       return;
     }
-    _remoteDrag = _forwardRemoteMouse;
+    final tmuxLocal =
+        c.tmuxReadonly != null &&
+        c.tmuxLocalSelection &&
+        _button == 0 &&
+        !HardwareKeyboard.instance.isAltPressed &&
+        _point(event.localPosition).x < (c.metadata?.columns ?? 80) - 2;
+    _remoteDrag = _forwardRemoteMouse && !tmuxLocal;
     if (_remoteDrag) {
       _mouse(event.localPosition, 0, _button);
       return;
@@ -742,6 +748,22 @@ class TerminalViewState extends State<TerminalView>
         ),
         items: [
           const PopupMenuItem(value: 'copy', child: Text('复制')),
+          if (c.tmuxReadonly != null) ...[
+            CheckedPopupMenuItem(
+              value: 'tmux-local-selection',
+              checked: c.tmuxLocalSelection,
+              child: const Text('tmux 本地拖选（Alt 转发鼠标）'),
+            ),
+            CheckedPopupMenuItem(
+              value: 'tmux-newline',
+              checked: c.tmuxShiftEnterLf,
+              child: const Text('tmux 换行兼容：Shift+Enter → Ctrl+J'),
+            ),
+            const PopupMenuItem(
+              value: 'tmux-help',
+              child: Text('tmux 滚动与键盘设置…'),
+            ),
+          ],
           const PopupMenuItem(value: 'paste', child: Text('粘贴')),
           if (widget.onPasteImage != null && c.connected)
             const PopupMenuItem(value: 'paste-image', child: Text('粘贴图片')),
@@ -803,6 +825,39 @@ class TerminalViewState extends State<TerminalView>
             selectedReference != null &&
             openLink != null) {
           _run(openLink(selectedReference));
+        }
+        if (v == 'tmux-local-selection') {
+          c.setTmuxLocalSelection(!c.tmuxLocalSelection);
+        }
+        if (v == 'tmux-newline') c.setTmuxShiftEnterLf(!c.tmuxShiftEnterLf);
+        if (v == 'tmux-help') {
+          unawaited(
+            showAppDialog<void>(
+              context: context,
+              builder: (dialog) => AlertDialog(
+                scrollable: true,
+                title: const Text('tmux 兼容设置'),
+                content: const SelectableText(
+                  '本地拖选默认保留选区；Alt+拖动转发给 tmux/TUI。\n'
+                  '右侧最后一列保留给 tmux 自身滚动条；内部窗格滚动条可用 Alt 拖动。\n\n'
+                  '支持 pane-scrollbars 的 tmux 版本可在普通 Shell 手动执行：\n'
+                  'tmux set-option mouse on\n'
+                  'tmux set-window-option pane-scrollbars on\n'
+                  'tmux set-window-option pane-scrollbars-position right\n\n'
+                  '这些命令只配置当前会话/窗口，不修改配置文件；旧版本提示未知选项时需升级 tmux，或使用 Ctrl+B 后按 [ 进入复制模式。\n\n'
+                  'Codex 换行：优先使用原始键盘协议；若 Shift+Enter 仍提交，可启用本标签的换行兼容选项。'
+                  '该选项把 Shift+Enter 作为 Ctrl+J 发送，对该标签内其他应用也生效，可随时关闭。\n\n'
+                  'tmux 内的 HSPTerm 历史联想仍需可信 Shell 集成，当前不凭屏幕内容猜测输入。',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialog),
+                    child: const Text('关闭'),
+                  ),
+                ],
+              ),
+            ),
+          );
         }
         if (v == 'search') showSearch();
         if (v == 'copy') _run(copy());
@@ -919,7 +974,9 @@ class TerminalViewState extends State<TerminalView>
     return LayoutBuilder(
       builder: (context, constraints) {
         c.resize(
-          ((constraints.maxWidth - 12) / _cell.width).floor(),
+          ((constraints.maxWidth - (c.tmuxReadonly == null ? 12 : 0)) /
+                  _cell.width)
+              .floor(),
           (constraints.maxHeight / _cell.height).floor(),
           _cell.width,
           _cell.height,
@@ -927,7 +984,7 @@ class TerminalViewState extends State<TerminalView>
         return Stack(
           children: [
             Positioned.fill(
-              right: 12,
+              right: c.tmuxReadonly == null ? 12 : 0,
               child: Focus(
                 focusNode: _focus,
                 onKeyEvent: _key,
@@ -951,10 +1008,12 @@ class TerminalViewState extends State<TerminalView>
                     _button = 3;
                   },
                   onPointerMove: (e) {
-                    if (_remoteDrag || _forwardRemoteMouse) {
+                    if (_remoteDrag) {
                       _mouse(e.localPosition, 2, _button);
                     } else if (_anchor != null) {
                       c.select(_anchor!, _point(e.localPosition));
+                    } else if (_forwardRemoteMouse) {
+                      _mouse(e.localPosition, 2, _button);
                     }
                   },
                   onPointerHover: (e) {
@@ -1024,13 +1083,14 @@ class TerminalViewState extends State<TerminalView>
                 ),
               ),
             ),
-            Positioned(
-              top: 0,
-              bottom: 0,
-              right: 0,
-              width: 12,
-              child: HistoryScrollbar(controller: c),
-            ),
+            if (c.tmuxReadonly == null)
+              Positioned(
+                top: 0,
+                bottom: 0,
+                right: 0,
+                width: 12,
+                child: HistoryScrollbar(controller: c),
+              ),
             TerminalSuggestionsOverlay(
               controller: _suggestions,
               viewport: Size(constraints.maxWidth, constraints.maxHeight),

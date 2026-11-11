@@ -56,7 +56,7 @@ RenderFrame frame({
   searchSpans: const [],
 );
 void main() {
-  test('display-only colors/underline preserve selection, while raw content and geometry still invalidate it', () async {
+  test('selection survives unrelated content revisions, but selected text and geometry still invalidate it', () async {
     final c = TerminalController(const NativeTerminalBackend());
     try {
       c.applyFrame(frame());
@@ -67,7 +67,7 @@ void main() {
       expect(c.selectedText(), isEmpty);
       c.select(const Point(0, 0), const Point(4, 0));
       c.applyFrame(frame(revision: 4, text: 'OTHER', content: 2));
-      expect(c.selectedText(), isEmpty);
+      expect(c.selectedText(), 'OTHER');
       c.select(const Point(0, 0), const Point(4, 0));
       c.applyFrame(frame(revision: 5, content: 2, columns: 21));
       expect(c.selectedText(), isEmpty);

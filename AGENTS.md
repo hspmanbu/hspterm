@@ -1,3 +1,5 @@
+- **用户最新执行方式（2026-11-11）**：默认实际编码+静态复核，推送当前fix/round7-windows-feedback并发起Windows CI后记录链接即结束，不持续等待/监视构建；用户会反馈实机或CI异常。普通技术选择按可维护、体验可用且实现成本适中的推荐方案自主决定，不追求过度完善；不能据此删除需求或把未实现/未运行的项目说成完成。第三阶段专项优化和Android继续暂停，最新源码/状态读PROGRESS顶部。
+
 - **最新交付（2026-11-05第二轮）**：产品源码a0910ce，Windows run41971663339/job127061543477已success，MSVC Release/Analyze0/66组件/原生启动退出/正常窗口几何恢复均过。完整包artifact13390548974（40,000,381字节）；正式产品源与随后GTK脚本/文档提交无diff，勿重构或重发旧CI。Ubuntu真实GTK2/MockGTK1/组件65/Native5/Rust270及静态证据在validation/windows-feedback-second-2026-11-05。中间产物已清理、可用约13GiB；恢复构建先prepare_native_extensions.py与pub get。用户原.log、ssh-screen/、tools/AGENTS.md保留未跟踪，不提交清理。仅Windows11 TSF/最小化新交互和welcome含义待用户复测/明确，Android暂停。
 
 - **本轮最新恢复（2026-11-05）**：产品源码a0910ce，19194de仅GTK旧选择器/证据，不改变产品源码；Windows run41971663339/job127061543477结果先查，禁止重复dispatch。Ubuntu本轮真实GTK2/MockGTK1/组件65/Native5/Rust270及静态全部通过，详validation/windows-feedback-second-2026-11-05。最后已恢复正式入口构建/启动退出后清理本轮中间产物，释放3.70GiB，可用12.97GiB；当前没有bundle，恢复先prepare_native_extensions.py及pub get。用户.log、ssh-screen/、tools/AGENTS.md保留未跟踪，不提交、不清理。Windows11 IME/最小化实机复测及welcome含义仍待；Android暂停。

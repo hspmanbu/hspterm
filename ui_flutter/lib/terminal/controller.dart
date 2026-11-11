@@ -113,6 +113,19 @@ class TerminalController extends ChangeNotifier {
   Future<tmx.TmuxSelection?> Function(tmx.TmuxPrompt)? chooseTmux;
   int? _tmuxToken;
   bool? tmuxReadonly;
+  // Per-tab compatibility choices; never synced or applied to ordinary SSH.
+  bool tmuxLocalSelection = true;
+  bool tmuxShiftEnterLf = false;
+  void setTmuxLocalSelection(bool value) {
+    tmuxLocalSelection = value;
+    notifyListeners();
+  }
+
+  void setTmuxShiftEnterLf(bool value) {
+    tmuxShiftEnterLf = value;
+    notifyListeners();
+  }
+
   int? _tmuxStateGeneration;
   bool? _pendingTmuxMode;
 
@@ -470,7 +483,6 @@ class TerminalController extends ChangeNotifier {
     if (old == null ||
         a == null ||
         b == null ||
-        old.contentRevision != frame.contentRevision ||
         old.columns != frame.columns ||
         old.rows != frame.rows ||
         old.historyLines != frame.historyLines ||
@@ -668,6 +680,14 @@ class TerminalController extends ChangeNotifier {
       return;
     }
     try {
+      if (tmuxReadonly != null &&
+          tmuxShiftEnterLf &&
+          input.key == 'Enter' &&
+          input.modifiers == 1) {
+        if (tmuxReadonly == true || input.kind == 2) return;
+        await _ordered((id) => backend.text(id, '\n'));
+        return;
+      }
       await _ordered((id) => backend.key(id, input));
     } catch (failure) {
       report(failure);

@@ -354,7 +354,7 @@ fn select(listing: &Listing, choice: Choice) -> Result<Startup, SshError> {
             // command queue before attach; do not check then blindly attach via
             // a second independent shell command. IDs/numbers are validated.
             let identity = session.identity();
-            let command = guarded_attach(&identity, &action);
+            let command = guarded_attach_options(&identity, &action, readonly);
             (Some(command), lock_size, readonly, Some(identity))
         }
     };
@@ -367,6 +367,27 @@ fn select(listing: &Listing, choice: Choice) -> Result<Startup, SshError> {
     })
 }
 fn guarded_attach(identity: &Identity, action: &str) -> String {
+    guarded_attach_options(identity, action, false)
+}
+fn guarded_attach_options(identity: &Identity, action: &str, readonly: bool) -> String {
+    let target = quote(&format!("{}:", identity.id));
+    // Capability probe, not a version guess. Unknown options leave the original
+    // attach untouched. Never change server defaults or a read-only session.
+    let compatible = if readonly {
+        action.to_owned()
+    } else {
+        let probe = format!("tmux show-window-options -t {target} pane-scrollbars >/dev/null 2>&1");
+        let enabled = format!(
+            "set-window-option -t {target} pane-scrollbars on ; set-window-option -t {target} pane-scrollbars-position right ; set-option -t {} mouse on ; {action}",
+            quote(&identity.id)
+        );
+        format!(
+            "if-shell {} {} {}",
+            quote(&probe),
+            quote(&enabled),
+            quote(action)
+        )
+    };
     let condition = format!(
         "#{{&&:#{{==:#{{pid}},{}}},#{{==:#{{session_created}},{}}}}}",
         identity.server_pid, identity.created
@@ -375,7 +396,7 @@ fn guarded_attach(identity: &Identity, action: &str) -> String {
         "exec tmux -u if-shell -F -t {} {} {} {}",
         quote(&format!("{}:", identity.id)),
         quote(&condition),
-        quote(action),
+        quote(&compatible),
         quote(
             "display-message -p 'HSPTERM_TMUX_SELECTION_CHANGED: tmux会话已改变，请重新连接并选择。'"
         )
@@ -475,7 +496,7 @@ pub(crate) async fn prepare(
         value = response => value.map_err(|_| SshError::Cancelled)?,
     };
     let mut startup = select(&listing, choice.clone())?;
-    if let Choice::CreateRemembered { name, .. } = choice {
+    if let Choice::CreateRemembered { name, .. } | Choice::Create { name, .. } = choice {
         // Wait until the original PTY's Agent setup has completed before
         // creating a pane, so remembering cannot silently lose Agent support.
         startup.deferred_create = Some(name);
@@ -532,6 +553,21 @@ mod tests {
                 created: 456,
             }],
         }
+    }
+    #[test]
+    fn compatibility_is_capability_gated_scoped_and_never_changes_readonly() {
+        let id = Identity {
+            id: "$12".into(),
+            server_pid: 123,
+            created: 456,
+        };
+        let command = guarded_attach_options(&id, "attach-session -t '$12'", false);
+        assert!(command.contains("show-window-options"));
+        assert!(command.contains("pane-scrollbars on"));
+        assert!(!command.contains("set-option -g"));
+        let readonly = guarded_attach_options(&id, "attach-session -r -t '$12'", true);
+        assert!(!readonly.contains("pane-scrollbars"));
+        assert!(readonly.contains("attach-session -r"));
     }
     #[test]
     fn remembered_identity_ignores_rename_but_rejects_reused_session_id_or_restarted_server() {
