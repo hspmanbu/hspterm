@@ -577,6 +577,7 @@ mod tests {
         assert!(!path.exists());
     }
     #[test]
+    #[cfg(unix)]
     fn concurrent_creation_never_cleans_a_live_run() {
         let root = tempfile::tempdir().unwrap();
         let cache = root.path().join("cache");
@@ -604,6 +605,7 @@ mod tests {
         assert_eq!(fs::read_dir(cache).unwrap().count(), 1); // registry only
     }
     #[test]
+    #[cfg(unix)]
     fn stale_cleanup_preserves_active_runs() {
         let root = tempfile::tempdir().unwrap();
         let active = HistoryPager::new_in(&root.path().join("cache"), 2).unwrap();
