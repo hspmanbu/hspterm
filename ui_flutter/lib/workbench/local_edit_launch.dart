@@ -922,29 +922,23 @@ class LocalEditRegistry extends ChangeNotifier {
     _changed();
   }
 
-  final _replacements = <(int, int, String), Future<void>>{};
-  bool hasMatching(LiveTerminalSession source, String path) => _sessions.any(
-    (s) =>
-        s._native == source.controller.id &&
-        s._originGeneration == source.controller.generation &&
-        s.remotePath == path,
-  );
+  final _replacements = <(String, String), Future<void>>{};
+  bool hasMatching(LiveTerminalSession source, String path) =>
+      _sessions.any((s) => s.session.id == source.id && s.remotePath == path);
 
-  /// Serialize reopen for this exact transport/generation/path. The old editor
+  /// Serialize reopen for this terminal tab/path, including after reconnect.
+  /// Every operation still retains its own original transport/generation. The old editor
   /// drains its upload and preserves unsynced drafts before the new download.
   Future<void> registerReplacing(LocalEditSession session) async {
-    final key = (
-      session._native,
-      session._originGeneration,
-      session.remotePath,
-    );
+    if (identical(session._owner, this) || session.isDisposed) return;
+    final key = (session.session.id, session.remotePath);
     final previous = _replacements[key];
     final done = Completer<void>();
     _replacements[key] = done.future;
     try {
       await previous;
       for (final old in List<LocalEditSession>.of(_sessions)) {
-        if ((old._native, old._originGeneration, old.remotePath) == key) {
+        if ((old.session.id, old.remotePath) == key) {
           await old.dispose();
         }
       }
@@ -990,10 +984,15 @@ class LocalEditRegistry extends ChangeNotifier {
     _changed();
   }
 
-  Future<void> disposeAll() {
+  Future<void> disposeAll() async {
     _closed = true;
     _overwriteAllowed.clear();
-    return _drain();
+    await _drain();
+    // A reopen may still be waiting for its old editor. Closing rejects its
+    // eventual registration, then waits for its own initialization/cleanup too.
+    while (_replacements.isNotEmpty || _retiring.isNotEmpty) {
+      await Future.wait([..._replacements.values, ..._retiring]);
+    }
   }
 
   /// A snapshot close leaves the registry available for later editor sessions.
@@ -1014,6 +1013,7 @@ Future<void> openLocalEdit(
   LiveTerminalSession source,
   DemoFile file,
 ) async {
+  if (model.isClosing) return;
   try {
     if (model.localEdits.isFull &&
         !model.localEdits.hasMatching(source, file.id)) {

@@ -223,6 +223,10 @@ void main() {
       expect(first.isDisposed, isTrue);
       expect(first.hasSessionListeners, isFalse);
       expect(await first.localFile.readAsString(), 'unsynced draft');
+      source.controller.generation++;
+      final reconnected = await open();
+      expect(registry.sessions, [reconnected]);
+      expect(next.isDisposed, isTrue);
     } finally {
       await registry.disposeAll();
       registry.dispose();
@@ -230,6 +234,41 @@ void main() {
       source.controller.dispose();
     }
   });
+  test(
+    'registry shutdown drains a same-file reopen waiting on the old download',
+    () async {
+      final source = await connectedSession(), registry = LocalEditRegistry();
+      gateway.downloadGate = Completer<void>();
+      Future<void> open() => LocalEditSession.launch(
+        source,
+        DemoFile('/dir/a.txt', 'a.txt'),
+        gateway: gateway,
+        rootOverride: root,
+        launchOverride: (_) async => true,
+        onSession: (edit) async {
+          created.add(edit);
+          await registry.registerReplacing(edit);
+        },
+      );
+      final first = open();
+      final firstRejected = expectLater(first, throwsStateError);
+      await Future<void>.delayed(Duration.zero);
+      final second = open();
+      final secondRejected = expectLater(second, throwsStateError);
+      final closing = registry.disposeAll();
+      gateway.downloadGate!.complete();
+      await Future.wait([firstRejected, secondRejected, closing]);
+      expect(registry.length, 0);
+      expect(created, hasLength(2));
+      expect(
+        created.every((edit) => edit.isDisposed && !edit.hasSessionListeners),
+        isTrue,
+      );
+      registry.dispose();
+      await source.controller.shutdown();
+      source.controller.dispose();
+    },
+  );
   test('sanitizeLocalName keeps extension and blocks traversal', () {
     expect(sanitizeLocalName('report.txt'), 'report.txt');
     expect(sanitizeLocalName('..'), isNot('..'));

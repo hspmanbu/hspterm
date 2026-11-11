@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | 首次/闲置后路径编辑 | prototype/cached_path_field.dart挂载后聚焦全选、外点退出 | sftp_feedback_ui_test新增首次/闲置用例；保留自动补全TapRegion |
 | 资源栏靠右及截断 | prototype/app.dart固定提示位+填满剩余区域；connection_status.dart独立资源横向视口 | connection_status_test覆盖宽/窄区域靠右，完整内容tooltip |
-| 同文件本地编辑替换 | LocalEditRegistry.registerReplacing按传输身份/代次/路径串行关闭旧会话 | local_edit_session_test保留旧草稿与唯一活动条目；不同标签独立 |
+| 同文件本地编辑替换 | LocalEditRegistry.registerReplacing按终端标签/路径串行关闭旧会话（覆盖重连），实际I/O仍核原身份/代次 | local_edit_session_test保留旧草稿与唯一活动条目；不同标签独立 |
 | 图片上传队列 | ssh-core upload_observed连续ACK，FRB小型进度快照，Dart图片条目 | 原代次/唯一临时源文件隔离；clipboard_image_test队列进度及位置；完成可清理 |
 | 多行预览编辑 | terminal/paste_editor.dart本地行号、调高、选区/滚动条与字体协调 | paste_preview_ui_test；发送仍为确认的原编辑正文，无合成行号 |
 | 消息精简 | app_notice.dart首短句/18字符展示，全文tooltip；警告错误保留全文 | 不截断日志/真正错误，不改变通知分级 |
