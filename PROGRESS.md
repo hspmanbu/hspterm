@@ -1,3 +1,13 @@
+## 2026-11-11 Windows CI恢复交付（源码2d51234，前两阶段；第三阶段暂停）
+
+- 分支保持fix/round7-windows-feedback，已保留其他agent源码提交。Windows run42966641743/job130345344967全部成功：https://github.com/hspmanbu/hspterm/actions/runs/42966641743 。源码2d51234后的提交仅补充验证文档，产品源码与CI一致。
+- 本次解决：组件测试缺少原生窗口几何通道造成19项Windows失败；新增显式Windows目标/2倍DPI适配测试，资源采样假时钟推进修正。历史冷存储修复Windows锁冲突分类及正常析构与目录扫描的删除竞态，恢复两项Windows并发/活跃目录测试，不通过跳过或忽略错误制造通过。代码提交19a864b、2d51234。
+- Windows Server 2022 CI：MSVC x64 Release正式工作台成功；FRB一致性/格式/全workspace严格Clippy通过；FRB77+term-core47共124项Rust测试、26文件158项Flutter测试全部通过，Analyze零问题；原生正常启动/退出、关闭重开后位置与大小恢复通过。
+- Ubuntu本轮：相同26文件158项组件、Windows适配/资源13项、完整term-core47项、真实OpenSSH图片上传1项通过；Analyze/Clippy/fmt与264API契约、259公共错误边界复核通过。图片实测内容、目录0700/文件0600、仅填路径不执行及拒绝旧代次；未声称实际Windows图片剪贴板已测。
+- 下载：https://github.com/hspmanbu/hspterm/actions/runs/42966641743/artifacts/13833380694 （HSPTerm-windows-x64，40,511,796字节，2026-11-25到期）。解压整个包后运行hspterm.exe，保留同目录DLL/data，勿只拷exe。SHA256：58909fa6c688b60407ddd5cddbe3c85490f3e800af80b7a3f408081859b8325f。
+- 前两阶段10项的源码与相关检查已完成；第6原生Explorer直接拖出、第7Windows图片剪贴板、第3跨屏DPI弹窗等真实交互仍待Windows11，不能将Windows Server自动化结果替代实机验收。精确清单及CI结果在validation/ci-recovery-2026-11-11/README.md、WINDOWS11_CHECKLIST.md、windows-jobs.json、windows-artifacts.json。
+- 第三阶段同平台Release内存/CPU/缓存对照及优化按用户要求继续暂停；Android暂停。用户原始.log、ssh-screen/、tools/AGENTS.md和round13基线目录未提交/未清理。后续先依据本节核实构建和反馈，不重复恢复旧失败run或重新实施已过模块。
+
 ## 2026-11-11 Windows 历史释放竞态续修（第三阶段仍暂停）
 
 - run42963332377 的 Release 编译、桥接一致性及 Clippy 成功；恢复的并发历史测试暴露 Windows access denied(5)，不能视为验收通过。上一轮 ERROR_LOCK_VIOLATION(33) 修复已生效，活跃目录清理测试通过。
