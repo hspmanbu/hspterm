@@ -17,6 +17,12 @@
 - 原始分支基线10a5c9a已在独立detached工作树/tmp/hspterm-r13-baseline-10a5c9a构建Linux Release真实SSH19场景，日志/tmp/hspterm-r13-baseline-build.log及*-perf.log；开发分支不变。Windows同平台Release对照将在最终CI执行，Ubuntu结果不冒称Windows结果。
 # HSPTerm 开发进度
 
+## 2026-11-11 第十二轮第三批续（源码144afa2，CI run 42955261463 = 构建成功/Flutter Windows widget测试19项失败待修）
+
+- 构建本体成功（产物40,511,156字节 artifact 13827838731）；Rust单元测试串行全过（修复过程中三轮CI暴露并修复的平台问题：tmux全局vault并发竞争→CI改单线程、inspection/integration依赖du/find/bash→cfg(unix)门控、term-core history并发分页Windows文件锁→cfg(unix)门控、workflow_dispatch丢失→YAML注释缩进修复）。
+- **未解决（下轮首要）**：Flutter widget 测试在 Windows runner 上 19 项失败（含第三批新功能的 Windows 分支路径：剪贴板图片/资源栏/面包屑/队列打开等），需逐项分析 Windows 环境差异（Platform 分支/路径分隔符/插件可用性）修复；CI 的 Flutter 测试步骤当前因此保持红，构建产物可下载但"CI 完整绿"未达成，不得据此宣称 Windows 全量验证通过。
+- 任务7/8/9/10 实现与 Ubuntu 验证完整有效（Analyze 0、相关套件全过、GTK 冒烟过）。
+
 ## 2026-11-09 第十二轮第三批（源码ff2eacf，CI待记；第二批e6ab150成功run42598050452）
 
 - 前两阶段10项复核确认完成（1编辑生命周期/2历史管理/3弹窗通知/4 SFTP流水线+平滑速度/5队列打开/6一次拖出已提交；7图片粘贴/8编辑进度百分比/9资源栏按主机持久化/10面包屑编辑区在工作区补齐后随本批提交）。任务10测试修复：无效地址提交后失焦退出编辑属合法恢复路径，断言放宽为两态。
