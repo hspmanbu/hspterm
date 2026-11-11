@@ -342,7 +342,7 @@ async fn copy_remote_file_inner(
                     .await
                     .ok_or(TransferError::Cancelled)?;
                 writer.write_all(&buffer[written..written + length]).await?;
-                writer.flush().await?;
+                writer.acknowledge_writes().await?;
                 written += length;
                 progress.acknowledged += length as u64;
                 changed(progress);

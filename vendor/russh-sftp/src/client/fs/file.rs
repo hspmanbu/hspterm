@@ -205,6 +205,85 @@ impl File {
         self.state.read.bounded = !enabled;
     }
 
+    /// Bounded explicit-offset I/O for externally rate-limited transfers.
+    /// The owner must drain every returned future before closing the handle.
+    /// Unlike AsyncWrite::flush, this waits for WRITE STATUS without fsync.
+    pub fn transfer_window(&self, writing: bool) -> usize {
+        (if writing {
+            self.features.max_concurrent_writes
+        } else {
+            self.features.max_concurrent_reads
+        })
+        .clamp(1, 16)
+    }
+
+    /// Confirm queued writes without a durability barrier. Call sync_all once
+    /// at completion when required, and always await close/shutdown separately.
+    pub async fn acknowledge_writes(&mut self) -> io::Result<()> {
+        std::future::poll_fn(|cx| poll_drain_writes(&mut self.state.write_acks, cx)).await
+    }
+
+    pub async fn read_exact_at(&self, mut offset: u64, length: usize) -> io::Result<Vec<u8>> {
+        if self.closed {
+            return Err(io::ErrorKind::BrokenPipe.into());
+        }
+        let packet = self
+            .features
+            .max_packet_len
+            .saturating_sub(READ_OVERHEAD_LENGTH) as u64;
+        let maximum = self
+            .features
+            .limits
+            .and_then(|l| l.read_len)
+            .unwrap_or(packet)
+            .min(packet)
+            .min(64 * 1024)
+            .max(1) as usize;
+        let mut bytes = Vec::with_capacity(length);
+        while bytes.len() < length {
+            let count = (length - bytes.len()).min(maximum);
+            let request = self
+                .session
+                .read_nowait(&self.handle, offset, count as u32)?;
+            let data = check_read_result(request.await)?.ok_or(io::ErrorKind::UnexpectedEof)?;
+            if data.is_empty() || data.len() > count {
+                return Err(io::ErrorKind::InvalidData.into());
+            }
+            offset += data.len() as u64;
+            bytes.extend_from_slice(&data);
+        }
+        Ok(bytes)
+    }
+
+    pub async fn write_all_at(&self, mut offset: u64, mut bytes: &[u8]) -> io::Result<()> {
+        if self.closed {
+            return Err(io::ErrorKind::BrokenPipe.into());
+        }
+        let overhead = WRITE_OVERHEAD_LENGTH + self.handle.len() as u32;
+        let packet = self.features.max_packet_len.saturating_sub(overhead) as u64;
+        let maximum = self
+            .features
+            .limits
+            .and_then(|l| l.write_len)
+            .unwrap_or(packet)
+            .min(packet)
+            .min(self.features.max_write_packet_len.saturating_sub(overhead) as u64)
+            .min(64 * 1024) as usize;
+        if maximum == 0 {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        while !bytes.is_empty() {
+            let count = bytes.len().min(maximum);
+            let request =
+                self.session
+                    .write_nowait_from_slice(&self.handle, offset, &bytes[..count])?;
+            check_write_result(request.await)?;
+            offset += count as u64;
+            bytes = &bytes[count..];
+        }
+        Ok(())
+    }
+
     /// Queries metadata about the remote file.
     pub async fn metadata(&self) -> SftpResult<Metadata> {
         Ok(self.session.fstat(self.handle.as_str()).await?.attrs)

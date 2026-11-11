@@ -27,8 +27,8 @@ void main() {
         running: true,
         elapsed: const Duration(seconds: 1),
       );
-      expect(rate.bytesPerSecond, 0);
-      expect(rate.remainingSeconds, isNull);
+      expect(rate.bytesPerSecond, 1000);
+      expect(rate.remainingSeconds, 3);
       rate.sample(
         acknowledged: 2500,
         total: null,
@@ -77,6 +77,24 @@ void main() {
         elapsed: const Duration(seconds: 12),
       );
       expect(rate.bytesPerSecond, isNull);
+    },
+  );
+  test(
+    'three-second smoothing absorbs a burst then decays to a true stall',
+    () {
+      final rate = TransferRate();
+      for (var step = 0; step <= 12; step++) {
+        rate.sample(
+          acknowledged: step == 0 ? 0 : 6000,
+          total: 12000,
+          running: true,
+          elapsed: Duration(milliseconds: step * 500),
+        );
+        if (step == 1) expect(rate.bytesPerSecond, 12000);
+        if (step == 6) expect(rate.bytesPerSecond, 2000);
+      }
+      expect(rate.bytesPerSecond, 0);
+      expect(rate.remainingSeconds, isNull);
     },
   );
 }

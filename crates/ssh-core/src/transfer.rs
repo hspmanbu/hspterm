@@ -5,11 +5,15 @@ use russh_sftp::{
     client::error::Error as SftpError,
     protocol::{OpenFlags, StatusCode},
 };
-use std::{future::Future, io, path::Path};
+#[cfg(test)]
+use std::future::Future;
+use std::{io, path::Path};
 use thiserror::Error;
+#[cfg(test)]
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::{
     fs,
-    io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -67,6 +71,7 @@ impl std::fmt::Debug for TransferError {
 }
 type Result<T> = std::result::Result<T, TransferError>;
 
+#[cfg(test)]
 async fn cancellable<T>(
     stop: &CancellationToken,
     work: impl Future<Output = Result<T>>,
@@ -128,6 +133,7 @@ fn regular_file(metadata: &std::fs::Metadata) -> Result<()> {
 
 /// Callback is bounded, synchronous bookkeeping only; never log payloads.
 /// A checkpoint advances only after the destination acknowledges the full block.
+#[cfg(test)]
 async fn stream(
     source: &mut (impl AsyncRead + Unpin),
     target: &mut (impl AsyncWrite + Unpin),
@@ -163,6 +169,112 @@ async fn stream(
     Ok(progress)
 }
 
+/// A fixed request window, not speculative AsyncRead prefetch. Admission is
+/// charged to the shared limiter before READ/WRITE, and ordered completion
+/// advances only a contiguous confirmed prefix. Cancellation stops admission
+/// but drains every admitted request before the owner sends CLOSE.
+async fn file_pipeline(
+    local: &mut fs::File,
+    remote: &russh_sftp::client::fs::File,
+    uploading: bool,
+    mut progress: FileProgress,
+    stop: &CancellationToken,
+    changed: &mut impl FnMut(FileProgress),
+    limiter: &BandwidthLimiter,
+) -> Result<FileProgress> {
+    use futures_util::{
+        future::BoxFuture,
+        stream::{FuturesOrdered, StreamExt},
+    };
+    type Completion = Result<(u64, usize, Vec<u8>)>;
+    let mut requests: FuturesOrdered<BoxFuture<'_, Completion>> = FuturesOrdered::new();
+    let mut admitted = progress.acknowledged;
+    let window = remote.transfer_window(uploading);
+    let mut failure = None;
+    let mut gap = false;
+    changed(progress);
+    loop {
+        let can_admit = failure.is_none()
+            && !stop.is_cancelled()
+            && admitted < progress.total
+            && requests.len() < window;
+        if requests.is_empty() && !can_admit {
+            break;
+        }
+        enum Next {
+            Done(Completion),
+            Grant(Option<usize>),
+        }
+        let next = tokio::select! {
+            biased;
+            completed = requests.next(), if !requests.is_empty() =>
+                Next::Done(completed.expect("nonempty request window")),
+            grant = limiter.acquire((progress.total - admitted).min(BLOCK as u64) as usize, stop),
+                if can_admit => Next::Grant(grant),
+        };
+        match next {
+            Next::Grant(None) => { /* cancellation is observed by admission */ }
+            Next::Grant(Some(length)) => {
+                let at = admitted;
+                if uploading {
+                    let mut bytes = vec![0; length];
+                    if let Err(error) = local.read_exact(&mut bytes).await {
+                        failure = Some(TransferError::Io(error));
+                        continue;
+                    }
+                    requests.push_back(Box::pin(async move {
+                        remote.write_all_at(at, &bytes).await?;
+                        Ok((at, length, Vec::new()))
+                    }));
+                } else {
+                    requests.push_back(Box::pin(async move {
+                        let bytes = remote.read_exact_at(at, length).await?;
+                        Ok((at, length, bytes))
+                    }));
+                }
+                admitted += length as u64;
+            }
+            Next::Done(Err(error)) => {
+                if failure.is_none() {
+                    failure = Some(error);
+                }
+                gap = true;
+            }
+            Next::Done(Ok((at, length, bytes))) => {
+                if gap {
+                    continue;
+                }
+                if !uploading {
+                    // Tokio File::flush confirms its blocking write. It does
+                    // not fsync: durability is requested once at completion.
+                    if let Err(error) = async {
+                        local.write_all(&bytes).await?;
+                        local.flush().await
+                    }
+                    .await
+                    {
+                        if failure.is_none() {
+                            failure = Some(TransferError::Io(error));
+                        }
+                        gap = true;
+                        continue;
+                    }
+                }
+                debug_assert_eq!(at, progress.acknowledged);
+                progress.acknowledged += length as u64;
+                changed(progress);
+            }
+        }
+    }
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    if stop.is_cancelled() {
+        return Err(TransferError::Cancelled);
+    }
+    Ok(progress)
+}
+
 pub async fn upload_file(
     sftp: &SftpSession,
     source: &Path,
@@ -193,10 +305,13 @@ pub async fn upload_file_limited(
     limiter: &BandwidthLimiter,
 ) -> Result<FileProgress> {
     remote_path(destination)?;
+    if stop.is_cancelled() {
+        return Err(TransferError::Cancelled);
+    }
     if !crate::local_path::supported(source) {
         return Err(TransferError::InvalidLocalPath);
     }
-    cancellable(stop, async {
+    {
         let total = local_size(source)
             .await?
             .ok_or(TransferError::InvalidFile)?;
@@ -214,10 +329,10 @@ pub async fn upload_file_limited(
         }
         let mut target = sftp.open_with_flags(destination, flags).await?;
         source.seek(io::SeekFrom::Start(start)).await?;
-        target.seek(io::SeekFrom::Start(start)).await?;
-        let progress = stream(
+        let outcome = file_pipeline(
             &mut source,
-            &mut target,
+            &target,
+            true,
             FileProgress {
                 acknowledged: start,
                 total,
@@ -226,8 +341,16 @@ pub async fn upload_file_limited(
             &mut changed,
             limiter,
         )
-        .await?;
-        target.flush().await?;
+        .await;
+        if outcome.is_err() {
+            target
+                .shutdown()
+                .await
+                .map_err(TransferError::RemoteClose)?;
+            return outcome;
+        }
+        let progress = outcome?;
+        target.sync_all().await?;
         if target.metadata().await?.size != Some(total) {
             return Err(TransferError::SizeMismatch);
         }
@@ -237,8 +360,7 @@ pub async fn upload_file_limited(
             .await
             .map_err(TransferError::RemoteClose)?;
         Ok(progress)
-    })
-    .await
+    }
 }
 
 pub async fn download_file(
@@ -271,17 +393,18 @@ pub async fn download_file_limited(
     limiter: &BandwidthLimiter,
 ) -> Result<FileProgress> {
     remote_path(source)?;
+    if stop.is_cancelled() {
+        return Err(TransferError::Cancelled);
+    }
     if !crate::local_path::supported(destination) {
         return Err(TransferError::InvalidLocalPath);
     }
-    cancellable(stop, async {
+    {
         let total = remote_size(sftp, source)
             .await?
             .ok_or(TransferError::InvalidFile)?;
         let start = offset(mode, total, local_size(destination).await?)?;
         let mut source = sftp.open(source).await?;
-        // Budget actual SFTP READ requests, not only consumption of prefetched bytes.
-        source.set_read_ahead(false);
         let mut options = fs::OpenOptions::new();
         options.write(true);
         no_follow(&mut options);
@@ -308,11 +431,11 @@ pub async fn download_file_limited(
         if matches!(mode, FileDisposition::Overwrite) {
             target.set_len(0).await?;
         }
-        source.seek(io::SeekFrom::Start(start)).await?;
         target.seek(io::SeekFrom::Start(start)).await?;
-        let progress = stream(
-            &mut source,
+        let outcome = file_pipeline(
             &mut target,
+            &source,
+            false,
             FileProgress {
                 acknowledged: start,
                 total,
@@ -321,7 +444,15 @@ pub async fn download_file_limited(
             &mut changed,
             limiter,
         )
-        .await?;
+        .await;
+        if outcome.is_err() {
+            source
+                .shutdown()
+                .await
+                .map_err(TransferError::RemoteClose)?;
+            return outcome;
+        }
+        let progress = outcome?;
         target.flush().await?;
         target.sync_all().await?;
         if target.metadata().await?.len() != total {
@@ -332,8 +463,7 @@ pub async fn download_file_limited(
             .await
             .map_err(TransferError::RemoteClose)?;
         Ok(progress)
-    })
-    .await
+    }
 }
 
 #[cfg(test)]
