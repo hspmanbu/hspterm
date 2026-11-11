@@ -1,3 +1,13 @@
+## 2026-11-11 第十五轮静态修正（CI发起后不监视，用户最新要求）
+
+- 开始前清理target、Flutter build/.dart_tool与Windows/Linux ephemeral约8GiB，可用从不足1GiB恢复8.7GiB；源码/锁/vendor/字体/用户日志/截图/验证文字记录保留。为静态Analyze仅重建prepare_native_extensions及离线pub元数据，不运行本机构建或测试。
+- 连接信息不再ellipsis，与资源栏均分可用空间，窄窗口可分别横向查看全文；数量文案缩短。
+- 多行预览：行号读取实际EditableTextState.renderEditable光标矩形并转换到gutter坐标，不再复制TextPainter布局猜padding/行高；程序清空正文时也同步行偏移。背景改主题surfaceContainerHigh。覆写ScrollBehavior.buildScrollbar消除EditableText强制多行自动滑块，只保留显式外侧RawScrollbar。调高采用起始高度+全局鼠标位移，避免移动控件局部坐标反馈；新增2倍DPI拖动和滑块唯一性回归源码。
+- Explorer定位：混合斜杠路径统一Windows分隔符；ILCreateFromPathW生成文件绝对PIDL，SHOpenFolderAndSelectItems以cidl=0定位该项；失败回退明确打开其父目录，不再依赖explorer /select解析。实际Windows Explorer选中待实机验证，不声称已通过。
+- 下载覆盖【部分修正/仍需复现】：接受并持久化覆盖决定后同步刷新运行时清单统计，避免继续展示已消费的旧冲突；增加下载Overwrite跨检查点保存/读取、零偏移重启及冲突计数清零的回归源码。现有核心已正确选择Overwrite并在打开句柄后截断。当前没有运行日志/复现结果，不能据此断言实际“下载一直待处理”已完全解决；已向用户询问本次日志/详情，仍待确认队列/SFTP实际阻塞位置。其余独立修正继续交付。
+- 静态：Flutter Analyze零问题，Rust/Dart格式及diff检查；265API/82DTO契约与260公共Result边界检查通过（仅静态）。新增回归未在本机运行，交由Windows CI；第三阶段与Android仍暂停。
+- 下一步：提交推送并发起一次Windows CI，记录链接后按用户要求结束、不持续监视。若用户反馈CI异常，再读取该run日志续修；不宣称构建已通过。
+
 ## 2026-11-11 第十四轮收尾CI（产品源码2f4540a）
 
 - 已推送2f4540a（包含1c52f59的重连/关闭补充），Windows run42991233929运行中：https://github.com/hspmanbu/hspterm/actions/runs/42991233929 。恢复时先查此run，不重复dispatch；前一run42986704180不是完成版本。

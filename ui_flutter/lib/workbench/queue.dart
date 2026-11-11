@@ -266,7 +266,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       if (!file.existsSync()) {
         throw StateError('本地文件已不存在，无法定位：${file.path}');
       }
-      final absolute = file.absolute.path;
+      final absolute = file.absolute.path.replaceAll('/', '\\');
       try {
         await const MethodChannel('hspterm/prototype_window')
             .invokeMethod<void>('reveal', {'path': absolute});
@@ -280,7 +280,10 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       try {
         // Explorer hand the request to its existing process and exits with 1
         // even when the window opened fine, so the exit code is ignored.
-        await Process.run('explorer.exe', ['/select,$absolute']);
+        await launchUrl(
+          Uri.directory(file.absolute.parent.path, windows: true),
+          mode: LaunchMode.externalApplication,
+        );
       } catch (_) {
         await launchUrl(
           Uri.directory(dir),

@@ -1236,6 +1236,11 @@ pub(crate) fn resume(
     header.error = None;
     save(&header, plan.as_ref())?;
     job.data.lock().header = header;
+    // Refresh the accepted checkpoint's counters before FIFO admission, so
+    // the UI cannot keep offering the conflict that was already resolved.
+    if let Some(plan) = &plan {
+        update(&job, plan, None);
+    }
     launch(&state, job, connection);
     Ok(())
 }

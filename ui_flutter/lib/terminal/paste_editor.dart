@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/rendering.dart';
+
 import 'package:flutter/material.dart';
 
 /// Local-only preview. Line numbers and resize chrome never enter the text.
@@ -19,11 +21,31 @@ class PasteEditor extends StatefulWidget {
 class _PasteEditorState extends State<PasteEditor> {
   final _scroll = ScrollController();
   final _layoutChanged = ValueNotifier<int>(0);
-  late final _numbers = _LineNumbers(_scroll, _layoutChanged);
+  final _field = GlobalKey();
+  final _gutter = GlobalKey();
+  late final _numbers = _LineNumbers(
+    _scroll,
+    _layoutChanged,
+    () {
+      EditableTextState? result;
+      void visit(Element element) {
+        if (element is StatefulElement && element.state is EditableTextState) {
+          result = element.state as EditableTextState;
+        } else {
+          element.visitChildren(visit);
+        }
+      }
+
+      _field.currentContext?.visitChildElements(visit);
+      return result?.renderEditable;
+    },
+    () => _gutter.currentContext?.findRenderObject() as RenderBox?,
+    () => widget.controller.text,
+  );
+  double _dragY = 0, _dragHeight = 0;
   double _height = 240;
   @override
   void dispose() {
-    _numbers.disposeLayout();
     _layoutChanged.dispose();
     _scroll.dispose();
     super.dispose();
@@ -50,7 +72,7 @@ class _PasteEditorState extends State<PasteEditor> {
         Container(
           height: _height.clamp(100.0, maxHeight),
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerLowest,
+            color: scheme.surfaceContainerHigh,
             border: Border.all(color: Theme.of(context).dividerColor),
             borderRadius: BorderRadius.circular(4),
           ),
@@ -67,12 +89,12 @@ class _PasteEditorState extends State<PasteEditor> {
               );
               _numbers.configure(
                 widget.controller.text,
-                math.max(1, constraints.maxWidth - gutter - rail - 16),
-                style,
-                strut,
                 MediaQuery.textScalerOf(context),
                 scheme.onSurfaceVariant,
               );
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _layoutChanged.value++;
+              });
               return MouseRegion(
                 cursor: SystemMouseCursors.basic,
                 child: RawScrollbar(
@@ -86,6 +108,7 @@ class _PasteEditorState extends State<PasteEditor> {
                     child: Row(
                       children: [
                         SizedBox(
+                          key: _gutter,
                           width: gutter,
                           height: double.infinity,
                           child: ClipRect(
@@ -97,34 +120,35 @@ class _PasteEditorState extends State<PasteEditor> {
                         ),
                         Expanded(
                           child: ScrollConfiguration(
-                            behavior: const MaterialScrollBehavior().copyWith(
-                              scrollbars: false,
-                            ),
-                            child: TextField(
-                              key: const ValueKey('terminal-paste-editor'),
-                              controller: widget.controller,
-                              scrollController: _scroll,
-                              onChanged: (value) {
-                                setState(() {});
-                                widget.onChanged(value);
-                              },
-                              style: style,
-                              strutStyle: strut,
-                              selectionHeightStyle: ui.BoxHeightStyle.max,
-                              selectionWidthStyle: ui.BoxWidthStyle.max,
-                              textAlignVertical: TextAlignVertical.top,
-                              expands: true,
-                              minLines: null,
-                              maxLines: null,
-                              decoration: const InputDecoration(
-                                isDense: true,
-                                filled: false,
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 10,
+                            behavior: const _EditorScrollBehavior(),
+                            child: KeyedSubtree(
+                              key: _field,
+                              child: TextField(
+                                key: const ValueKey('terminal-paste-editor'),
+                                controller: widget.controller,
+                                scrollController: _scroll,
+                                onChanged: (value) {
+                                  setState(() {});
+                                  widget.onChanged(value);
+                                },
+                                style: style,
+                                strutStyle: strut,
+                                selectionHeightStyle: ui.BoxHeightStyle.max,
+                                selectionWidthStyle: ui.BoxWidthStyle.max,
+                                textAlignVertical: TextAlignVertical.top,
+                                expands: true,
+                                minLines: null,
+                                maxLines: null,
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  filled: false,
+                                  border: InputBorder.none,
+                                  enabledBorder: InputBorder.none,
+                                  focusedBorder: InputBorder.none,
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 10,
+                                  ),
                                 ),
                               ),
                             ),
@@ -145,8 +169,13 @@ class _PasteEditorState extends State<PasteEditor> {
             child: GestureDetector(
               key: const ValueKey('paste-resize-handle'),
               behavior: HitTestBehavior.opaque,
+              onVerticalDragStart: (event) {
+                _dragY = event.globalPosition.dy;
+                _dragHeight = _height.clamp(100.0, maxHeight);
+              },
               onVerticalDragUpdate: (event) => setState(() {
-                _height = (_height + event.delta.dy).clamp(100.0, maxHeight);
+                _height = (_dragHeight + event.globalPosition.dy - _dragY)
+                    .clamp(100.0, maxHeight);
               }),
               child: const SizedBox(
                 width: 52,
@@ -161,72 +190,92 @@ class _PasteEditorState extends State<PasteEditor> {
   }
 }
 
+class _EditorScrollBehavior extends MaterialScrollBehavior {
+  const _EditorScrollBehavior();
+  @override
+  Widget buildScrollbar(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) => child;
+}
+
 class _LineNumbers extends CustomPainter {
-  _LineNumbers(this.scroll, this.changes)
-    : super(repaint: Listenable.merge([scroll, changes]));
+  _LineNumbers(
+    this.scroll,
+    this.changes,
+    this.editable,
+    this.gutter,
+    this.currentText,
+  ) : super(repaint: Listenable.merge([scroll, changes]));
   final ValueNotifier<int> changes;
   final ScrollController scroll;
-  final _layout = TextPainter(textDirection: TextDirection.ltr);
+  final RenderEditable? Function() editable;
+  final RenderBox? Function() gutter;
+  final String Function() currentText;
+  final _starts = <int>[0];
   String? _text;
-  double? _width;
-  TextScaler? _scaler;
+  TextScaler scaler = TextScaler.noScaling;
   Color color = Colors.grey;
-  final _positions = <double>[];
-  void configure(
-    String text,
-    double width,
-    TextStyle style,
-    StrutStyle strut,
-    TextScaler scaler,
-    Color value,
-  ) {
-    if (_text == text &&
-        _width == width &&
-        _scaler == scaler &&
-        color == value) {
-      return;
-    }
-    color = value;
+  void configure(String text, TextScaler value, Color ink) {
+    scaler = value;
+    color = ink;
+    if (_text == text) return;
     _text = text;
-    _width = width;
-    _scaler = scaler;
-    _layout.text = TextSpan(text: text, style: style);
-    _layout.strutStyle = strut;
-    _layout.textScaler = scaler;
-    _layout.layout(maxWidth: width);
-    _positions.clear();
-    _positions.add(
-      _layout.getOffsetForCaret(const TextPosition(offset: 0), Rect.zero).dy,
-    );
+    _starts.clear();
+    _starts.add(0);
     for (var i = 0; i < text.length; i++) {
       if (text.codeUnitAt(i) == 10 ||
           text.codeUnitAt(i) == 13 &&
               (i + 1 == text.length || text.codeUnitAt(i + 1) != 10)) {
-        _positions.add(
-          _layout.getOffsetForCaret(TextPosition(offset: i + 1), Rect.zero).dy,
-        );
+        _starts.add(i + 1);
       }
     }
-    changes.value++;
   }
 
-  void disposeLayout() => _layout.dispose();
   @override
   void paint(Canvas canvas, Size size) {
-    final offset = scroll.hasClients ? scroll.offset : 0.0;
-    final label = TextPainter(textDirection: TextDirection.ltr);
+    configure(currentText(), scaler, color);
+    final render = editable(), box = gutter();
+    if (render == null || box == null || !render.hasSize || !box.hasSize) {
+      return;
+    }
+    Rect caret(int i) {
+      final rect = render.getLocalRectForCaret(
+        TextPosition(offset: _starts[i]),
+      );
+      return box.globalToLocal(render.localToGlobal(rect.topLeft)) & rect.size;
+    }
+
+    final label = TextPainter(
+      textDirection: TextDirection.ltr,
+      textScaler: scaler,
+    );
     try {
-      for (var i = 0; i < _positions.length; i++) {
-        final y = _positions[i] + 10 - offset;
-        if (y < -30) continue;
-        if (y > size.height) break;
+      var lo = 0, hi = _starts.length;
+      while (lo < hi) {
+        final mid = (lo + hi) ~/ 2;
+        if (caret(mid).bottom < 0) {
+          lo = mid + 1;
+        } else {
+          hi = mid;
+        }
+      }
+      for (var i = lo; i < _starts.length; i++) {
+        final rect = caret(i);
+        if (rect.top > size.height) break;
         label.text = TextSpan(
           text: '${i + 1}',
           style: TextStyle(fontSize: 11, color: color),
         );
-        label.textScaler = _scaler ?? TextScaler.noScaling;
         label.layout();
-        label.paint(canvas, Offset(size.width - label.width - 8, y + 3));
+        label.paint(
+          canvas,
+          Offset(
+            size.width - label.width - 8,
+            rect.center.dy - label.height / 2,
+          ),
+        );
       }
     } finally {
       label.dispose();

@@ -24,27 +24,14 @@ struct FontCatalog {
 // the reliable replacement for `explorer /select,...` whose exit code is
 // meaningless (a reused Explorer process exits with 1 even on success).
 bool RevealInExplorer(const std::wstring& path) {
-  LPITEMIDLIST item = nullptr;
-  SFGAOF attributes = 0;
-  const HRESULT parsed = SHParseDisplayName(path.c_str(), nullptr, &item, 0, &attributes);
-  if (FAILED(parsed) || item == nullptr) return false;
-  // The parent folder is derived from the same PIDL so the selection target
-  // and the opened window can never disagree.
-  LPCITEMIDLIST child = nullptr;
-  LPITEMIDLIST parent = ILCloneFull(item);
-  if (parent == nullptr) {
-    ILFree(item);
-    return false;
-  }
-  // ILRemoveLastID mutates in place, leaving the parent PIDL.
-  if (!ILRemoveLastID(parent)) {
-    ILFree(parent);
-    ILFree(item);
-    return false;
-  }
-  child = ILFindLastID(item);
-  const HRESULT revealed = SHOpenFolderAndSelectItems(parent, 1, &child, 0);
-  ILFree(parent);
+  // Parse an ordinary filesystem path, never a slash-mixed shell namespace.
+  std::wstring native = path;
+  std::replace(native.begin(), native.end(), L'/', L'\\');
+  PIDLIST_ABSOLUTE item = ILCreateFromPathW(native.c_str());
+  if (item == nullptr) return false;
+  // With cidl=0 the absolute PIDL names the item to select. This avoids
+  // interpreting a parent/child PIDL pair against the desktop namespace.
+  const HRESULT revealed = SHOpenFolderAndSelectItems(item, 0, nullptr, 0);
   ILFree(item);
   return SUCCEEDED(revealed);
 }

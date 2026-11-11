@@ -177,6 +177,42 @@ mod tests {
     use super::*;
     use hspterm_storage_sync::Vault;
     #[test]
+    fn explicit_download_overwrite_survives_checkpoint_and_clears_conflict_counters() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut vault = Vault::create(
+            &temp.path().join("overwrite.vault"),
+            b"synthetic-overwrite-master",
+        )
+        .unwrap();
+        let (mut header, mut plan) = fixture(2);
+        header.upload = false;
+        header.state = State::Waiting;
+        plan.direction = Direction::Download;
+        plan.nodes[1].state = NodeState::Conflict;
+        plan.nodes[1].started = true;
+        plan.nodes[1].acknowledged = 16;
+        let job = super::super::new_job(header.clone(), None, Some(&plan));
+        plan.retry(1, ConflictDecision::Overwrite).unwrap();
+        Encoded::encode(&header, Some(&plan), None)
+            .unwrap()
+            .replace(&mut vault, &header.id)
+            .unwrap();
+        let (_, restored) = decode(
+            LocalTaskJournal::new(&mut vault)
+                .load_parts(&header.id)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let restored = restored.unwrap();
+        assert_eq!(restored.nodes[1].decision, ConflictDecision::Overwrite);
+        assert_eq!(restored.nodes[1].state, NodeState::Pending);
+        assert!(!restored.nodes[1].started);
+        assert_eq!(restored.nodes[1].acknowledged, 0);
+        super::super::update(&job, &restored, None);
+        assert_eq!(super::super::view(&job).conflicts, 0);
+    }
+    #[test]
     fn cache_reference_reads_header_without_authorizing_missing_body_resume() {
         let temp = tempfile::tempdir().unwrap();
         let mut vault = Vault::create(

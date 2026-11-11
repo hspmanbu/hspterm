@@ -101,12 +101,14 @@ class _WorkbenchConnectionStatusState extends State<WorkbenchConnectionStatus>
     Widget label(String text) => Tooltip(
       message:
           '$text\nRTT 取自当前 SSH 心跳成功 ACK，包含本机排队与当前 SSH 路线。不额外探测；关闭心跳、旧兼容模式或尚无有效样本显示 —。任务数为当前已载入的真实任务记录。可选资源检查需单独授权独立通道；点击查看设置。',
-      child: Text(
-        text,
-        key: const ValueKey('workbench-connection-status'),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Text(
+          text,
+          key: const ValueKey('workbench-connection-status'),
+          maxLines: 1,
+          style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+        ),
       ),
     );
     final source = model.focus;
@@ -124,17 +126,16 @@ class _WorkbenchConnectionStatusState extends State<WorkbenchConnectionStatus>
           final resource = inspection.summary?.label;
           final details =
               '${source.statusLabel} · ${terminalTransportSummary(value)} · '
-              '${model.sessions.length} 个终端 · ${model.totalTransferCount} 个任务';
+              '终端 ${model.sessions.length} · 任务 ${model.totalTransferCount}';
           return Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Flexible(child: label(details)),
+              Expanded(child: label(details)),
               if (inspection.metrics ||
                   resource != null ||
                   inspection.error != null) ...[
                 const SizedBox(width: 12),
-                Flexible(
-                  flex: 2,
+                Expanded(
                   child: InkWell(
                     key: const ValueKey('remote-inspection-status'),
                     onTap: () => showRemoteInspection(context, source),

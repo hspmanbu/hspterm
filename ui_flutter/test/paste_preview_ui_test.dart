@@ -1,3 +1,5 @@
+import 'package:hspterm/terminal/paste_editor.dart';
+
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -8,6 +10,10 @@ void main() {
   testWidgets(
     'paste preview has local line numbers, resize grip and reserved scroll rail',
     (tester) async {
+      tester.view.devicePixelRatio = 2;
+      tester.view.physicalSize = const Size(1600, 1200);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(
@@ -34,9 +40,29 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.getSize(input).height, greaterThan(before));
+      final grip = find.byKey(const ValueKey('paste-resize-handle'));
+      final drag = await tester.startGesture(
+        tester.getCenter(grip),
+        kind: ui.PointerDeviceKind.mouse,
+      );
+      await drag.moveBy(const Offset(0, 20));
+      await tester.pump();
+      final trackingHeight = tester.getSize(input).height;
+      await drag.moveBy(const Offset(0, 30));
+      await tester.pump();
+      expect(tester.getSize(input).height - trackingHeight, closeTo(30, 1));
+      await drag.up();
+      await tester.pumpAndSettle();
       final bar = tester.widget<RawScrollbar>(find.byType(RawScrollbar));
       expect(identical(bar.controller, field.scrollController), isTrue);
       expect(bar.interactive, isTrue);
+      expect(
+        find.descendant(
+          of: find.byType(PasteEditor),
+          matching: find.byWidgetPredicate((w) => w is RawScrollbar),
+        ),
+        findsOneWidget,
+      );
       expect(
         tester.getRect(input).right,
         lessThan(tester.getRect(find.byType(RawScrollbar)).right - 15),

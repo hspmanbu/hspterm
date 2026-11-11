@@ -60,7 +60,10 @@ void main() {
             ),
           );
           await tester.pump();
-          final resource = find.byType(SingleChildScrollView);
+          final resource = find.descendant(
+            of: find.byKey(const ValueKey('remote-inspection-status')),
+            matching: find.byType(SingleChildScrollView),
+          );
           expect(resource, findsOneWidget);
           expect(
             tester.getRect(resource).right,
@@ -70,6 +73,10 @@ void main() {
             ),
           );
           expect(find.textContaining('内存 75%'), findsOneWidget);
+          final connection = tester.widget<Text>(
+            find.byKey(const ValueKey('workbench-connection-status')),
+          );
+          expect(connection.overflow, isNot(TextOverflow.ellipsis));
           expect(tester.takeException(), isNull);
         }
       } finally {
