@@ -1,14 +1,16 @@
 import '../app_notice.dart';
 
-import 'dart:io' show Platform;
-
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// Returns the visible client rectangle in physical pixels after the runner
 /// has brought a minimally usable area onto the nearest monitor.
 Future<Rect?> _visibleDialogArea() async {
-  if (!Platform.isWindows) return null;
+  // Use the framework's platform so adapter behavior can be exercised under
+  // widget tests on other hosts. ThemeData.platform does not alter this value.
+  if (defaultTargetPlatform != TargetPlatform.windows) return null;
   try {
     final bounds = await const MethodChannel('hspterm/prototype_window')
         .invokeListMethod<double>('ensureDialogVisible', {

@@ -533,7 +533,12 @@ fn cleanup_stale(root: &Path) -> io::Result<()> {
                     return Err(error);
                 }
             }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            // fs2 reports ERROR_LOCK_VIOLATION on Windows, which Rust maps
+            // to Uncategorized rather than WouldBlock. This means the run is
+            // live, not that creating another terminal's history has failed.
+            Err(error)
+                if error.kind() == io::ErrorKind::WouldBlock
+                    || error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {}
             Err(error) => return Err(error),
         }
     }
@@ -577,7 +582,6 @@ mod tests {
         assert!(!path.exists());
     }
     #[test]
-    #[cfg(unix)]
     fn concurrent_creation_never_cleans_a_live_run() {
         let root = tempfile::tempdir().unwrap();
         let cache = root.path().join("cache");
@@ -605,7 +609,6 @@ mod tests {
         assert_eq!(fs::read_dir(cache).unwrap().count(), 1); // registry only
     }
     #[test]
-    #[cfg(unix)]
     fn stale_cleanup_preserves_active_runs() {
         let root = tempfile::tempdir().unwrap();
         let active = HistoryPager::new_in(&root.path().join("cache"), 2).unwrap();

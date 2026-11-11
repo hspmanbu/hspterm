@@ -1,6 +1,15 @@
+## 2026-11-11 CI 恢复修复（基于447050f，第三阶段优化继续暂停）
+
+- 已保留其他agent提交ff2eacf至447050f，分支仍为fix/round7-windows-feedback。最新失败run42955261463的Release、FRB一致性、Rust检查/测试、Analyze通过，Flutter组件19项失败；没有将失败产物当成完整验收通过。
+- 统一弹窗适配改为Flutter目标平台判断，使Windows适配能够在Ubuntu显式平台变体下测试。组件测试显式提供窗口几何通道替身；补上Windows目标的无几何/有物理几何两条路径及2倍DPI可见区验证，保留所有原弹窗断言。测试替身不会进入正式程序，真实Windows runner与窗口定位检查保留。
+- 资源栏测试用1ms推进假时钟触发已排程的零延迟采样；不改变正式5秒采样周期，不改变终端刷新率。
+- 修复历史冷存储的Windows锁冲突分类：fs2的ERROR_LOCK_VIOLATION(33)在Rust中不是WouldBlock，使用fs2提供的跨平台冲突错误识别活跃owner锁。恢复144afa2临时限制为Unix的两项并发/残留清理测试，交给Windows CI重新执行，不通过跳过测试掩盖该错误。本项为确定性Windows错误修复，未开展内存/性能优化。
+- 当前环境：与Windows workflow相同26个Flutter测试文件158项全过；定向弹窗/资源13项全过；Rust历史3项全过（包括恢复的两项并发测试）；Analyze零问题、term-core严格Clippy通过；格式、264个API契约与259个公共错误边界静态检查通过。CI待推送后触发，运行ID和最终产物会补在本节。
+- 仍待：Windows11真实Explorer拖出/图片剪贴板/多显示器DPI交互；图片与大目录等同平台内存对照属于暂停的第三阶段，不能标记完成。保留用户原始日志、ssh-screen/及未跟踪文件，不提交凭据或用户截图。
+
 ## 2026-11-11 综合修复任务（基线10a5c9a，分支fix/round7-windows-feedback）
 
-按用户最新顺序：1 编辑生命周期；2 历史管理/墓碑；3 业务弹窗/静默通知；4 有界SFTP流水线/3秒速度；5 下载打开；6 首次直接拖出；7 图片剪贴板上传；8 编辑进度；9 资源栏持久化/前台采样；10 面包屑；最后同平台Release内存/CPU/缓存回归及Windows CI。每项相关测试后独立提交。Flutter/Rust/FRB不变，Android暂停；不切旧main。
+按用户最新顺序：1 编辑生命周期；2 历史管理/墓碑；3 业务弹窗/静默通知；4 有界SFTP流水线/3秒速度；5 下载打开；6 首次直接拖出；7 图片剪贴板上传；8 编辑进度；9 资源栏持久化/前台采样；10 面包屑；第三阶段同平台Release内存/CPU/缓存优化按用户新指令暂停；本轮先完成前两阶段并恢复Windows CI。每项相关测试后独立提交。Flutter/Rust/FRB不变，Android暂停；不切旧main。
 
 - 第6项直接拖出源码接入：按下冻结源快照，原Flutter内部拖放保留；出客户区边缘后同一次手势显式创建原生DragSession并准备Explorer描述符，不要求Alt/队列二次拖。预先初始化原生上下文，释放按键/代次改变/销毁会取消未交接准备，交接后由原provider租约负责退休。首次准入、内部目标、来源冻结、释放/卸载及既有导出流/终端路径回归12项通过；Analyze零问题。大量目录需保持鼠标按下等待枚举；Windows OLE实际下载、再次进入本窗口/多屏路径与原生缓存释放尚待Windows CI/实机，不能标为已实测。详WINDOWS_EXPLORER_DROP.md最新节。
 
@@ -14,7 +23,7 @@
 
 - 初始Git跟踪文件无修改；三份用户.log、ssh-screen/、tools/AGENTS.md、benchmark/screenshot.py为用户未跟踪内容，保留、不提交。AGENTS顶部旧11月5日记录不是分支最新状态，实际源码/本节优先。
 - 已核实旧代码有部分quiet通知/弹窗封装/历史管理/帧指纹，均复用；当前首先修复本地编辑自动关闭未注销、重复dispose未共享Future及注册表退出未等待已自动关闭的清理工作。第1项已修复：注册表统一自动/手动/批量注销，退休Future仍受所有者追踪；重复dispose共享Future，关闭等待初始下载/检测/上传，不会关闭后再启动编辑器。上传使用有界不可变快照，防止保存期间用户继续编辑而误把新草稿当已同步后删除。25项相关测试通过，Analyze0；追加3项覆盖自动注销、关闭中下载、并发修改草稿保留。
-- 原始分支基线10a5c9a已在独立detached工作树/tmp/hspterm-r13-baseline-10a5c9a构建Linux Release真实SSH19场景，日志/tmp/hspterm-r13-baseline-build.log及*-perf.log；开发分支不变。Windows同平台Release对照将在最终CI执行，Ubuntu结果不冒称Windows结果。
+- 原始分支基线10a5c9a已在独立detached工作树/tmp/hspterm-r13-baseline-10a5c9a构建Linux Release真实SSH13场景，日志/tmp/hspterm-r13-baseline-build.log及*-perf.log；开发分支不变。Windows同平台Release性能对照按用户新指令暂停；Ubuntu结果不冒称Windows结果。
 # HSPTerm 开发进度
 
 ## 2026-11-11 第十二轮第三批续（源码144afa2，CI run 42955261463 = 构建成功/Flutter Windows widget测试19项失败待修）

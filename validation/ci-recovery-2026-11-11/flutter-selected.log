@@ -1,0 +1,166 @@
+   Woah! You appear to be trying to run flutter as root.
+   We strongly recommend running the flutter tool without superuser privileges.
+  /
+📎
+00:00 +0: loading /opt/hspterm/ui_flutter/test/typography_settings_test.dart
+00:00 +0: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: common Apply can rebase a non-font revision but refuses changed font settings
+00:00 +1: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: configuration refresh waits for the real previous font save and then reads current settings
+00:00 +2: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: explicit Nerd candidate preserves primary monospace geometry and licensed symbol fallback
+00:00 +3: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: large font catalog is lazy, searchable, and selection stays a draft
+00:00 +4: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: large font catalog is lazy, searchable, and selection stays a draft
+00:00 +5: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: large font catalog is lazy, searchable, and selection stays a draft
+00:00 +6: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: large font catalog is lazy, searchable, and selection stays a draft
+00:03 +7: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: large font catalog is lazy, searchable, and selection stays a draft
+00:04 +8: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: catalog errors keep builtin choices and cancelling preserves the draft
+00:05 +9: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: layout validation, fallback and cache invalidation do not alter terminal data
+00:05 +10: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: failed save keeps render settings; old form cannot overwrite reloaded source
+00:05 +11: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: shutdown awaits in-flight persistence and no new writes are admitted
+00:05 +12: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: settings selection is a draft until explicit save, and failed load cannot overwrite
+00:05 +13: /opt/hspterm/ui_flutter/test/typography_settings_test.dart: narrow large text layout keeps font controls scrollable
+00:10 +14: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: an unavailable source after a failed acknowledgement cannot silently pass a second Apply
+00:10 +15: /opt/hspterm/ui_flutter/test/widget_test.dart: link hover is passive, Ctrl click is explicit and remote mouse capture retains priority
+00:10 +16: /opt/hspterm/ui_flutter/test/widget_test.dart: link hover is passive, Ctrl click is explicit and remote mouse capture retains priority
+00:11 +17: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:11 +18: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:11 +19: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:11 +20: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:11 +21: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:11 +22: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:11 +23: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:12 +24: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:12 +25: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:12 +26: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:12 +27: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:12 +28: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: Cancel discards local drafts and OK applies before leaving settings
+00:12 +29: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: category changes retain drafts and common Apply saves hidden editors
+00:12 +30: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: whole settings page cannot bypass the same guard by navigating to hosts
+00:13 +31: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: whole settings page cannot bypass the same guard by navigating to hosts
+00:13 +32: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: whole settings page cannot bypass the same guard by navigating to hosts
+00:13 +33: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: whole settings page cannot bypass the same guard by navigating to hosts
+00:13 +34: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: whole settings page cannot bypass the same guard by navigating to hosts
+00:13 +35: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: an in-flight save blocks leave without offering to discard its submitted mutation
+00:13 +36: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: notification-style activation respects drafts before selecting its original tab
+00:14 +37: /opt/hspterm/ui_flutter/test/terminal_paths_send_test.dart: path Applied preserves literal source and never retries
+00:15 +38: /opt/hspterm/ui_flutter/test/terminal_paths_send_test.dart: path Applied preserves literal source and never retries
+00:15 +39: /opt/hspterm/ui_flutter/test/settings_leave_guard_test.dart: external category requests preserve pending drafts without prompting
+00:15 +40: /opt/hspterm/ui_flutter/test/terminal_paths_send_test.dart: path Unavailable preserves literal source and never retries
+00:15 +41: /opt/hspterm/ui_flutter/test/terminal_paths_send_test.dart: path Unconfirmed preserves literal source and never retries
+00:15 +42: /opt/hspterm/ui_flutter/test/terminal_paths_send_test.dart: stale generation copies without targeting the reconnected session
+00:15 +43: /opt/hspterm/ui_flutter/test/terminal_paths_send_test.dart: drag snapshot cannot change when the source row is renamed
+00:15 +44: /opt/hspterm/ui_flutter/test/terminal_paths_send_test.dart: unavailable insert direct-pastes quoted paths when allowed
+00:15 +45: /opt/hspterm/ui_flutter/test/terminal_paths_send_test.dart: direct paste disabled keeps the clipboard-only fallback
+00:16 +46: /opt/hspterm/ui_flutter/test/terminal_paths_send_test.dart: disconnected session never direct-pastes
+00:16 +47: /opt/hspterm/ui_flutter/test/terminal_paths_send_test.dart: cd variant never direct-pastes
+00:16 +48: /opt/hspterm/ui_flutter/test/run_log_test.dart: current run log omits error secrets and foreign stack paths
+00:16 +49: /opt/hspterm/ui_flutter/test/run_log_test.dart: current run UI log has a fixed memory budget
+00:17 +50: /opt/hspterm/ui_flutter/test/diagnostics_test.dart: exports only current-launch logs and replaces previous contents
+00:17 +51: /opt/hspterm/ui_flutter/test/diagnostics_test.dart: exports only current-launch logs and replaces previous contents
+00:17 +52: /opt/hspterm/ui_flutter/test/diagnostics_test.dart: exports only current-launch logs and replaces previous contents
+00:17 +53: /opt/hspterm/ui_flutter/test/diagnostics_test.dart: exports only current-launch logs and replaces previous contents
+00:18 +54: /opt/hspterm/ui_flutter/test/app_notice_test.dart: action notices close automatically after six seconds and expose close control
+00:19 +55: /opt/hspterm/ui_flutter/test/app_notice_test.dart: action notices close automatically after six seconds and expose close control
+00:19 +56: /opt/hspterm/ui_flutter/test/diagnostics_test.dart: formal diagnostics builder is reached through the real settings category
+00:19 +57: /opt/hspterm/ui_flutter/test/diagnostics_test.dart: formal diagnostics builder is reached through the real settings category
+00:19 +58: /opt/hspterm/ui_flutter/test/diagnostics_test.dart: formal diagnostics builder is reached through the real settings category
+00:19 +59: /opt/hspterm/ui_flutter/test/diagnostics_test.dart: read once, filter locally and leave idle without native polling
+00:20 +60: /opt/hspterm/ui_flutter/test/diagnostics_test.dart: clear is explicit and ACK is separate from subsequent refresh
+00:20 +61: /opt/hspterm/ui_flutter/test/diagnostics_test.dart: load failure is explicit, capacity is bounded and compact layout remains scrollable
+00:20 +62: /opt/hspterm/ui_flutter/test/minimized_terminal_test.dart: minimized zero viewport never replaces the last valid PTY geometry or frame
+00:21 +63: /opt/hspterm/ui_flutter/test/file_properties_dialog_test.dart: folder size grows page by page and completes with item counts
+00:22 +64: /opt/hspterm/ui_flutter/test/sftp_feedback_ui_test.dart: deep breadcrumbs reserve an edit hit zone and discard an invalid address
+00:23 +65: /opt/hspterm/ui_flutter/test/sftp_feedback_ui_test.dart: deep breadcrumbs reserve an edit hit zone and discard an invalid address
+00:23 +66: /opt/hspterm/ui_flutter/test/sftp_feedback_ui_test.dart: deep breadcrumbs reserve an edit hit zone and discard an invalid address
+00:24 +67: /opt/hspterm/ui_flutter/test/sftp_feedback_ui_test.dart: deep breadcrumbs reserve an edit hit zone and discard an invalid address
+EDITING=1 BAR=0 TF=1
+TF_TEXT=[/root/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep] LOADED=[/root/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep] SAME=true
+00:25 +68: /opt/hspterm/ui_flutter/test/file_properties_dialog_test.dart: owner dropdowns list remote accounts and submit changed ownership
+00:25 +69: /opt/hspterm/ui_flutter/test/sftp_feedback_ui_test.dart: parent placeholder navigates without entering the real file list
+00:25 +70: /opt/hspterm/ui_flutter/test/file_properties_dialog_test.dart: properties layout remains scrollable in a small window with large text
+00:25 +71: /opt/hspterm/ui_flutter/test/sftp_feedback_ui_test.dart: two bookmark popups and compact visible unchecked boxes
+00:25 +72: /opt/hspterm/ui_flutter/test/sftp_feedback_ui_test.dart: file submenu selects another existing host and performs explicit mock copy
+00:26 +73: /opt/hspterm/ui_flutter/test/terminal_feedback_test.dart: Ctrl wheel zoom is session-owned, consumes TUI wheel and survives view recreation
+00:27 +74: /opt/hspterm/ui_flutter/test/terminal_feedback_test.dart: Ctrl wheel zoom is session-owned, consumes TUI wheel and survives view recreation
+00:27 +75: /opt/hspterm/ui_flutter/test/terminal_feedback_test.dart: active composition blocks controlled input and late detached IME snapshots are ignored
+00:28 +76: /opt/hspterm/ui_flutter/test/dialog_bounds_test.dart: Windows geometry adapter opens a reachable dialog with bounds=null (variant: TargetPlatform.windows)
+00:28 +77: /opt/hspterm/ui_flutter/test/history_controls_test.dart: preferences save only explicitly; failures retain choice and allow manual retry
+00:29 +78: /opt/hspterm/ui_flutter/test/history_controls_test.dart: preferences save only explicitly; failures retain choice and allow manual retry
+00:29 +79: /opt/hspterm/ui_flutter/test/history_controls_test.dart: preferences save only explicitly; failures retain choice and allow manual retry
+00:29 +80: /opt/hspterm/ui_flutter/test/history_controls_test.dart: preferences save only explicitly; failures retain choice and allow manual retry
+00:29 +81: /opt/hspterm/ui_flutter/test/history_controls_test.dart: preferences save only explicitly; failures retain choice and allow manual retry
+00:30 +82: /opt/hspterm/ui_flutter/test/terminal_suggestions_test.dart: candidate delete keeps its slot but reveals only on row hover or keyboard selection
+00:31 +83: /opt/hspterm/ui_flutter/test/terminal_suggestions_test.dart: candidate delete keeps its slot but reveals only on row hover or keyboard selection
+00:31 +84: /opt/hspterm/ui_flutter/test/history_controls_test.dart: empty global clear still requires confirmation and saves an epoch; failure has no auto retry
+00:31 +85: /opt/hspterm/ui_flutter/test/history_controls_test.dart: empty global clear still requires confirmation and saves an epoch; failure has no auto retry
+00:31 +86: /opt/hspterm/ui_flutter/test/history_controls_test.dart: empty global clear still requires confirmation and saves an epoch; failure has no auto retry
+00:31 +87: /opt/hspterm/ui_flutter/test/history_controls_test.dart: empty global clear still requires confirmation and saves an epoch; failure has no auto retry
+00:31 +88: /opt/hspterm/ui_flutter/test/history_controls_test.dart: empty global clear still requires confirmation and saves an epoch; failure has no auto retry
+00:31 +89: /opt/hspterm/ui_flutter/test/history_controls_test.dart: empty global clear still requires confirmation and saves an epoch; failure has no auto retry
+00:32 +90: /opt/hspterm/ui_flutter/test/history_controls_test.dart: unread settings cannot overwrite defaults or clear; explicit reload recovers
+00:32 +91: /opt/hspterm/ui_flutter/test/history_controls_test.dart: history draft survives category navigation and a clear does not discard its unsaved switch
+00:33 +92: /opt/hspterm/ui_flutter/test/history_controls_test.dart: history draft survives category navigation and a clear does not discard its unsaved switch
+00:33 +93: /opt/hspterm/ui_flutter/test/history_controls_test.dart: history draft survives category navigation and a clear does not discard its unsaved switch
+00:33 +94: /opt/hspterm/ui_flutter/test/clipboard_image_test.dart: image shortcut runs once without sending keys and keeps text paste intact
+00:33 +95: /opt/hspterm/ui_flutter/test/clipboard_image_test.dart: image shortcut runs once without sending keys and keeps text paste intact
+00:33 +96: /opt/hspterm/ui_flutter/test/history_controls_test.dart: host search is local and narrow scaled controls have no overflow
+00:34 +97: /opt/hspterm/ui_flutter/test/history_controls_test.dart: host search is local and narrow scaled controls have no overflow
+00:34 +98: /opt/hspterm/ui_flutter/test/history_controls_test.dart: disabled history remains manageable and exact host-text selection does not delete another host
+00:35 +99: /opt/hspterm/ui_flutter/test/history_controls_test.dart: leaving a retained settings category drops plaintext and rejects a late search
+00:35 +100: /opt/hspterm/ui_flutter/test/explorer_drag_handoff_test.dart: ordinary drag keeps Flutter targets without admitting native export
+00:36 +101: /opt/hspterm/ui_flutter/test/explorer_drag_handoff_test.dart: first edge crossing freezes source and cancels preparation on release
+00:36 +102: /opt/hspterm/ui_flutter/test/explorer_drag_handoff_test.dart: native handoff survives pointer cancel and view disposal
+00:36 +103: /opt/hspterm/ui_flutter/test/explorer_export_test.dart: native content requests use bounded FIFO before reserving source work
+00:36 +104: /opt/hspterm/ui_flutter/test/explorer_export_test.dart: queued cancellation never starts a source, active cancellation retains its slot until actual completion
+00:36 +105: /opt/hspterm/ui_flutter/test/explorer_export_test.dart: capacity rejection and failed workers do not strand an export permit
+00:36 +106: /opt/hspterm/ui_flutter/test/explorer_export_test.dart: cancelled streaming still reports failed cleanup and waits before admitting the next source
+00:36 +107: /opt/hspterm/ui_flutter/test/explorer_export_test.dart: Windows export names preserve Unicode and quoting, reject traversal, aliases and devices
+00:36 +108: /opt/hspterm/ui_flutter/test/explorer_export_test.dart: a complete snapshot is streamed in chunks, released before caller signals close
+00:36 +109: /opt/hspterm/ui_flutter/test/explorer_export_test.dart: cancellation awaits the actual source stop and does not signal successful EOF
+00:36 +110: /opt/hspterm/ui_flutter/test/explorer_export_test.dart: an invalid snapshot is never published, and cleanup failure remains failure
+00:37 +111: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +112: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +113: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +114: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +115: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +116: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +117: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +118: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +119: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +120: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +121: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +122: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +123: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +124: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +125: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +126: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +127: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:38 +128: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:39 +129: /opt/hspterm/ui_flutter/test/local_edit_queue_test.dart: edit transfer progress handles upload download unknown totals and empty files
+00:39 +130: /opt/hspterm/ui_flutter/test/local_edit_session_test.dart: idle timeout closes the session but never mid-transfer
+00:39 +131: /opt/hspterm/ui_flutter/test/local_edit_session_test.dart: idle timeout closes the session but never mid-transfer
+00:40 +132: /opt/hspterm/ui_flutter/test/local_edit_session_test.dart: idle timeout closes the session but never mid-transfer
+00:40 +133: /opt/hspterm/ui_flutter/test/local_edit_session_test.dart: idle timeout closes the session but never mid-transfer
+00:40 +134: /opt/hspterm/ui_flutter/test/local_edit_session_test.dart: idle timeout closes the session but never mid-transfer
+00:40 +135: /opt/hspterm/ui_flutter/test/local_edit_session_test.dart: idle timeout closes the session but never mid-transfer
+00:43 +136: /opt/hspterm/ui_flutter/test/local_edit_session_test.dart: idle timeout closes the session but never mid-transfer
+00:43 +137: /opt/hspterm/ui_flutter/test/local_edit_session_test.dart: idle timeout closes the session but never mid-transfer
+00:43 +138: /opt/hspterm/ui_flutter/test/local_edit_session_test.dart: idle timeout closes the session but never mid-transfer
+00:43 +139: /opt/hspterm/ui_flutter/test/local_edit_session_test.dart: idle timeout closes the session but never mid-transfer
+00:43 +140: /opt/hspterm/ui_flutter/test/transfer_queue_test.dart: batch conflict decision is explicit and scoped to the clicked task
+00:43 +141: /opt/hspterm/ui_flutter/test/transfer_queue_test.dart: batch conflict decision is explicit and scoped to the clicked task
+00:44 +142: /opt/hspterm/ui_flutter/test/transfer_queue_test.dart: batch conflict decision is explicit and scoped to the clicked task
+00:44 +143: /opt/hspterm/ui_flutter/test/transfer_queue_test.dart: batch conflict decision is explicit and scoped to the clicked task
+00:44 +144: /opt/hspterm/ui_flutter/test/transfer_queue_test.dart: batch conflict decision is explicit and scoped to the clicked task
+00:44 +145: /opt/hspterm/ui_flutter/test/transfer_queue_test.dart: large real queue builds only visible rows and routes Ctrl multiselect
+00:45 +146: /opt/hspterm/ui_flutter/test/transfer_queue_test.dart: compact queue supports text scaling and keeps successful rows folded
+00:45 +147: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: saved resource visibility restores without process consent or background sampling
+00:45 +148: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: shutdown revokes first and waits for the actual in-flight request
+00:45 +149: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: adjacent monotonic samples calculate rates and refuse boot changes, resets and stale intervals
+00:45 +150: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: no startup request or timer; only enabled focused sampling runs and leaving focus stops it
+00:45 +151: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: revocation cancels publication of a late sample without waiting for that request to finish
+00:45 +152: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: unknown signal consumes original list, cannot replay, and new generation clears all local consent
+00:45 +153: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: small scaled consent dialog stays scrollable and closing never starts a probe
+00:46 +154: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: small scaled consent dialog stays scrollable and closing never starts a probe
+00:46 +155: /opt/hspterm/ui_flutter/test/connection_status_test.dart: latency updates neither repaint terminal listeners nor pull frames; old generation ignored and disconnect clears sample
+00:46 +156: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: process action requires separate explicit confirmation and cancel sends no signal
+00:46 +157: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: process action requires separate explicit confirmation and cancel sends no signal
+00:46 +158: All tests passed!

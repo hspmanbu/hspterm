@@ -138,7 +138,7 @@ void main() {
       expect(c.processesAllowed, false);
       expect(gateway.samples, 0);
       c.setActive(true);
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       expect(gateway.samples, 1);
       c.setActive(false);
       await c.configure(metrics: true, processes: true);

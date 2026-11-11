@@ -1,8 +1,57 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hspterm/prototype/design.dart';
 
 void main() {
+  for (final physicalBounds in <List<double>?>[
+    null,
+    [400, 100, 1000, 700],
+  ]) {
+    testWidgets(
+      'Windows geometry adapter opens a reachable dialog with bounds=$physicalBounds',
+      (tester) async {
+        tester.view.physicalSize = const Size(1600, 1000);
+        tester.view.devicePixelRatio = 2;
+        addTearDown(tester.view.reset);
+        var calls = 0;
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          const MethodChannel('hspterm/prototype_window'),
+          (call) async {
+            expect(call.method, 'ensureDialogVisible');
+            calls++;
+            return physicalBounds;
+          },
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  child: const Text('open'),
+                  onPressed: () =>
+                      confirm(context, 'Windows dialog', 'body ' * 300),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        expect(calls, 1);
+        expect(find.text('Windows dialog'), findsOneWidget);
+        final visible = physicalBounds == null
+            ? const Rect.fromLTWH(0, 0, 800, 500)
+            : const Rect.fromLTWH(200, 50, 500, 350);
+        expect(visible.contains(tester.getCenter(find.text('确认'))), true);
+        await tester.tap(find.text('确认'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.windows),
+    );
+  }
+
   testWidgets('confirm stays fully visible in a small window', (tester) async {
     tester.view.physicalSize = const Size(420, 320);
     tester.view.devicePixelRatio = 1.0;

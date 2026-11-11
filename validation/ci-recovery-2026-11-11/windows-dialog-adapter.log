@@ -1,0 +1,19 @@
+   Woah! You appear to be trying to run flutter as root.
+   We strongly recommend running the flutter tool without superuser privileges.
+  /
+📎
+00:00 +0: loading /opt/hspterm/ui_flutter/test/dialog_bounds_test.dart
+00:00 +0: /opt/hspterm/ui_flutter/test/dialog_bounds_test.dart: Windows geometry adapter opens a reachable dialog with bounds=null (variant: TargetPlatform.windows)
+00:00 +1: /opt/hspterm/ui_flutter/test/dialog_bounds_test.dart: Windows geometry adapter opens a reachable dialog with bounds=null (variant: TargetPlatform.windows)
+00:00 +2: /opt/hspterm/ui_flutter/test/dialog_bounds_test.dart: Windows geometry adapter opens a reachable dialog with bounds=null (variant: TargetPlatform.windows)
+00:00 +3: /opt/hspterm/ui_flutter/test/dialog_bounds_test.dart: Windows geometry adapter opens a reachable dialog with bounds=null (variant: TargetPlatform.windows)
+00:00 +4: /opt/hspterm/ui_flutter/test/dialog_bounds_test.dart: Windows geometry adapter opens a reachable dialog with bounds=null (variant: TargetPlatform.windows)
+00:00 +5: /opt/hspterm/ui_flutter/test/dialog_bounds_test.dart: Windows geometry adapter opens a reachable dialog with bounds=null (variant: TargetPlatform.windows)
+00:00 +6: /opt/hspterm/ui_flutter/test/dialog_bounds_test.dart: Windows geometry adapter opens a reachable dialog with bounds=null (variant: TargetPlatform.windows)
+00:01 +7: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: small scaled consent dialog stays scrollable and closing never starts a probe
+00:01 +8: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: small scaled consent dialog stays scrollable and closing never starts a probe
+00:01 +9: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: small scaled consent dialog stays scrollable and closing never starts a probe
+00:01 +10: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: small scaled consent dialog stays scrollable and closing never starts a probe
+00:01 +11: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: small scaled consent dialog stays scrollable and closing never starts a probe
+00:01 +12: /opt/hspterm/ui_flutter/test/remote_inspection_test.dart: process action requires separate explicit confirmation and cancel sends no signal
+00:02 +13: All tests passed!
