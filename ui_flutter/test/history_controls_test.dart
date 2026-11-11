@@ -25,10 +25,20 @@ class _Gateway implements HistoryControlsGateway {
   Future<List<rust.CommandSearchRow>> searchCommands(
     String query,
     String? hostId,
-  ) async => const [];
+  ) async => pendingSearch == null ? rows : pendingSearch!.future;
 
   @override
-  Future<int> deleteCommands(List<String> texts, String? hostId) async => 0;
+  Future<int> deleteCommands(List<String> texts, String? hostId) async {
+    deleted.add((List.of(texts), hostId));
+    rows = rows
+        .where((row) => row.hostId != hostId || !texts.contains(row.text))
+        .toList();
+    return texts.length;
+  }
+
+  List<rust.CommandSearchRow> rows = [];
+  Completer<List<rust.CommandSearchRow>>? pendingSearch;
+  final deleted = <(List<String>, String?)>[];
 
   HistoryControls value = fixture();
   Object? loadError, saveError;
@@ -312,6 +322,94 @@ void main() {
         await tester.pumpWidget(const SizedBox());
         await tester.pump();
       }
+    },
+  );
+  testWidgets(
+    'disabled history remains manageable and exact host-text selection does not delete another host',
+    (tester) async {
+      final g = _Gateway()
+        ..value = fixture(enabled: false)
+        ..rows = const [
+          rust.CommandSearchRow(
+            hostId: 'fixture-host',
+            text: 'echo shared',
+            usedCounter: 2,
+          ),
+          rust.CommandSearchRow(
+            hostId: 'another-host',
+            text: 'echo shared',
+            usedCounter: 1,
+          ),
+        ];
+      await _mount(tester, g);
+      await tester.ensureVisible(keyed('history-command-search-run'));
+      await tester.tap(keyed('history-command-search-run'));
+      await tester.pumpAndSettle();
+      final first = keyed('history-command-row-0'),
+          second = keyed('history-command-row-1');
+      tester.widget<CheckboxListTile>(first).onChanged!(true);
+      await tester.pump();
+      expect(tester.widget<CheckboxListTile>(second).value, false);
+      await tester.ensureVisible(keyed('history-command-delete-selected'));
+      await tester.tap(keyed('history-command-delete-selected'));
+      await tester.pumpAndSettle();
+      expect(g.deleted, hasLength(1));
+      expect(g.deleted.single.$1, ['echo shared']);
+      expect(g.deleted.single.$2, 'fixture-host');
+      expect(g.rows.single.hostId, 'another-host');
+    },
+  );
+  testWidgets(
+    'leaving a retained settings category drops plaintext and rejects a late search',
+    (tester) async {
+      final active = ValueNotifier(true);
+      final g = _Gateway()
+        ..rows = const [
+          rust.CommandSearchRow(
+            hostId: 'fixture-host',
+            text: 'echo private fixture',
+            usedCounter: 1,
+          ),
+        ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ValueListenableBuilder<bool>(
+              valueListenable: active,
+              builder: (_, value, _) => TickerMode(
+                enabled: value,
+                child: SingleChildScrollView(
+                  child: HistoryControlsPanel(gateway: g),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(keyed('history-command-search'));
+      await tester.enterText(keyed('history-command-search'), 'private');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      expect(find.text('echo private fixture'), findsOneWidget);
+      g.pendingSearch = Completer();
+      await tester.ensureVisible(keyed('history-command-search-run'));
+      await tester.tap(keyed('history-command-search-run'));
+      await tester.pump();
+      active.value = false;
+      await tester.pump();
+      g.pendingSearch!.complete(g.rows);
+      await tester.pumpAndSettle();
+      expect(find.text('echo private fixture'), findsNothing);
+      expect(
+        tester
+            .widget<TextField>(keyed('history-command-search'))
+            .controller!
+            .text,
+        '',
+      );
+      await tester.pumpWidget(const SizedBox());
+      active.dispose();
     },
   );
 }

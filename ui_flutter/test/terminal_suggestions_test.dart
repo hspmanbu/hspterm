@@ -1,3 +1,5 @@
+import 'package:flutter/gestures.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -63,6 +65,58 @@ Future<TerminalController> controller(SuggestionsBackend backend) async {
 }
 
 void main() {
+  testWidgets(
+    'candidate delete keeps its slot but reveals only on row hover or keyboard selection',
+    (tester) async {
+      final backend = SuggestionsBackend(),
+          key = GlobalKey<TerminalViewState>();
+      final current = await controller(backend);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 600,
+              height: 300,
+              child: TerminalView(key: key, controller: current),
+            ),
+          ),
+        ),
+      );
+      key.currentState!.focusTerminal();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 30));
+      await tester.pump();
+      final icon = find.byIcon(Icons.delete_outline).first;
+      final opacity = find
+          .ancestor(of: icon, matching: find.byType(Opacity))
+          .first;
+      expect(tester.widget<Opacity>(opacity).opacity, 0);
+      final buttonSize = tester.getSize(icon);
+      final row = find.byKey(
+        ValueKey('history-candidate-0-${backend.value!.ticket}'),
+      );
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: const Offset(700, 500));
+      await mouse.moveTo(tester.getTopLeft(row) + const Offset(12, 10));
+      await tester.pump();
+      expect(tester.widget<Opacity>(opacity).opacity, 1);
+      expect(tester.getSize(icon), buttonSize);
+      await mouse.moveTo(const Offset(700, 500));
+      await tester.pump();
+      expect(tester.widget<Opacity>(opacity).opacity, 0);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      expect(tester.widget<Opacity>(opacity).opacity, 1);
+      await tester.tap(icon);
+      await tester.pump();
+      expect(backend.deleted.single.$3, 0);
+      expect(backend.selected, isEmpty);
+      await mouse.removePointer();
+      await tester.pumpWidget(const SizedBox());
+      await closeTerminal(tester, current);
+    },
+  );
+
   testWidgets(
     'controlled path actions hide stale candidates and queries wait for keys appended during ACK',
     (tester) async {

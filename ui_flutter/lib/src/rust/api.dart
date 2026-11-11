@@ -1558,10 +1558,12 @@ Future<List<CommandSearchRow>> searchCommandHistory({
   required String query,
   String? hostId,
   required int limit,
+  String? expectedVaultScope,
 }) => RustLib.instance.api.crateApiSearchCommandHistory(
   query: query,
   hostId: hostId,
   limit: limit,
+  expectedVaultScope: expectedVaultScope,
 );
 
 /// Tombstoned single/batch delete. `host_id = None` deletes the texts on
@@ -1570,9 +1572,11 @@ Future<List<CommandSearchRow>> searchCommandHistory({
 Future<int> deleteCommandHistory({
   required List<String> texts,
   String? hostId,
+  String? expectedVaultScope,
 }) => RustLib.instance.api.crateApiDeleteCommandHistory(
   texts: texts,
   hostId: hostId,
+  expectedVaultScope: expectedVaultScope,
 );
 
 /// Round-12 candidate delete: resolves the exact text from the live ticket

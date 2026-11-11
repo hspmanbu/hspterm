@@ -2105,12 +2105,17 @@ fn wire__crate__api__delete_command_history_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_texts = <Vec<String>>::sse_decode(&mut deserializer);
             let api_host_id = <Option<String>>::sse_decode(&mut deserializer);
+            let api_expected_vault_scope = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || async move {
-                        let output_ok =
-                            crate::api::delete_command_history(api_texts, api_host_id).await?;
+                        let output_ok = crate::api::delete_command_history(
+                            api_texts,
+                            api_host_id,
+                            api_expected_vault_scope,
+                        )
+                        .await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -7419,13 +7424,18 @@ fn wire__crate__api__search_command_history_impl(
             let api_query = <String>::sse_decode(&mut deserializer);
             let api_host_id = <Option<String>>::sse_decode(&mut deserializer);
             let api_limit = <u32>::sse_decode(&mut deserializer);
+            let api_expected_vault_scope = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || async move {
-                        let output_ok =
-                            crate::api::search_command_history(api_query, api_host_id, api_limit)
-                                .await?;
+                        let output_ok = crate::api::search_command_history(
+                            api_query,
+                            api_host_id,
+                            api_limit,
+                            api_expected_vault_scope,
+                        )
+                        .await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,

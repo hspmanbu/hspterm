@@ -6081,11 +6081,18 @@ pub async fn search_command_history(
     query: String,
     host_id: Option<String>,
     limit: u32,
+    expected_vault_scope: Option<String>,
 ) -> Result<Vec<CommandSearchRow>> {
     /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
     let outcome: Result<_> = crate::public_errors::guard(async move {
         tokio::task::spawn_blocking(move || {
             with_vault(|v| {
+                ensure!(
+                    expected_vault_scope
+                        .as_deref()
+                        .is_none_or(|scope| scope == v.instance_id()),
+                    "原历史管理配置库已改变，请重新打开页面"
+                );
                 use hspterm_storage_sync::command_history::HistoryRepository;
                 Ok(HistoryRepository::new(v)
                     .search_commands(&query, host_id.as_deref(), limit as usize)?
@@ -6107,11 +6114,21 @@ pub async fn search_command_history(
 /// Tombstoned single/batch delete. `host_id = None` deletes the texts on
 /// every host that stores them. The revision of the history document is
 /// consumed inside the atomic commit; stale callers get a public summary.
-pub async fn delete_command_history(texts: Vec<String>, host_id: Option<String>) -> Result<u32> {
+pub async fn delete_command_history(
+    texts: Vec<String>,
+    host_id: Option<String>,
+    expected_vault_scope: Option<String>,
+) -> Result<u32> {
     /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
     let outcome: Result<_> = crate::public_errors::guard(async move {
         tokio::task::spawn_blocking(move || {
             with_vault(|v| {
+                ensure!(
+                    expected_vault_scope
+                        .as_deref()
+                        .is_none_or(|scope| scope == v.instance_id()),
+                    "原历史管理配置库已改变，请重新打开页面"
+                );
                 use hspterm_storage_sync::command_history::HistoryRepository;
                 let borrowed: Vec<&str> = texts.iter().map(String::as_str).collect();
                 let deleted =

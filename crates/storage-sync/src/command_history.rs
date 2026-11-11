@@ -14,6 +14,8 @@ const MAX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_HOSTS: usize = 1000;
 const PER_HOST: usize = 500;
 const MAX_ENTRIES: usize = 20_000;
+// Deletes are durable knowledge, never an LRU. Fail atomically at capacity.
+const MAX_DELETIONS: usize = 20_000;
 const MAX_COMMAND: usize = 4096;
 
 #[derive(Debug, thiserror::Error)]
@@ -86,8 +88,8 @@ impl Drop for Entry {
 /// Round-12 single-command delete marker. A tombstone suppresses any entry
 /// with the same exact text whose `used` stamp is not newer than `at`,
 /// across merges, so a stale device cannot resurrect the command. A later
-/// real execution of the same text removes the tombstone and forms a fresh
-/// legal record.
+/// real execution of the same text forms a fresh legal record while retaining
+/// deletion knowledge against older offline payloads.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Tombstone {
@@ -241,11 +243,12 @@ impl Document {
             return Err(HistoryError::Capacity);
         }
         let mut count = 0;
+        let mut deletions = 0;
         for (host, h) in &self.hosts {
             if !crate::repository::valid_id(host, "host") || !h.clear.valid(self.clock) {
                 return Err(HistoryError::Format);
             }
-            if h.entries.len() > PER_HOST || h.deleted.len() > PER_HOST {
+            if h.entries.len() > PER_HOST || h.deleted.len() > MAX_DELETIONS {
                 return Err(HistoryError::Capacity);
             }
             let mut seen = std::collections::HashSet::new();
@@ -276,8 +279,9 @@ impl Document {
                 }
             }
             count += h.entries.len();
+            deletions += h.deleted.len();
         }
-        if count > MAX_ENTRIES {
+        if count > MAX_ENTRIES || deletions > MAX_DELETIONS {
             return Err(HistoryError::Capacity);
         }
         Ok(())
@@ -306,7 +310,7 @@ impl Document {
         h.deleted.retain(|t| t.at > h.clear);
         h.deleted
             .sort_by(|a, b| b.at.cmp(&a.at).then_with(|| a.text.cmp(&b.text)));
-        h.deleted.truncate(PER_HOST);
+        // Keep every marker newer than the explicit clear epoch.
     }
     fn merged(a: &Self, b: &Self) -> Result<Self> {
         let mut result = Self {
@@ -350,10 +354,10 @@ impl Document {
             }
         }
         // Resolution: a tombstone suppresses its older entry, a genuinely
-        // newer re-execution (used > at) invalidates the tombstone instead.
+        // newer re-execution (used > at) survives alongside retained deletion knowledge.
         for h in result.hosts.values_mut() {
-            h.deleted
-                .retain(|t| !h.entries.iter().any(|e| e.text == t.text && e.used > t.at));
+            // A newer execution may coexist with its older deletion. Keep the
+            // marker even after that live entry ages out of the bounded LRU.
             h.entries
                 .retain(|e| !h.deleted.iter().any(|t| t.text == e.text && t.at >= e.used));
             Self::compact(h);
@@ -464,14 +468,7 @@ impl<'a> HistoryRepository<'a> {
         for text in &allowed {
             let used = document.tick(&actor)?;
             let h = document.hosts.entry(host.to_owned()).or_default();
-            // A real re-execution outranks a pending tombstone: drop it and
-            // the new entry becomes the fresh legal record.
-            h.deleted.retain(|t| {
-                if t.text == *text && used > t.at {
-                    return false;
-                }
-                true
-            });
+            // A real re-execution outranks, but never erases, a deletion marker.
             if let Some(entry) = h.entries.iter_mut().find(|e| e.text == *text) {
                 entry.used = used;
             } else {
@@ -536,10 +533,14 @@ impl<'a> HistoryRepository<'a> {
         if accepted.is_empty() {
             return Ok(0);
         }
-        if let Some(id) = host {
-            self.host(id)?;
-        }
         let (prior, mut document) = self.read()?;
+        if let Some(id) = host {
+            // Management must also be able to delete retained history of a
+            // removed host, without weakening the recorder's host admission.
+            if !document.hosts.contains_key(id) {
+                self.host(id)?;
+            }
+        }
         let (old_writer, actor) = self.actor()?;
         let targets: Vec<String> = match host {
             Some(id) => vec![id.to_owned()],
@@ -592,9 +593,6 @@ impl<'a> HistoryRepository<'a> {
             return Err(HistoryError::Capacity);
         }
         let document = self.read()?.1;
-        if !document.enabled {
-            return Ok(Vec::new());
-        }
         let needle = query.to_lowercase();
         let mut hits: Vec<CommandSearchHit> = document
             .hosts
@@ -1218,10 +1216,10 @@ mod tests {
     }
 
     #[test]
-    fn genuinely_newer_execution_invalidates_the_tombstone() {
+    fn genuinely_newer_execution_survives_without_forgetting_the_tombstone() {
         // Device A deleted the command (marker at=T2). A device whose clock
         // already knows T2 re-executes it (used=T3 > T2): the fresh legal
-        // record must survive and the stale marker retires. (An offline
+        // record must survive alongside the older marker. (An offline
         // device whose clock predates the delete is suppressed, consistent
         // with the clear-epoch semantics.)
         let mut deleter = Document::default();
@@ -1244,11 +1242,11 @@ mod tests {
             "a genuinely newer execution is a fresh legal record"
         );
         assert!(
-            !merged.hosts[HOST]
+            merged.hosts[HOST]
                 .deleted
                 .iter()
                 .any(|t| t.text == "echo again"),
-            "the stale marker must be retired by the newer execution"
+            "deletion knowledge remains after the newer execution ages out"
         );
         merged.validate().unwrap();
     }
@@ -1279,5 +1277,71 @@ mod tests {
             "a clear epoch subsumes older per-text markers"
         );
         local.validate().unwrap();
+    }
+    #[test]
+    fn more_than_one_history_window_of_deletes_never_resurrects_old_commands() {
+        let mut stale = Document::default();
+        for i in 0..PER_HOST {
+            add(&mut stale, HOST, &format!("echo {i}"), A);
+        }
+        let mut current = stale.clone();
+        current.hosts.get_mut(HOST).unwrap().entries.clear();
+        for i in 0..PER_HOST + 40 {
+            let at = current.tick(B).unwrap();
+            current
+                .hosts
+                .get_mut(HOST)
+                .unwrap()
+                .deleted
+                .push(Tombstone {
+                    text: format!("echo {i}"),
+                    at,
+                });
+        }
+        Document::compact(current.hosts.get_mut(HOST).unwrap());
+        assert_eq!(current.hosts[HOST].deleted.len(), PER_HOST + 40);
+        assert!(
+            Document::merged(&current, &stale).unwrap().hosts[HOST]
+                .entries
+                .is_empty()
+        );
+        let mut executed = current.clone();
+        add(&mut executed, HOST, "echo 0", B);
+        let mut merged = Document::merged(&executed, &stale).unwrap();
+        assert_eq!(names(&merged, HOST), ["echo 0"]);
+        for i in 0..PER_HOST {
+            add(&mut merged, HOST, &format!("new {i}"), B);
+        }
+        Document::compact(merged.hosts.get_mut(HOST).unwrap());
+        assert!(
+            !names(&Document::merged(&merged, &stale).unwrap(), HOST)
+                .contains(&"echo 0".to_owned())
+        );
+    }
+    #[test]
+    fn disabled_recording_does_not_disable_history_management() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut v = Vault::create(
+            &temp.path().join("manage.vault"),
+            b"synthetic-history-manage",
+        )
+        .unwrap();
+        let a = host(&mut v);
+        let b = host(&mut v);
+        let mut history = HistoryRepository::new(&mut v);
+        history.record_qualified(&a.id, "echo shared").unwrap();
+        history.record_qualified(&b.id, "echo shared").unwrap();
+        history.set_enabled(false).unwrap();
+        assert_eq!(
+            history.search_commands("shared", None, 100).unwrap().len(),
+            2
+        );
+        assert!(!history.record_qualified(&a.id, "echo ignored").unwrap());
+        history
+            .delete_commands(Some(&a.id), &["echo shared"])
+            .unwrap();
+        let hits = history.search_commands("shared", None, 100).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].host_id, b.id);
     }
 }

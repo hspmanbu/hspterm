@@ -21,10 +21,19 @@ abstract interface class HistoryControlsGateway {
 }
 
 class NativeHistoryControlsGateway implements HistoryControlsGateway {
-  const NativeHistoryControlsGateway(this.model);
+  NativeHistoryControlsGateway(this.model);
+  String? _scope;
   final LiveWorkbenchModel model;
   @override
-  Future<HistoryControls> load() => rust.commandHistoryControls();
+  Future<HistoryControls> load() async {
+    final value = await model.runLocalSettings(
+      rust.commandHistoryControls,
+      reportFailure: false,
+    );
+    _scope = value.vaultScope;
+    return value;
+  }
+
   @override
   Future<HistoryControls> setEnabled(HistoryControls source, bool value) =>
       model.updateCommandHistory(source, enabled: value);
@@ -35,10 +44,31 @@ class NativeHistoryControlsGateway implements HistoryControlsGateway {
   Future<List<rust.CommandSearchRow>> searchCommands(
     String query,
     String? hostId,
-  ) => rust.searchCommandHistory(query: query, hostId: hostId, limit: 100);
+  ) {
+    if (_scope == null) return Future.error(StateError('请先读取历史设置'));
+    return model.runLocalSettings(
+      () => rust.searchCommandHistory(
+        query: query,
+        hostId: hostId,
+        limit: 100,
+        expectedVaultScope: _scope,
+      ),
+      reportFailure: false,
+    );
+  }
+
   @override
-  Future<int> deleteCommands(List<String> texts, String? hostId) =>
-      rust.deleteCommandHistory(texts: texts, hostId: hostId);
+  Future<int> deleteCommands(List<String> texts, String? hostId) {
+    if (_scope == null) return Future.error(StateError('请先读取历史设置'));
+    return model.runLocalSettings(
+      () => rust.deleteCommandHistory(
+        texts: texts,
+        hostId: hostId,
+        expectedVaultScope: _scope,
+      ),
+      reportFailure: false,
+    );
+  }
 }
 
 /// Metadata only: command contents are never requested or shown here.
@@ -61,7 +91,26 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
   String? _commandHostFilter;
   Timer? _commandDebounce;
   List<rust.CommandSearchRow> _commandResults = const [];
-  final _commandSelected = <String>{};
+  final _commandSelected = <(String, String)>{};
+  bool _commandActive = true;
+
+  void _discardCommands() {
+    _commandEpoch++;
+    _commandDebounce?.cancel();
+    _commandSearch.clear();
+    _commandResults = const [];
+    _commandSelected.clear();
+    _commandLoading = false;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final active = TickerMode.valuesOf(context).enabled;
+    if (_commandActive && !active) _discardCommands();
+    _commandActive = active;
+  }
+
   bool _commandLoading = false;
   int _commandEpoch = 0;
 
@@ -73,7 +122,7 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
 
   @override
   void dispose() {
-    _commandDebounce?.cancel();
+    _discardCommands();
     _commandSearch.dispose();
     _search.dispose();
     super.dispose();
@@ -191,6 +240,7 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
   }
 
   Future<void> _searchCommands() async {
+    if (!_commandActive || !mounted) return;
     final epoch = ++_commandEpoch;
     setState(() => _commandLoading = true);
     try {
@@ -198,34 +248,43 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
         _commandSearch.text,
         _commandHostFilter,
       );
-      if (mounted && epoch == _commandEpoch) {
+      if (mounted && _commandActive && epoch == _commandEpoch) {
         setState(() {
           _commandResults = results;
           _commandSelected.removeWhere(
-            (text) => !results.any((row) => row.text == text),
+            (key) => !results.any((row) => (row.hostId, row.text) == key),
           );
         });
       }
     } catch (_) {
       // Public summary only; the query and results never reach the log.
-      if (mounted && epoch == _commandEpoch) {
+      if (mounted && _commandActive && epoch == _commandEpoch) {
         setState(() => _commandResults = const []);
       }
     } finally {
-      if (mounted && epoch == _commandEpoch) {
+      if (mounted && _commandActive && epoch == _commandEpoch) {
         setState(() => _commandLoading = false);
       }
     }
   }
 
-  Future<void> _deleteCommands(List<String> texts) async {
-    if (texts.isEmpty || _busy) return;
+  Future<void> _deleteCommands(List<(String, String)> rows) async {
+    if (rows.isEmpty || _busy) return;
     setState(() => _busy = true);
     try {
-      final deleted = await widget.gateway.deleteCommands(
-        texts,
-        _commandHostFilter,
-      );
+      var deleted = 0;
+      final grouped = <String, List<String>>{};
+      for (final row in rows) {
+        (grouped[row.$1] ??= []).add(row.$2);
+      }
+      for (final group in grouped.entries) {
+        for (var offset = 0; offset < group.value.length; offset += 32) {
+          deleted += await widget.gateway.deleteCommands(
+            group.value.skip(offset).take(32).toList(),
+            group.key,
+          );
+        }
+      }
       if (mounted) {
         setState(() {
           _status = '已删除 $deleted 条并加密保存删除标记；其他设备的旧同步记录也不会复活。';
@@ -448,14 +507,14 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   key: ValueKey('history-command-row-$i'),
-                  value: _commandSelected.contains(row.text),
+                  value: _commandSelected.contains((row.hostId, row.text)),
                   onChanged: _busy
                       ? null
                       : (checked) => setState(() {
                           if (checked == true) {
-                            _commandSelected.add(row.text);
+                            _commandSelected.add((row.hostId, row.text));
                           } else {
-                            _commandSelected.remove(row.text);
+                            _commandSelected.remove((row.hostId, row.text));
                           }
                         }),
                   title: Text(
@@ -470,7 +529,9 @@ class _HistoryControlsPanelState extends State<HistoryControlsPanel> {
                   subtitle: Text('$hostName · 使用序号 ${row.usedCounter}'),
                   secondary: IconButton(
                     tooltip: '删除该命令记录',
-                    onPressed: _busy ? null : () => _deleteCommands([row.text]),
+                    onPressed: _busy
+                        ? null
+                        : () => _deleteCommands([(row.hostId, row.text)]),
                     icon: const Icon(Icons.delete_outline, size: 18),
                   ),
                 );

@@ -29,26 +29,46 @@ class TerminalSuggestionsOverlay extends StatefulWidget {
 }
 
 /// Always occupies a fixed slot so the row layout does not shift on hover.
-class _CandidateDeleteButton extends StatelessWidget {
-  const _CandidateDeleteButton({required this.onDelete});
+class _CandidateDeleteButton extends StatefulWidget {
+  const _CandidateDeleteButton({required this.onDelete, required this.visible});
   final VoidCallback onDelete;
+  final bool visible;
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 26,
-    height: 24,
-    child: IconButton(
-      tooltip: '删除该历史记录',
-      padding: EdgeInsets.zero,
-      iconSize: 16,
-      onPressed: onDelete,
-      icon: const Icon(Icons.delete_outline),
-    ),
-  );
+  State<_CandidateDeleteButton> createState() => _CandidateDeleteButtonState();
+}
+
+class _CandidateDeleteButtonState extends State<_CandidateDeleteButton> {
+  bool focused = false;
+  @override
+  Widget build(BuildContext context) {
+    final visible = widget.visible || focused;
+    return SizedBox(
+      width: 26,
+      height: 24,
+      child: Focus(
+        onFocusChange: (value) => setState(() => focused = value),
+        child: Opacity(
+          opacity: visible ? 1 : 0,
+          child: IgnorePointer(
+            ignoring: !visible,
+            child: IconButton(
+              tooltip: '删除该历史记录',
+              padding: EdgeInsets.zero,
+              iconSize: 16,
+              onPressed: widget.onDelete,
+              icon: const Icon(Icons.delete_outline),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _TerminalSuggestionsOverlayState
     extends State<TerminalSuggestionsOverlay> {
   final _scroll = ScrollController();
+  int hovered = -1;
   @override
   void initState() {
     super.initState();
@@ -148,41 +168,53 @@ class _TerminalSuggestionsOverlayState
                         controller: _scroll,
                         padding: EdgeInsets.zero,
                         itemCount: choices.length,
-                        itemBuilder: (context, index) => InkWell(
-                          key: ValueKey('history-candidate-$index-$ticket'),
-                          canRequestFocus: false,
-                          onTap: () => widget.choose(index, ticket),
-                          child: Container(
-                            height: 30,
-                            alignment: Alignment.centerLeft,
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            color: index == state.selected
-                                ? Theme.of(context).colorScheme.primary
-                                      .withValues(alpha: .18)
-                                : null,
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Tooltip(
-                                    message: choices[index],
-                                    child: Text(
-                                      choices[index],
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontFamily: 'monospace',
+                        itemBuilder: (context, index) => MouseRegion(
+                          onEnter: (_) => setState(() => hovered = index),
+                          onExit: (_) {
+                            if (hovered == index) setState(() => hovered = -1);
+                          },
+                          child: InkWell(
+                            key: ValueKey('history-candidate-$index-$ticket'),
+                            canRequestFocus: false,
+                            onTap: () => widget.choose(index, ticket),
+                            child: Container(
+                              height: 30,
+                              alignment: Alignment.centerLeft,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              color: index == state.selected
+                                  ? Theme.of(context).colorScheme.primary
+                                        .withValues(alpha: .18)
+                                  : null,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Tooltip(
+                                      message: choices[index],
+                                      child: Text(
+                                        choices[index],
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontFamily: 'monospace',
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                // Round-12: hover-revealed delete; removing
-                                // the tombstoned command never selects or
-                                // executes the row.
-                                _CandidateDeleteButton(
-                                  onDelete: () => widget.delete(index, ticket),
-                                ),
-                              ],
+                                  // Round-12: hover-revealed delete; removing
+                                  // the tombstoned command never selects or
+                                  // executes the row.
+                                  _CandidateDeleteButton(
+                                    visible:
+                                        hovered == index ||
+                                        index == state.selected,
+                                    onDelete: () =>
+                                        widget.delete(index, ticket),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),

@@ -347,6 +347,7 @@ abstract class RustLibApi extends BaseApi {
   Future<int> crateApiDeleteCommandHistory({
     required List<String> texts,
     String? hostId,
+    String? expectedVaultScope,
   });
 
   Future<void> crateApiDeleteHostGroup({required String id});
@@ -945,6 +946,7 @@ abstract class RustLibApi extends BaseApi {
     required String query,
     String? hostId,
     required int limit,
+    String? expectedVaultScope,
   });
 
   Future<SearchSummary> crateApiSearchTerminal({
@@ -3090,6 +3092,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Future<int> crateApiDeleteCommandHistory({
     required List<String> texts,
     String? hostId,
+    String? expectedVaultScope,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -3097,6 +3100,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_list_String(texts, serializer);
           sse_encode_opt_String(hostId, serializer);
+          sse_encode_opt_String(expectedVaultScope, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -3109,7 +3113,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiDeleteCommandHistoryConstMeta,
-        argValues: [texts, hostId],
+        argValues: [texts, hostId, expectedVaultScope],
         apiImpl: this,
       ),
     );
@@ -3118,7 +3122,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiDeleteCommandHistoryConstMeta =>
       const TaskConstMeta(
         debugName: "delete_command_history",
-        argNames: ["texts", "hostId"],
+        argNames: ["texts", "hostId", "expectedVaultScope"],
       );
 
   @override
@@ -7747,6 +7751,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String query,
     String? hostId,
     required int limit,
+    String? expectedVaultScope,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -7755,6 +7760,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(query, serializer);
           sse_encode_opt_String(hostId, serializer);
           sse_encode_u_32(limit, serializer);
+          sse_encode_opt_String(expectedVaultScope, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -7767,7 +7773,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiSearchCommandHistoryConstMeta,
-        argValues: [query, hostId, limit],
+        argValues: [query, hostId, limit, expectedVaultScope],
         apiImpl: this,
       ),
     );
@@ -7776,7 +7782,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSearchCommandHistoryConstMeta =>
       const TaskConstMeta(
         debugName: "search_command_history",
-        argNames: ["query", "hostId", "limit"],
+        argNames: ["query", "hostId", "limit", "expectedVaultScope"],
       );
 
   @override

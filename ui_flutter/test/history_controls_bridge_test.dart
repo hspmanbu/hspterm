@@ -78,6 +78,22 @@ void main() {
         model.updateCommandHistory(all, enabled: true),
         throwsA(anything),
       );
+      await expectLater(
+        rust.searchCommandHistory(
+          query: '',
+          limit: 100,
+          expectedVaultScope: first.vaultScope,
+        ),
+        throwsA(anything),
+      );
+      await expectLater(
+        rust.deleteCommandHistory(
+          texts: ['echo fixture'],
+          hostId: host.id,
+          expectedVaultScope: first.vaultScope,
+        ),
+        throwsA(anything),
+      );
       expect((await rust.commandHistoryControls()).enabled, true);
       await rust.unlockVault(
         path: path,
