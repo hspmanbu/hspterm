@@ -1,4 +1,4 @@
-## 2026-11-11 第十四轮六项反馈修正（静态修改；待Windows CI）
+## 2026-11-11 第十四轮六项反馈修正（源码3033b1f；Windows CI运行中）
 
 - 基于7880c04，仍为fix/round7-windows-feedback；第三阶段内存/稳定性专项继续暂停，未运行本机构建/运行测试。
 - 面包屑：挂载后显式聚焦并全选已加载路径；onTapOutside一次退出，保留RawAutocomplete候选的TapRegion，补首次/20秒闲置后重复进入测试。
@@ -8,7 +8,7 @@
 - 多行粘贴：新增本地行号（逻辑行/软折行位置跟随滚动）、右下角高度拖动条、16/14/12px标题/正文/说明层级、max选区高度/宽度、独立22px滚动条区域及常规鼠标指针。行号/控件不进入确认正文。
 - WebDAV：UI设置/审阅/加密目标校验/实际HTTP客户端同时支持用户明确HTTP和HTTPS；仍禁userinfo/query/fragment/redirect，Drive/OAuth既定HTTPS绑定不变。加入公开构造器HTTP线级测试及provider边界测试，CI明确执行这些过滤用例。
 - 已执行静态复核：FRB2.13正规生成、Dart Analyze零问题、格式；API265/DTO82词法契约零发现，260公共Result错误边界已更新。新增/修订组件、队列、生命周期、HTTP测试源码，尚未执行，不标记通过。
-- 下一步：最后静态复核后提交/推送并dispatch Windows Release CI；恢复先查询新run，禁止重复dispatch。原用户日志/截图/round13未跟踪内容保持原样。
+- 已推送3033b1f，Windows Release CI运行中：https://github.com/hspmanbu/hspterm/actions/runs/42986704180 。下一步先查询此run和实际测试结果，禁止重复dispatch；最终产物尚待确认。原用户日志/截图/round13未跟踪内容保持原样。
 
 ## 2026-11-11 Windows CI恢复交付（源码2d51234，前两阶段；第三阶段暂停）
 
