@@ -573,7 +573,7 @@ packages:
     source: hosted
     version: "0.9.1"
   super_native_extensions:
-    dependency: "direct overridden"
+    dependency: "direct main"
     description:
       path: ".dart_tool/hspterm_native_extensions"
       relative: true

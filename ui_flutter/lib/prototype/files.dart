@@ -2684,10 +2684,10 @@ class _FilesPanelState extends State<FilesPanel> {
                                                     row = Draggable<RemoteDrag>(
                                                       // Secondary clicks belong to the file menu;
                                                       // never enter a drag arena for that button.
-                                                      allowedButtonsFilter: (buttons) =>
-                                                          buttons ==
-                                                              kPrimaryMouseButton &&
-                                                          !explorerExportGesture,
+                                                      allowedButtonsFilter:
+                                                          (buttons) =>
+                                                              buttons ==
+                                                              kPrimaryMouseButton,
                                                       data: RemoteDrag(
                                                         p.id,
                                                         p.path,

@@ -140,6 +140,14 @@ class ExplorerExportBatch {
   }
 
   native.DragItem get first => _items.first;
+  List<native.DragItem> claimItems(native.DragSession owner) {
+    if (_configured || !_ready || _closed || !identical(owner, session)) {
+      throw ExplorerExportCancelled();
+    }
+    _configured = true;
+    return List.unmodifiable(_items);
+  }
+
   native.DragConfiguration? configuration(
     native.DragConfiguration config,
     native.DragSession owner,
