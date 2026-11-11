@@ -118,7 +118,7 @@ jobs:
         run: |
           cargo clippy --workspace --all-targets --locked -- -D warnings
           if ($LASTEXITCODE -ne 0) { throw 'Rust Clippy failed' }
-          cargo test --workspace --lib --locked -- --test-threads=2
+          cargo test --workspace --lib --locked -- --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'Rust library tests failed' }
 
       - name: Analyze Flutter
