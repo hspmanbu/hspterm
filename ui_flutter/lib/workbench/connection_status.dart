@@ -122,14 +122,51 @@ class _WorkbenchConnectionStatusState extends State<WorkbenchConnectionStatus>
         builder: (context, _) {
           final inspection = source.inspection;
           final resource = inspection.summary?.label;
-          return InkWell(
-            key: const ValueKey('remote-inspection-status'),
-            onTap: () => showRemoteInspection(context, source),
-            child: label(
-              '${source.statusLabel} · ${terminalTransportSummary(value)} · ${model.sessions.length} 个终端 · ${model.totalTransferCount} 个任务记录'
-              '${resource == null ? '' : ' · 上次采样 $resource'}'
-              '${inspection.error == null ? '' : ' · 资源检查已暂停'}',
-            ),
+          final details =
+              '${source.statusLabel} · ${terminalTransportSummary(value)} · '
+              '${model.sessions.length} 个终端 · ${model.totalTransferCount} 个任务';
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Flexible(child: label(details)),
+              if (inspection.metrics ||
+                  resource != null ||
+                  inspection.error != null) ...[
+                const SizedBox(width: 12),
+                Flexible(
+                  flex: 2,
+                  child: InkWell(
+                    key: const ValueKey('remote-inspection-status'),
+                    onTap: () => showRemoteInspection(context, source),
+                    child: Tooltip(
+                      message: resource ?? inspection.error ?? '资源采样中',
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        reverse: true,
+                        child: Text(
+                          inspection.error != null
+                              ? '资源采样已暂停'
+                              : resource ?? '资源采样中…',
+                          maxLines: 1,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).hintColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ] else
+                InkWell(
+                  key: const ValueKey('remote-inspection-status'),
+                  onTap: () => showRemoteInspection(context, source),
+                  child: const Padding(
+                    padding: EdgeInsets.only(left: 8),
+                    child: Icon(Icons.monitor_heart_outlined, size: 15),
+                  ),
+                ),
+            ],
           );
         },
       ),

@@ -1,3 +1,4 @@
+import 'image_upload_task.dart';
 import 'staging_cleanup.dart';
 import 'transfer_connections.dart';
 
@@ -40,11 +41,13 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   void initState() {
     super.initState();
     m.localEdits.addListener(_editsChanged);
+    m.imageUploadRevision.addListener(_editsChanged);
   }
 
   @override
   void dispose() {
     m.localEdits.removeListener(_editsChanged);
+    m.imageUploadRevision.removeListener(_editsChanged);
     super.dispose();
   }
 
@@ -96,6 +99,48 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   /// A local-edit task is NOT a download to a user-chosen directory: it is
   /// its own lightweight tile with the edit lifecycle, never the Rust
   /// transfer engine.
+  Widget _imageTile(ImageUploadTask task) {
+    final total = task.total;
+    final progress = total == null
+        ? null
+        : total == 0
+        ? 1.0
+        : (task.done / total).clamp(0.0, 1.0);
+    final detail = '${task.host} · ${task.state}\n${task.path ?? '等待远端安全临时目录'}';
+    return ListTile(
+      dense: true,
+      leading: const Icon(Icons.image_outlined, size: 18),
+      title: Text(
+        'clipboard.png · ${task.state}',
+        style: const TextStyle(fontSize: 12),
+      ),
+      subtitle: Tooltip(
+        message: detail,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '${task.host} · ${task.path ?? '准备远端路径'}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10),
+            ),
+            const SizedBox(height: 4),
+            LinearProgressIndicator(
+              value: task.ended ? (task.succeeded ? 1 : 0) : progress,
+              minHeight: 3,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${progress == null ? '—' : '${(progress * 100).round()}%'} · ${bytes(task.done)} / ${total == null ? '未知大小' : bytes(total)}',
+              style: const TextStyle(fontSize: 10),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _editTile(LocalEditSession edit) {
     final statusText = switch (edit.status) {
       LocalEditStatus.downloading => '下载中',
@@ -944,7 +989,22 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
     final edits = m.localEdits.sessions
         .where((s) => s.status != LocalEditStatus.closed)
         .toList();
+    final images = m.imageUploads
+        .where((t) => m.allTasks || t.session == m.focus?.id)
+        .toList();
     final rows = <Object>[
+      if (images.isNotEmpty) ...[
+        SectionHeading(
+          '图片上传 · ${images.length}',
+          trailing: Tool(
+            Icons.playlist_remove,
+            '清理已结束图片任务',
+            m.clearFinishedImageUploads,
+            size: 14,
+          ),
+        ),
+        ...images,
+      ],
       if (edits.isNotEmpty) ...[
         SectionHeading(
           '本地编辑 · ${edits.length}',
@@ -995,7 +1055,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  '${activity.length} 活动 · ${errors.length} 异常',
+                  '${activity.length + images.where((t) => !t.ended).length} 活动 · ${errors.length + images.where((t) => t.error.isNotEmpty).length} 异常',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1062,7 +1122,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
           ),
         ),
         Expanded(
-          child: list.isEmpty && edits.isEmpty
+          child: list.isEmpty && edits.isEmpty && images.isEmpty
               ? Center(
                   child: Text(
                     m.allTasks ? '暂无传输任务' : '当前会话无任务 · 可切换全部任务',
@@ -1074,6 +1134,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
                   itemBuilder: (_, i) {
                     final row = rows[i];
                     if (row is LocalEditSession) return _editTile(row);
+                    if (row is ImageUploadTask) return _imageTile(row);
                     return row is jobs.TransferTaskView
                         ? item(row)
                         : row as Widget;

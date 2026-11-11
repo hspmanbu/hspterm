@@ -5,18 +5,37 @@ use hspterm_ssh_core::{ManagedSession, SessionPhase};
 use parking_lot::Mutex;
 use rand::RngCore;
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
 use tokio_util::sync::CancellationToken;
+
+struct Progress {
+    generation: u64,
+    local: PathBuf,
+    path: String,
+    done: u64,
+    total: u64,
+}
 
 #[derive(Default)]
 pub(crate) struct Uploads {
     gate: tokio::sync::Mutex<()>,
     active: Mutex<Option<CancellationToken>>,
     channels: crate::transfer_channels::Channels,
+    progress: Mutex<Option<Progress>>,
 }
 impl Uploads {
+    pub(crate) fn progress(&self, generation: u64, local: &Path) -> String {
+        match &*self.progress.lock() {
+            Some(value) if value.generation == generation && value.local == local => {
+                serde_json::json!({"path": value.path, "done": value.done, "total": value.total})
+                    .to_string()
+            }
+            _ => "{}".to_owned(),
+        }
+    }
+
     pub(crate) async fn upload(
         &self,
         session: &ManagedSession,
@@ -36,6 +55,7 @@ impl Uploads {
                 bail!("原图片粘贴会话已断开或改变，未上传");
             }
             *active = Some(stop.clone());
+            self.progress.lock().take();
         }
         let mut states = session.subscribe();
         let changed = async {
@@ -60,8 +80,21 @@ impl Uploads {
                     let mut nonce = [0; 16];
                     rand::rngs::OsRng.try_fill_bytes(&mut nonce)?;
                     let nonce = nonce.iter().map(|b| format!("{b:02x}")).collect::<String>();
-                    Ok(hspterm_ssh_core::clipboard_image::upload(
-                        &remote, local, &nonce, &stop, &budget,
+                    Ok(hspterm_ssh_core::clipboard_image::upload_observed(
+                        &remote,
+                        local,
+                        &nonce,
+                        &stop,
+                        &budget,
+                        |path, value| {
+                            *self.progress.lock() = Some(Progress {
+                                generation,
+                                local: local.to_owned(),
+                                path: path.to_owned(),
+                                done: value.acknowledged,
+                                total: value.total,
+                            });
+                        },
                     )
                     .await?)
                 };
@@ -85,5 +118,27 @@ impl Uploads {
         }
         let _gate = self.gate.lock().await;
         self.channels.retire().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn snapshots_are_bound_to_generation_and_the_exact_local_upload() {
+        let uploads = Uploads::default();
+        *uploads.progress.lock() = Some(Progress {
+            generation: 7,
+            local: PathBuf::from("first.png"),
+            path: "/tmp/private/clipboard.png".into(),
+            done: 512,
+            total: 1024,
+        });
+        assert_eq!(uploads.progress(8, Path::new("first.png")), "{}");
+        assert_eq!(uploads.progress(7, Path::new("next.png")), "{}");
+        let value: serde_json::Value =
+            serde_json::from_str(&uploads.progress(7, Path::new("first.png"))).unwrap();
+        assert_eq!(value["done"], 512);
+        assert_eq!(value["path"], "/tmp/private/clipboard.png");
     }
 }

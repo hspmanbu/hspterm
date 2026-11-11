@@ -526,15 +526,22 @@ class PrototypeAppState extends State<PrototypeApp> {
                         color: Theme.of(context).colorScheme.primary,
                       ),
                       const SizedBox(width: 6),
-                      // Flexible: a long quiet notice ellipsizes instead of
-                      // widening the fixed-height status row.
-                      const Flexible(child: QuietNoticeView()),
                       Text(
-                        m.isMock ? 'UI 原型 · 模拟数据 · 不连接服务器' : 'HSPTerm · SSH',
-                        style: TextStyle(fontSize: 10),
+                        m.isMock ? 'UI 原型 · 模拟数据' : 'HSPTerm',
+                        style: const TextStyle(fontSize: 11),
                       ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: (MediaQuery.sizeOf(context).width * .16).clamp(
+                          0.0,
+                          220.0,
+                        ),
+                        child: const QuietNoticeView(),
+                      ),
+                      const SizedBox(width: 8),
                       if (widget.statusBarBuilder != null)
                         Expanded(
+                          flex: 5,
                           child: Align(
                             alignment: Alignment.centerRight,
                             child: widget.statusBarBuilder!(context),

@@ -1,3 +1,6 @@
+import 'package:hspterm/workbench/queue.dart';
+import 'package:hspterm/workbench/image_upload_task.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -23,6 +26,25 @@ class ImageModel extends PathSessions {
 }
 
 void main() {
+  test('image queue uses actual acknowledged progress and remote location', () {
+    final task = ImageUploadTask('one', 'fixture');
+    task.apply({
+      'path': '/tmp/private/clipboard.png',
+      'done': 128,
+      'total': 1024,
+    });
+    expect(task.done, 128);
+    expect(task.total, 1024);
+    expect(task.path, '/tmp/private/clipboard.png');
+    expect(
+      () => task.apply({'path': '/tmp/x', 'done': 2048, 'total': 1024}),
+      throwsFormatException,
+    );
+    task.ended = true;
+    task.apply({'path': '/tmp/stale', 'done': 0, 'total': 5});
+    expect(task.path, '/tmp/private/clipboard.png');
+  });
+
   test('PNG stream is bounded and refuses truncated, oversized and cancelled input', () async {
     final directory = await Directory.systemTemp.createTemp(
       'image-stream-test-',
@@ -99,6 +121,45 @@ void main() {
         }),
         throwsFormatException,
       );
+    },
+  );
+  testWidgets(
+    'image upload queue updates ACK percentage and remote destination',
+    (tester) async {
+      final source = session('Image', 1, 4);
+      final model = ImageModel([source])..selected = source;
+      final task = ImageUploadTask(source.id, 'Image');
+      task.apply({
+        'path': '/tmp/private/clipboard.png',
+        'done': 1024,
+        'total': 4096,
+      });
+      model.publishImageUpload(task);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: LiveTransferQueue(model: model)),
+        ),
+      );
+      await tester.pump();
+      expect(find.textContaining('/tmp/private/clipboard.png'), findsOneWidget);
+      expect(find.textContaining('25%'), findsOneWidget);
+      task.apply({
+        'path': '/tmp/private/clipboard.png',
+        'done': 2048,
+        'total': 4096,
+      });
+      model.publishImageUpload(task);
+      await tester.pump();
+      expect(find.textContaining('50%'), findsOneWidget);
+      task.ended = true;
+      model.publishImageUpload(task);
+      model.clearFinishedImageUploads();
+      await tester.pump();
+      expect(find.textContaining('/tmp/private/clipboard.png'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await drainAsync(tester, model.shutdown());
+      model.dispose();
     },
   );
   testWidgets(

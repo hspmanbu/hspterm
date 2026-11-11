@@ -1,3 +1,4 @@
+import 'paste_editor.dart';
 import '../prototype/design.dart';
 import 'application_keys.dart';
 import 'ime_buffer.dart';
@@ -1258,31 +1259,38 @@ class _TerminalPastePreviewState extends State<TerminalPastePreview> {
   @override
   Widget build(BuildContext context) => AlertDialog(
     scrollable: true,
-    title: Text('确认粘贴 · $_lines 行 / $_bytes 字节'),
+    title: Text(
+      '确认粘贴 · $_lines 行 / $_bytes 字节',
+      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+    ),
     content: SizedBox(
       width: 600,
-      child: TextField(
-        key: const ValueKey('terminal-paste-editor'),
-        controller: editor,
-        onChanged: (text) => setState(() {
-          var lines = 1;
-          for (var i = 0; i < text.length; i++) {
-            if (text.codeUnitAt(i) == 10 ||
-                (text.codeUnitAt(i) == 13 &&
-                    (i + 1 == text.length || text.codeUnitAt(i + 1) != 10))) {
-              lines++;
-            }
-          }
-          _lines = lines;
-          _bytes = utf8.encode(text).length;
-        }),
-        minLines: 3,
-        maxLines: 12,
-        decoration: InputDecoration(
-          labelText: '预览并编辑粘贴内容',
-          helperText: '目标：${widget.target}。多行内容可能执行多条命令。',
-          helperMaxLines: 2,
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '目标：${widget.target} · 多行内容可能执行多条命令',
+            style: const TextStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          PasteEditor(
+            controller: editor,
+            onChanged: (text) => setState(() {
+              var lines = 1;
+              for (var i = 0; i < text.length; i++) {
+                if (text.codeUnitAt(i) == 10 ||
+                    (text.codeUnitAt(i) == 13 &&
+                        (i + 1 == text.length ||
+                            text.codeUnitAt(i + 1) != 10))) {
+                  lines++;
+                }
+              }
+              _lines = lines;
+              _bytes = utf8.encode(text).length;
+            }),
+          ),
+        ],
       ),
     ),
     actions: [

@@ -153,11 +153,14 @@ class _QuietNoticeViewState extends State<QuietNoticeView> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Flexible(
-            child: Text(
-              notice.message,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: color),
+            child: Tooltip(
+              message: notice.message,
+              child: Text(
+                compactNotice(notice.message),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: color),
+              ),
             ),
           ),
           if (notice.action case final action?)
@@ -166,4 +169,12 @@ class _QuietNoticeViewState extends State<QuietNoticeView> {
       ),
     );
   }
+}
+
+/// Keep routine status text compact; retain the full text in its tooltip.
+String compactNotice(String text) {
+  final first = text.split(RegExp(r'[；;\n]')).first.trim();
+  return first.runes.length <= 18
+      ? first
+      : '${String.fromCharCodes(first.runes.take(17))}…';
 }

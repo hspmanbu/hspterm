@@ -362,7 +362,7 @@ fn validation_and_post_sync_key_changes_do_not_destroy_an_existing_collection() 
     assert!(matches!(save(&mut v, p), Err(SyncError::KeyChange)));
     assert!(v.get(SECRET).unwrap().unwrap().as_slice() == original.as_slice());
     for endpoint in [
-        "http://127.0.0.1/object",
+        "ftp://127.0.0.1/object",
         "https://user:secret@fixture.invalid/object",
         "https://fixture.invalid/object?secret=value",
     ] {
@@ -431,4 +431,14 @@ fn target_disable_and_auth_changes_retire_captured_cloud_results_even_without_a_
         baseline.prepare_apply(&v, &captured, captured.document(), None, now),
         Err(SyncError::Changed)
     ));
+}
+
+#[test]
+fn webdav_http_targets_remain_valid_without_relaxing_drive_endpoint_binding() {
+    let mut webdav = target();
+    webdav.endpoint = "http://dav.internal/config.enc".into();
+    assert!(webdav.checked().is_ok());
+    let mut drive = drive_target();
+    drive.endpoint = drive.endpoint.replacen("https://", "http://", 1);
+    assert!(drive.checked().is_err());
 }

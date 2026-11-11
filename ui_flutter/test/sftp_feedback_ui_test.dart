@@ -20,6 +20,34 @@ Future<void> mount(WidgetTester tester, WorkbenchModel model) async {
 
 void main() {
   testWidgets(
+    'first and idle path entry selects all and one outside click exits',
+    (tester) async {
+      final model = WorkbenchModel()..demo();
+      model.focus!.path = '/home/first';
+      await mount(tester, model);
+      for (var attempt = 0; attempt < 2; attempt++) {
+        await tester.tap(find.byKey(const ValueKey('sftp-path-edit-space')));
+        await tester.pumpAndSettle();
+        final field = tester.widget<TextField>(
+          find.byKey(const ValueKey('remote-path')),
+        );
+        expect(field.focusNode!.hasFocus, isTrue);
+        expect(
+          field.controller!.selection,
+          const TextSelection(baseOffset: 0, extentOffset: 11),
+        );
+        await tester.tapAt(
+          tester.getTopLeft(find.byType(FilesPanel)) + const Offset(12, 12),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('remote-path')), findsNothing);
+        await tester.pump(const Duration(seconds: 20));
+      }
+      await tester.pumpWidget(const SizedBox());
+      model.dispose();
+    },
+  );
+  testWidgets(
     'deep breadcrumbs reserve an edit hit zone and discard an invalid address',
     (tester) async {
       final model = WorkbenchModel()..demo();
@@ -30,14 +58,6 @@ void main() {
       expect(tester.getSize(space).width, 28);
       await tester.tap(space);
       await tester.pumpAndSettle();
-      // ignore: avoid_print
-      print('EDITING=${find.byKey(const ValueKey('remote-path')).evaluate().length} BAR=${find.byKey(const ValueKey('sftp-path-bar')).evaluate().length} TF=${find.byType(TextField).evaluate().length}');
-      final tfs = tester.widgetList<TextField>(find.byType(TextField));
-      // ignore: avoid_print
-      for (final tf in tfs) {
-        // ignore: avoid_print
-        print('TF_TEXT=[${tf.controller?.text}] LOADED=[$loaded] SAME=${tf.controller?.text == loaded}');
-      }
       final address = find.byWidgetPredicate(
         (w) => w is TextField && w.controller?.text == loaded,
       );

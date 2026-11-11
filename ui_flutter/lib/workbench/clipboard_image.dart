@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'image_upload_task.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -95,6 +99,7 @@ Future<void> pasteClipboardImage(
   ClipboardImageReader? read,
   ClipboardImageUploader? upload,
   ClipboardImagePaster? paste,
+  Future<String> Function(int, int, String)? progressReader,
 }) async {
   final controller = source.controller;
   final id = controller.id, generation = controller.generation;
@@ -108,6 +113,40 @@ Future<void> pasteClipboardImage(
   if (id == null || !current()) throw StateError('请先聚焦已连接的SSH终端');
   if (!model.beginImagePaste(source.id)) return;
   Directory? directory;
+  final task = ImageUploadTask(source.id, source.host.name);
+  model.publishImageUpload(task);
+  Timer? progressTimer;
+  Future<void>? progressWork;
+  var observing = true, polling = false;
+  String? localImage;
+  void poll() {
+    if (!observing || polling || localImage == null) return;
+    if (model.isClosing) {
+      progressTimer?.cancel();
+      return;
+    }
+    polling = true;
+    progressWork = () async {
+      try {
+        final raw =
+            await (progressReader?.call(id, generation, localImage!) ??
+                rust.clipboardImageProgress(
+                  id: id,
+                  generation: generation,
+                  localPath: localImage!,
+                ));
+        if (!observing || model.isClosing) return;
+        task.apply(jsonDecode(raw) as Map<String, dynamic>);
+        model.publishImageUpload(task);
+      } catch (_) {
+        // Progress is advisory; the owned upload remains the authority for
+        // completion/error. Keep its last acknowledged snapshot on failure.
+      } finally {
+        polling = false;
+      }
+    }();
+  }
+
   try {
     await model.runTransferSubmission(() async {
       directory = await Directory.systemTemp.createTemp(
@@ -121,6 +160,16 @@ Future<void> pasteClipboardImage(
         return;
       }
       if (!current()) throw StateError('原终端已改变，未上传图片');
+      localImage = file.path;
+      task.total = await file.length();
+      task.state = '等待上传';
+      model.publishImageUpload(task);
+      if (upload == null || progressReader != null) {
+        progressTimer = Timer.periodic(
+          const Duration(milliseconds: 250),
+          (_) => poll(),
+        );
+      }
       final path =
           await (upload?.call(id, generation, file.path) ??
               rust.uploadClipboardImage(
@@ -134,11 +183,17 @@ Future<void> pasteClipboardImage(
           path.contains('\r')) {
         throw StateError('远端返回的图片路径无效，未输入');
       }
+      task.path = path;
+      task.done = task.total ?? 0;
+      task.state = '已上传';
+      task.ended = true;
+      model.publishImageUpload(task);
+
       if (!current()) {
         if (context.mounted) {
           showAppNotice(
             context,
-            '图片已上传，原终端焦点或连接已改变，未输入路径。',
+            '图片已上传，终端已切换；未输入路径',
             level: AppNoticeLevel.warning,
             action: SnackBarAction(
               label: '复制图片路径',
@@ -162,14 +217,22 @@ Future<void> pasteClipboardImage(
             ));
       });
       if (context.mounted) {
-        showAppNotice(
-          context,
-          '图片已上传，已填入绝对路径；未按回车。',
-          level: AppNoticeLevel.success,
-        );
+        showAppNotice(context, '图片已上传并填入路径，未执行', level: AppNoticeLevel.success);
       }
     });
+  } catch (error) {
+    if (!task.ended) {
+      task.error = '上传失败';
+      task.state = '上传失败';
+    }
+    rethrow;
   } finally {
+    observing = false;
+    progressTimer?.cancel();
+    await progressWork;
+    task.ended = true;
+    if (task.path == null && task.error.isEmpty) task.state = '无图片';
+    model.publishImageUpload(task);
     try {
       if (directory != null) await directory!.delete(recursive: true);
     } finally {

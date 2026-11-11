@@ -66,7 +66,9 @@ class ConfigurationSyncSettings {
         }
       }
       if (uri == null ||
-          uri.scheme != 'https' ||
+          !(drive != null ? {'https'} : {'http', 'https'}).contains(
+            uri.scheme,
+          ) ||
           uri.host.isEmpty ||
           uri.userInfo.isNotEmpty ||
           uri.hasQuery ||
@@ -534,14 +536,15 @@ class _ConfigurationSyncSettingsPanelState
             if (_source != null) ...[
               _check('启用此同步目标', _enabled, (v) => _enabled = v),
               _field(
-                _editingWebDav ? 'WebDAV HTTPS 文件地址' : 'Drive 对象地址（只读）',
+                _editingWebDav ? 'WebDAV 文件地址（HTTP / HTTPS）' : 'Drive 对象地址（只读）',
                 _endpoint,
                 readOnly: !_editingWebDav,
-                help: '填写文件对象地址，不能只填目录；不在地址中填写密码或查询参数',
+                help: '填写文件地址；HTTP不保护WebDAV登录信息，配置内容仍端到端加密',
                 validator: (v) {
                   final uri = Uri.tryParse(v ?? '');
                   return uri == null ||
-                          uri.scheme != 'https' ||
+                          !(_editingWebDav ? {'http', 'https'} : {'https'})
+                              .contains(uri.scheme) ||
                           uri.host.isEmpty ||
                           uri.userInfo.isNotEmpty ||
                           uri.hasQuery ||
@@ -549,7 +552,7 @@ class _ConfigurationSyncSettingsPanelState
                           uri.path.isEmpty ||
                           uri.path.endsWith('/') ||
                           utf8.encode(v!).length > 8192
-                      ? '请填写完整 HTTPS 文件地址'
+                      ? '请填写完整 HTTP / HTTPS 文件地址'
                       : null;
                 },
               ),

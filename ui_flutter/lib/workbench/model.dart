@@ -1,3 +1,4 @@
+import 'image_upload_task.dart';
 import '../app_notice.dart';
 import '../run_log.dart';
 import 'staging_cleanup_port.dart';
@@ -244,6 +245,26 @@ LiveTerminalSession? chooseTransferConnection(
 }
 
 class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
+  final imageUploads = <ImageUploadTask>[];
+  final imageUploadRevision = ValueNotifier<int>(0);
+  void clearFinishedImageUploads() {
+    if (isClosing) return;
+    imageUploads.removeWhere((task) => task.ended);
+    imageUploadRevision.value++;
+    notifyListeners();
+  }
+
+  void publishImageUpload(ImageUploadTask task) {
+    if (isClosing) return;
+    final added = !imageUploads.contains(task);
+    if (added) {
+      imageUploads.removeWhere((old) => old.ended && imageUploads.length >= 32);
+      imageUploads.add(task);
+    }
+    imageUploadRevision.value++;
+    if (added) notifyListeners();
+  }
+
   final _imagePastes = <String>{};
   bool beginImagePaste(String session) =>
       !isClosing && _imagePastes.add(session);
@@ -1105,7 +1126,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   @override
   int get activeTransferCount => transferTasks.where((t) => t.busy).length;
   @override
-  int get totalTransferCount => transferTasks.length;
+  int get totalTransferCount => transferTasks.length + imageUploads.length;
   @override
   bool get hasTransferErrors =>
       transferTasks.any((t) => t.state == 'Partial' || t.state == 'Failed');
@@ -2981,6 +3002,8 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     typography.removeListener(_typographyChanged);
     unawaited(
       shutdown().whenComplete(() {
+        imageUploadRevision.dispose();
+        imageUploads.clear();
         typography.dispose();
         appearance.removeListener(_appearanceChanged);
         appearance.dispose();

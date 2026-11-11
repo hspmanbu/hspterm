@@ -32,7 +32,7 @@ class SyncReview {
     }
     final uri = Uri.tryParse(endpoint);
     if (uri == null ||
-        uri.scheme != 'https' ||
+        !{'http', 'https'}.contains(uri.scheme) ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty ||
         uri.hasQuery ||

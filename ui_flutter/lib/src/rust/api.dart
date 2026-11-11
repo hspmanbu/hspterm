@@ -1133,6 +1133,17 @@ Future<void> saveResourceBarPreference({
   enabled: enabled,
 );
 
+/// Small generation-bound ACK snapshot; contains no clipboard pixels or text.
+Future<String> clipboardImageProgress({
+  required int id,
+  required int generation,
+  required String localPath,
+}) => RustLib.instance.api.crateApiClipboardImageProgress(
+  id: id,
+  generation: generation,
+  localPath: localPath,
+);
+
 Future<String> uploadClipboardImage({
   required int id,
   required int generation,

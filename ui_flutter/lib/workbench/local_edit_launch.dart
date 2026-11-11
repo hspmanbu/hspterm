@@ -418,7 +418,7 @@ class LocalEditSession extends ChangeNotifier {
     void Function(String message)? onNotice,
     Directory? rootOverride,
     Future<bool> Function(Uri uri)? launchOverride,
-    void Function(LocalEditSession session)? onSession,
+    FutureOr<void> Function(LocalEditSession session)? onSession,
     Future<LocalEditConflictDecision?> Function(String remotePath)? onConflict,
     bool Function(int native, int generation)? overwriteAllowed,
     void Function(int native, int generation)? allowOverwrite,
@@ -469,7 +469,7 @@ class LocalEditSession extends ChangeNotifier {
     final initialization = Completer<void>();
     session._initialization = initialization.future;
     try {
-      onSession?.call(session);
+      await onSession?.call(session);
       session._requireOpen();
       await gateway.downloadTo(
         native,
@@ -922,6 +922,39 @@ class LocalEditRegistry extends ChangeNotifier {
     _changed();
   }
 
+  final _replacements = <(int, int, String), Future<void>>{};
+  bool hasMatching(LiveTerminalSession source, String path) => _sessions.any(
+    (s) =>
+        s._native == source.controller.id &&
+        s._originGeneration == source.controller.generation &&
+        s.remotePath == path,
+  );
+
+  /// Serialize reopen for this exact transport/generation/path. The old editor
+  /// drains its upload and preserves unsynced drafts before the new download.
+  Future<void> registerReplacing(LocalEditSession session) async {
+    final key = (
+      session._native,
+      session._originGeneration,
+      session.remotePath,
+    );
+    final previous = _replacements[key];
+    final done = Completer<void>();
+    _replacements[key] = done.future;
+    try {
+      await previous;
+      for (final old in List<LocalEditSession>.of(_sessions)) {
+        if ((old._native, old._originGeneration, old.remotePath) == key) {
+          await old.dispose();
+        }
+      }
+      register(session);
+    } finally {
+      done.complete();
+      if (identical(_replacements[key], done.future)) _replacements.remove(key);
+    }
+  }
+
   void _retire(LocalEditSession session, Future<void> closing) {
     _sessions.remove(session);
     session.removeListener(_changed);
@@ -982,7 +1015,8 @@ Future<void> openLocalEdit(
   DemoFile file,
 ) async {
   try {
-    if (model.localEdits.isFull) {
+    if (model.localEdits.isFull &&
+        !model.localEdits.hasMatching(source, file.id)) {
       if (context.mounted) {
         showAppNotice(
           context,
@@ -1000,7 +1034,7 @@ Future<void> openLocalEdit(
           showAppNotice(context, message, level: AppNoticeLevel.warning);
         }
       },
-      onSession: model.localEdits.register,
+      onSession: model.localEdits.registerReplacing,
       overwriteAllowed: model.localEdits.overwriteAllowed,
       allowOverwrite: model.localEdits.allowOverwrite,
       onConflict: (remotePath) async {
@@ -1043,7 +1077,7 @@ Future<void> openLocalEdit(
       },
     );
     if (context.mounted) {
-      showAppNotice(context, '已在本地编辑器打开；保存后自动上传，远端变更将提示冲突');
+      showAppNotice(context, '已打开编辑器，保存后自动上传');
     }
   } catch (error) {
     if (context.mounted) {

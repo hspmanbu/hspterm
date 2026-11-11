@@ -48,6 +48,17 @@ pub async fn upload(
     stop: &CancellationToken,
     limiter: &BandwidthLimiter,
 ) -> Result<String> {
+    upload_observed(sftp, source, nonce, stop, limiter, |_, _| {}).await
+}
+
+pub async fn upload_observed(
+    sftp: &SftpSession,
+    source: &Path,
+    nonce: &str,
+    stop: &CancellationToken,
+    limiter: &BandwidthLimiter,
+    mut progress: impl FnMut(&str, transfer::FileProgress),
+) -> Result<String> {
     if nonce.len() != 32 || !nonce.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(ImageUploadError::InvalidImage);
     }
@@ -115,13 +126,20 @@ pub async fn upload(
         if !safe {
             return Err(ImageUploadError::UnsafeDirectory);
         }
+        progress(
+            &path,
+            transfer::FileProgress {
+                acknowledged: 0,
+                total: metadata.len(),
+            },
+        );
         transfer::upload_file_limited(
             sftp,
             source,
             &path,
             FileDisposition::Resume { offset: 0 },
             stop,
-            |_| {},
+            |value| progress(&path, value),
             limiter,
         )
         .await?;

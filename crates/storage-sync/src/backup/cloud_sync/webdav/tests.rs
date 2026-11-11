@@ -48,7 +48,7 @@ async fn server(reply: Vec<u8>) -> (String, JoinHandle<Vec<u8>>) {
     (format!("http://{address}/private-object.hspconfig"), worker)
 }
 fn client(endpoint: &str) -> WebDav {
-    WebDav::build(
+    WebDav::new(
         endpoint,
         Some(Authentication {
             username: "synthetic-user".into(),
@@ -56,7 +56,6 @@ fn client(endpoint: &str) -> WebDav {
         }),
         None,
         3,
-        true,
     )
     .unwrap()
 }
@@ -185,8 +184,8 @@ async fn writes_always_send_exact_conditions_and_missing_ack_or_412_cannot_advan
     worker.await.unwrap();
 }
 #[tokio::test]
-async fn cancellation_does_not_launch_a_request_and_production_config_rejects_plaintext_or_userinfo()
- {
+async fn cancellation_does_not_launch_a_request_and_config_rejects_unsupported_schemes_or_userinfo()
+{
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/object", listener.local_addr().unwrap());
     let transport = client(&endpoint);
@@ -208,7 +207,7 @@ async fn cancellation_does_not_launch_a_request_and_production_config_rejects_pl
             .is_err()
     );
     for endpoint in [
-        "http://127.0.0.1/object",
+        "ftp://127.0.0.1/object",
         "https://user:password@fixture.invalid/object",
         "https://fixture.invalid/object?secret=value",
         "https://fixture.invalid/dir/",
@@ -224,7 +223,7 @@ async fn an_explicit_http_proxy_failure_never_falls_back_to_the_target_socket() 
     let mut proxy_address = Url::parse(&proxy_url).unwrap();
     proxy_address.set_path("");
     let endpoint = format!("http://{}/object", target.local_addr().unwrap());
-    let transport = WebDav::build(
+    let transport = WebDav::new(
         &endpoint,
         None,
         Some(IndependentProxy {
@@ -233,7 +232,6 @@ async fn an_explicit_http_proxy_failure_never_falls_back_to_the_target_socket() 
             password: Zeroizing::new("synthetic-proxy-pass".into()),
         }),
         3,
-        true,
     )
     .unwrap();
     assert!(transport.read(&CancellationToken::new()).await.is_err());
@@ -301,4 +299,24 @@ async fn socks5_authentication_and_target_dns_stay_on_the_independent_proxy() {
         .await
         .unwrap()
         .unwrap();
+}
+
+#[test]
+fn public_webdav_accepts_explicit_http_without_relaxing_url_boundaries() {
+    for endpoint in [
+        "http://127.0.0.1/object",
+        "http://dav.internal/config.enc",
+        "https://dav.internal/config.enc",
+    ] {
+        assert!(WebDav::new(endpoint, None, None, 3).is_ok());
+        assert!(checked_endpoint(endpoint).is_ok());
+    }
+    for endpoint in [
+        "http://user:secret@dav.internal/object",
+        "http://dav.internal/dir/",
+        "http://dav.internal/object?token=x",
+        "file:///tmp/object",
+    ] {
+        assert!(checked_endpoint(endpoint).is_err());
+    }
 }

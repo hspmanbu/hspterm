@@ -4717,6 +4717,25 @@ pub async fn save_resource_bar_preference(
     crate::public_errors::finish(outcome)
 }
 
+/// Small generation-bound ACK snapshot; contains no clipboard pixels or text.
+pub async fn clipboard_image_progress(
+    id: u32,
+    generation: u64,
+    local_path: String,
+) -> Result<String> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        let e = entry(id)?;
+        if e.session.status().generation != generation {
+            bail!("原图片粘贴会话已改变");
+        }
+        Ok(e.image_uploads
+            .progress(generation, std::path::Path::new(&local_path)))
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
 pub async fn upload_clipboard_image(
     id: u32,
     generation: u64,

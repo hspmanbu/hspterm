@@ -58,18 +58,12 @@ pub(super) fn valid_auth(username: &str, password: &str) -> bool {
         && password.len() <= 4096
         && !password.chars().any(char::is_control)
 }
-fn exact_url(value: &str, allow_test_loopback: bool) -> Result<Url> {
+fn exact_url(value: &str) -> Result<Url> {
     if value.len() > 8192 || value.chars().any(char::is_control) {
         return Err(TransportError::Configuration);
     }
     let url = Url::parse(value).map_err(|_| TransportError::Configuration)?;
-    let loopback = allow_test_loopback
-        && url.scheme() == "http"
-        && url
-            .host_str()
-            .and_then(|s| s.parse::<std::net::IpAddr>().ok())
-            .is_some_and(|ip| ip.is_loopback());
-    if url.scheme() != "https" && !loopback
+    if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
@@ -83,7 +77,7 @@ fn exact_url(value: &str, allow_test_loopback: bool) -> Result<Url> {
     Ok(url)
 }
 pub(super) fn checked_endpoint(value: &str) -> Result<String> {
-    let result = exact_url(value, false)?.to_string();
+    let result = exact_url(value)?.to_string();
     if result.len() > 8192 {
         return Err(TransportError::Configuration);
     }
@@ -106,12 +100,12 @@ pub(super) fn checked_proxy(value: &str) -> Result<bool> {
     }
     Ok(url.scheme() == "socks5h")
 }
-/// One transport policy shared by WebDAV, OAuth and Drive. Test-only HTTP is
-/// selected only by private constructors; public clients remain HTTPS-only.
+/// OAuth/Drive keep HTTPS-only clients. WebDAV explicitly permits HTTP URLs
+/// chosen by the user; redirects remain disabled for both protocols.
 pub(super) fn client(
     proxy: Option<IndependentProxy>,
     timeout_seconds: u32,
-    allow_test_loopback: bool,
+    allow_http: bool,
 ) -> Result<Client> {
     if !(1..=300).contains(&timeout_seconds) {
         return Err(TransportError::Configuration);
@@ -127,7 +121,7 @@ pub(super) fn client(
     });
     let mut builder = Client::builder()
         .tls_backend_rustls()
-        .https_only(!allow_test_loopback)
+        .https_only(!allow_http)
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .referer(false)
@@ -171,15 +165,6 @@ impl WebDav {
         proxy: Option<IndependentProxy>,
         timeout_seconds: u32,
     ) -> Result<Self> {
-        Self::build(endpoint, authentication, proxy, timeout_seconds, false)
-    }
-    fn build(
-        endpoint: &str,
-        authentication: Option<Authentication>,
-        proxy: Option<IndependentProxy>,
-        timeout_seconds: u32,
-        allow_test_loopback: bool,
-    ) -> Result<Self> {
         if !(1..=300).contains(&timeout_seconds)
             || authentication
                 .as_ref()
@@ -187,8 +172,8 @@ impl WebDav {
         {
             return Err(TransportError::Configuration);
         }
-        let endpoint = exact_url(endpoint, allow_test_loopback)?;
-        let client = client(proxy, timeout_seconds, allow_test_loopback)?;
+        let endpoint = exact_url(endpoint)?;
+        let client = client(proxy, timeout_seconds, endpoint.scheme() == "http")?;
         Ok(Self {
             client,
             endpoint,

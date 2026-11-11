@@ -195,6 +195,41 @@ void main() {
     return taskDir.listSync().single as File;
   }
 
+  test('reopening the same transport file retires its old editor and keeps its draft', () async {
+    final source = await connectedSession();
+    final registry = LocalEditRegistry();
+    Future<LocalEditSession> open() async {
+      late LocalEditSession result;
+      await LocalEditSession.launch(
+        source,
+        DemoFile('/dir/a.txt', 'a.txt', byteSize: 5),
+        gateway: gateway,
+        rootOverride: root,
+        launchOverride: (_) async => true,
+        onSession: (session) async {
+          result = session;
+          created.add(session);
+          await registry.registerReplacing(session);
+        },
+      );
+      return result;
+    }
+
+    try {
+      final first = await open();
+      await first.localFile.writeAsString('unsynced draft');
+      final next = await open();
+      expect(registry.sessions, [next]);
+      expect(first.isDisposed, isTrue);
+      expect(first.hasSessionListeners, isFalse);
+      expect(await first.localFile.readAsString(), 'unsynced draft');
+    } finally {
+      await registry.disposeAll();
+      registry.dispose();
+      await source.controller.shutdown();
+      source.controller.dispose();
+    }
+  });
   test('sanitizeLocalName keeps extension and blocks traversal', () {
     expect(sanitizeLocalName('report.txt'), 'report.txt');
     expect(sanitizeLocalName('..'), isNot('..'));

@@ -19,7 +19,7 @@ pub struct ProxyTarget {
 #[serde(deny_unknown_fields)]
 pub struct Target {
     pub enabled: bool,
-    /// Exact HTTPS object, validated against the chosen provider. Drive has
+    /// Exact WebDAV HTTP(S) or Drive HTTPS object, validated against the chosen provider. Drive has
     /// explicit metadata and cannot silently be sent through the WebDAV client.
     pub endpoint: String,
     pub collection: String,

@@ -1,3 +1,11 @@
+import 'dart:convert';
+
+import 'package:hspterm/workbench/model.dart';
+import 'package:hspterm/workbench/remote_inspection.dart';
+
+import 'transfer_connection_selection_test.dart' show session;
+import 'support/terminal_cleanup.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hspterm/src/rust/api.dart' as rust;
@@ -6,7 +14,74 @@ import 'package:hspterm/workbench/connection_status.dart';
 
 import 'support/fake_backend.dart';
 
+class _StatusModel extends LiveWorkbenchModel {
+  _StatusModel(this.source);
+  final LiveTerminalSession source;
+  @override
+  LiveTerminalSession get focus => source;
+}
+
 void main() {
+  testWidgets(
+    'resource metrics stay on the right and scroll instead of ellipsizing',
+    (tester) async {
+      final source = session('Fixture', 1, 4);
+      final model = _StatusModel(source);
+      source.inspection.metrics = true;
+      source.inspection.summary = RemoteResourceSummary(
+        RemoteResourceSample.parse(
+          jsonEncode({
+            'version': 1,
+            'boot': '01234567-89ab-cdef-0123-456789abcdef',
+            'millis': 1000,
+            'cpu_total': 100,
+            'cpu_idle': 20,
+            'memory_total': 1024,
+            'memory_available': 256,
+            'disk_total': 2048,
+            'disk_available': 512,
+            'rx': 1024,
+            'tx': 512,
+          }),
+        ),
+        null,
+      );
+      try {
+        for (final width in [760.0, 420.0]) {
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: SizedBox(
+                  width: width,
+                  height: 34,
+                  child: WorkbenchConnectionStatus(model: model),
+                ),
+              ),
+            ),
+          );
+          await tester.pump();
+          final resource = find.byType(SingleChildScrollView);
+          expect(resource, findsOneWidget);
+          expect(
+            tester.getRect(resource).right,
+            closeTo(
+              tester.getRect(find.byType(WorkbenchConnectionStatus)).right,
+              1,
+            ),
+          );
+          expect(find.textContaining('内存 75%'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        }
+      } finally {
+        await tester.pumpWidget(const SizedBox());
+        await drainAsync(tester, model.shutdown());
+        model.dispose();
+        await closeTerminal(tester, source.controller);
+        source.disposeInspection();
+      }
+    },
+  );
+
   test('RTT is explicit about unknown samples and PTY dimensions come from accepted frames', () {
     expect(
       terminalTransportSummary((

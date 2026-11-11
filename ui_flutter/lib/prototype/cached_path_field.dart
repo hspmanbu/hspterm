@@ -148,6 +148,17 @@ class _CachedPathFieldState extends State<CachedPathField> {
   void initState() {
     super.initState();
     widget.controller.addListener(_controllerChanged);
+    // Focus and selection must land after the replacement field attaches.
+    // Desktop autofocus/gesture selection can otherwise collapse the first
+    // selection and leave keyboard focus on the old directory list.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+      widget.controller.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: widget.controller.text.length,
+      );
+    });
     _focus.addListener(() {
       if (!_focus.hasFocus) {
         _invalidate();
@@ -197,7 +208,11 @@ class _CachedPathFieldState extends State<CachedPathField> {
           controller: controller,
           focusNode: focus,
           // Entering edit moves the keyboard focus straight into the field.
-          autofocus: true,
+          autofocus: false,
+          onTapOutside: (_) {
+            _focus.unfocus();
+            widget.onFocusLost?.call();
+          },
           style: const TextStyle(fontSize: 11, fontFamily: 'JetBrainsMono'),
           // Keep the themed filled/bordered box and its symmetric padding so the
           // editor fills the address-bar height instead of a raised small input.
