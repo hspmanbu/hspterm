@@ -23,7 +23,8 @@ import 'explorer_cache_cleanup.dart';
 import '../app_notice.dart';
 
 class LiveTransferQueue extends StatefulWidget {
-  const LiveTransferQueue({super.key, required this.model});
+  const LiveTransferQueue({super.key, required this.model, this.launchLocal});
+  final Future<bool> Function(Uri)? launchLocal;
   final LiveWorkbenchModel model;
   @override
   State<LiveTransferQueue> createState() => _LiveTransferQueueState();
@@ -144,7 +145,11 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
               }),
             ),
           ),
-          Tool(Icons.folder_open, '打开所在文件夹', () => run(_revealFile(edit))),
+          Tool(
+            Icons.folder_open,
+            '打开所在文件夹',
+            () => run(_revealFile(edit.localFile)),
+          ),
           PopupMenuButton<String>(
             tooltip: '本地编辑任务',
             itemBuilder: (_) => const [
@@ -162,7 +167,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
                     ),
                   );
                 case 'folder':
-                  run(_revealFile(edit));
+                  run(_revealFile(edit.localFile));
                 case 'close':
                   run(
                     Future<void>(() async {
@@ -182,8 +187,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   /// preselected; `explorer /select` is only a fallback because a reused
   /// Explorer process exits non-zero even on success, and a plain folder
   /// open is the last resort when selection cannot be done at all.
-  Future<void> _revealFile(LocalEditSession edit) async {
-    final file = edit.localFile;
+  Future<void> _revealFile(File file) async {
     final dir = file.parent.path;
     if (Platform.isWindows) {
       if (!file.parent.existsSync()) {
@@ -215,7 +219,42 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       }
       return;
     }
-    await launchUrl(Uri.directory(dir), mode: LaunchMode.externalApplication);
+    await _launchLocal(Uri.directory(dir));
+  }
+
+  Future<void> _launchLocal(Uri uri) async {
+    final opened =
+        await (widget.launchLocal?.call(uri) ??
+            launchUrl(uri, mode: LaunchMode.externalApplication));
+    if (!opened) throw StateError('系统未打开本地文件或目录');
+  }
+
+  bool _canOpenDownload(jobs.TransferTaskView task) =>
+      !task.upload &&
+      !task.busy &&
+      task.sourceRemote == null &&
+      task.remoteTransport != 'explorer_snapshot' &&
+      (task.state == 'Complete' ||
+          task.folder && task.state == 'CompleteWithSkips');
+
+  Future<void> _openDownload(
+    jobs.TransferTaskView task, {
+    bool reveal = false,
+  }) async {
+    if (!_canOpenDownload(task)) throw StateError('当前任务尚未完成本地下载');
+    final type = await FileSystemEntity.type(task.local, followLinks: false);
+    if (task.folder
+        ? type != FileSystemEntityType.directory
+        : type != FileSystemEntityType.file) {
+      throw StateError('下载文件或目录已不存在，或已被替换');
+    }
+    if (task.folder) {
+      await _launchLocal(Uri.directory(Directory(task.local).absolute.path));
+    } else if (reveal) {
+      await _revealFile(File(task.local));
+    } else {
+      await _launchLocal(Uri.file(File(task.local).absolute.path));
+    }
   }
 
   final _operations = <String>{};
@@ -396,6 +435,14 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       context: context,
       position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy),
       items: [
+        if (_canOpenDownload(t)) ...[
+          DeskMenuItem(
+            value: 'open-local',
+            child: Text(t.folder ? '打开目录' : '打开文件'),
+          ),
+          if (!t.folder)
+            const DeskMenuItem(value: 'reveal-local', child: Text('打开所在文件夹')),
+        ],
         if (t.remoteTransport == 'explorer_snapshot' &&
             m.hasPendingExternalDelivery)
           const DeskMenuItem(
@@ -426,7 +473,9 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       ],
     );
     if (command != null && mounted) {
-      if (command == 'end-explorer') {
+      if (command == 'open-local' || command == 'reveal-local') {
+        await _openDownload(t, reveal: command == 'reveal-local');
+      } else if (command == 'end-explorer') {
         if (await confirm(
           context,
           '结束所有当前Explorer交付？',
@@ -708,6 +757,21 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
                       ),
                     ),
                     Text(label(t), style: TextStyle(fontSize: 9, color: color)),
+                    if (_canOpenDownload(t)) ...[
+                      Tool(
+                        t.folder ? Icons.folder_open : Icons.open_in_new,
+                        t.folder ? '打开目录' : '打开文件',
+                        () => run(_openDownload(t)),
+                        size: 13,
+                      ),
+                      if (!t.folder)
+                        Tool(
+                          Icons.folder_open,
+                          '打开所在文件夹',
+                          () => run(_openDownload(t, reveal: true)),
+                          size: 13,
+                        ),
+                    ],
                     if (uncertainMove(t))
                       Tool(
                         Icons.fact_check_outlined,

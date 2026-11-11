@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -20,6 +22,9 @@ TransferTaskView task(
   int? sourceDeletionsTotal,
   List<TransferActiveFile>? activeFiles,
   bool explorer = false,
+  bool upload = true,
+  bool folder = false,
+  String? local,
   int? terminalGeneration,
   int? sourceTerminalGeneration,
 }) => TransferTaskView(
@@ -37,10 +42,10 @@ TransferTaskView task(
   remoteMovePhase: movePhase,
   hostId: 'fixture',
   name: 'item-$n.txt',
-  local: '/fixture/item-$n.txt',
+  local: local ?? '/fixture/item-$n.txt',
   remote: '/remote/item-$n.txt',
-  upload: true,
-  folder: false,
+  upload: upload,
+  folder: folder,
   state: state,
   busy: state == 'Running',
   discovered: 1,
@@ -74,6 +79,95 @@ class QueueFixture extends LiveWorkbenchModel {
 }
 
 void main() {
+  testWidgets(
+    'completed downloads open their own file or folder without SSH or a new transfer',
+    (tester) async {
+      final directory = Directory.systemTemp.createTempSync(
+        'hspterm-download-open-',
+      );
+      final file = File('${directory.path}/fixture.txt');
+      file.writeAsStringSync('fixture');
+      final model = QueueFixture()..allTasks = true;
+      model.transferTasks = [
+        task(0, state: 'Complete', upload: false, local: file.path),
+        task(
+          1,
+          state: 'CompleteWithSkips',
+          upload: false,
+          folder: true,
+          local: directory.path,
+        ),
+        task(2, upload: false, local: file.path),
+      ];
+      final opened = <Uri>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: Desk.theme(false),
+          home: Scaffold(
+            body: LiveTransferQueue(
+              model: model,
+              launchLocal: (uri) async {
+                opened.add(uri);
+                return true;
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.textContaining('已结束'));
+      await tester.pumpAndSettle();
+      final row = find.byKey(const ValueKey('live-transfer-task-0'));
+      await tester.ensureVisible(row);
+      await tester.runAsync(() async {
+        await tester.tap(
+          find.descendant(of: row, matching: find.byTooltip('打开文件')),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      });
+      await tester.pumpAndSettle();
+      expect(opened.single, Uri.file(file.absolute.path));
+      await tester.runAsync(() async {
+        await tester.tap(
+          find.descendant(of: row, matching: find.byTooltip('打开所在文件夹')),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      });
+      await tester.pumpAndSettle();
+      expect(opened.last, Uri.directory(directory.absolute.path));
+      final folder = find.byKey(const ValueKey('live-transfer-task-1'));
+      await tester.ensureVisible(folder);
+      await tester.runAsync(() async {
+        await tester.tap(
+          find.descendant(of: folder, matching: find.byTooltip('打开目录')),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      });
+      await tester.pumpAndSettle();
+      expect(opened.last, Uri.directory(directory.absolute.path));
+      expect(opened, hasLength(3));
+      expect(model.actions, isEmpty);
+      final active = find.byKey(const ValueKey('live-transfer-task-2'));
+      expect(
+        find.descendant(of: active, matching: find.byTooltip('打开文件')),
+        findsNothing,
+      );
+      file.deleteSync();
+      await tester.ensureVisible(row);
+      await tester.runAsync(() async {
+        await tester.tap(
+          find.descendant(of: row, matching: find.byTooltip('打开文件')),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      });
+      await tester.pumpAndSettle();
+      expect(opened, hasLength(3));
+      expect(find.textContaining('已不存在'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      model.dispose();
+      directory.deleteSync(recursive: true);
+    },
+  );
+
   testWidgets(
     'Explorer ready source is distinct from external destination success',
     (tester) async {
@@ -204,6 +298,11 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
+      // The queue now prompts once on discovering conflicts; explicitly
+      // decline before testing the manually reopened task menu.
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('live-transfer-task-1')));
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.tap(find.byKey(const ValueKey('live-transfer-task-0')));
