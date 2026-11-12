@@ -90,6 +90,10 @@ abstract class TerminalBackend {
   Future<void> clipboard(int id, int requestId, String text);
 }
 
+abstract interface class TerminalTmuxHistoryBackend {
+  Future<String> tmuxHistory(int id, int generation, String? pane, int? offset);
+}
+
 abstract interface class TerminalSuggestionsBackend {
   Future<rust.TerminalSuggestions?> suggestions(int id, int generation);
   Future<String> chooseSuggestion(
@@ -130,8 +134,21 @@ class NativeTerminalBackend
     implements
         TerminalBackend,
         TerminalCommandsBackend,
+        TerminalTmuxHistoryBackend,
         TerminalReconnectNoticeBackend,
         TerminalSuggestionsBackend {
+  @override
+  Future<String> tmuxHistory(
+    int id,
+    int generation,
+    String? pane,
+    int? offset,
+  ) => rust.terminalTmuxHistory(
+    id: id,
+    generation: generation,
+    pane: pane,
+    offset: offset,
+  );
   @override
   Future<rust.TerminalSuggestions?> suggestions(int id, int generation) =>
       rust.terminalSuggestions(id: id, generation: generation);

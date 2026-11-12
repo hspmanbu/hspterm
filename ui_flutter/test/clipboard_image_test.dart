@@ -143,6 +143,13 @@ void main() {
       await tester.pump();
       expect(find.textContaining('/tmp/private/clipboard.png'), findsOneWidget);
       expect(find.textContaining('25%'), findsOneWidget);
+      await tester.tap(find.textContaining('图片上传 ·'));
+      await tester.pump();
+      expect(find.textContaining('25%'), findsNothing);
+      expect(model.imageUploads, contains(task));
+      await tester.tap(find.textContaining('图片上传 ·'));
+      await tester.pump();
+      expect(find.textContaining('25%'), findsOneWidget);
       task.apply({
         'path': '/tmp/private/clipboard.png',
         'done': 2048,
@@ -210,6 +217,21 @@ void main() {
       await tester.pumpAndSettle();
       expect(images, 1);
       expect(backend.pastes, [('ordinary text', false)]);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async => null,
+      );
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      expect(
+        images,
+        2,
+        reason: 'ordinary paste falls back to the image clipboard when text is absent',
+      );
+      expect(backend.pastes, [('ordinary text', false)]);
+
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
         null,

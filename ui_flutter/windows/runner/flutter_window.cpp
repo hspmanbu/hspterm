@@ -7,6 +7,7 @@
 #include <dwmapi.h>
 #include <windowsx.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <flutter/standard_method_codec.h>
 #include "utils.h"
 #include "secure_unlock.h"
@@ -29,9 +30,15 @@ bool RevealInExplorer(const std::wstring& path) {
   std::replace(native.begin(), native.end(), L'/', L'\\');
   PIDLIST_ABSOLUTE item = ILCreateFromPathW(native.c_str());
   if (item == nullptr) return false;
-  // With cidl=0 the absolute PIDL names the item to select. This avoids
-  // interpreting a parent/child PIDL pair against the desktop namespace.
-  const HRESULT revealed = SHOpenFolderAndSelectItems(item, 0, nullptr, 0);
+  PIDLIST_ABSOLUTE parent = ILCloneFull(item);
+  if (parent == nullptr || !ILRemoveLastID(parent)) {
+    if (parent != nullptr) ILFree(parent);
+    ILFree(item);
+    return false;
+  }
+  PCUITEMID_CHILD child = ILFindLastID(item);
+  const HRESULT revealed = SHOpenFolderAndSelectItems(parent, 1, &child, 0);
+  ILFree(parent);
   ILFree(item);
   return SUCCEEDED(revealed);
 }
@@ -225,10 +232,9 @@ bool FlutterWindow::OnCreate() {
       if (!PostMessage(window, WM_CLOSE, 0, 0)) {
         result->Error("window_close", "无法提交关闭请求；窗口保持打开"); return;
       }
-    } else if (method == "reveal") {
-      // Open the parent folder with the file preselected through the shell
-      // API (SHOpenFolderAndSelectItems). The Dart side falls back to opening
-      // the folder when selection is not possible.
+    } else if (method == "reveal" || method == "openLocal") {
+      // Keep filesystem paths out of URL routing. Reveal selects one child
+      // in its explicit parent PIDL; open uses the Windows file association.
       const auto* args = call.arguments();
       const auto* map = args == nullptr
           ? nullptr : std::get_if<flutter::EncodableMap>(args);
@@ -251,8 +257,22 @@ bool FlutterWindow::OnCreate() {
                               wide.data(), wide_size) != wide_size) {
         result->Error("reveal", "文件路径编码无效"); return;
       }
-      if (!RevealInExplorer(wide)) {
-        result->Error("reveal_failed", "Shell未能选中文件；回退打开父目录"); return;
+      wide.resize(static_cast<size_t>(wide_size - 1));
+      std::replace(wide.begin(), wide.end(), L'/', L'\\');
+      if (method == "openLocal") {
+        SHELLEXECUTEINFOW info = {};
+        info.cbSize = sizeof(info);
+        info.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
+        info.hwnd = window;
+        info.lpVerb = L"open";
+        info.lpFile = wide.c_str();
+        info.nShow = SW_SHOWNORMAL;
+        if (!ShellExecuteExW(&info)) {
+          result->Error("open_error", "Windows未能打开本地路径，错误码" +
+              std::to_string(GetLastError())); return;
+        }
+      } else if (!RevealInExplorer(wide)) {
+        result->Error("reveal_failed", "Windows未能定位并选中文件"); return;
       }
     } else if (method == "ensureDialogVisible") {
       // A Flutter dialog is clipped to this window's client area. When the

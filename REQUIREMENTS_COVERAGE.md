@@ -1,3 +1,16 @@
+## 2026-11-12 第17轮反馈增量（源码已接，运行验收待CI/Windows11）
+
+| 项目 | 实际入口 | 状态 |
+|---|---|---|
+| 分数DPI连续背景、多行主题字体/统一选区 | terminal/painter.dart、paste_editor.dart | 已编码/静态复核；像素/组件回归待CI |
+| 下载/本地编辑打开及定位 | workbench/local_file_actions.dart、queue.dart、runner/flutter_window.cpp | 已编码；路径参数测试待CI，Shell实际选中待Win11 |
+| 图片任务折叠、直接编号PNG、统一粘贴 | queue.dart、terminal/view.dart、ssh-core/clipboard_image.rs | 已编码；组件/真实SFTP完整性回归未在本轮运行 |
+| tmux Alt覆盖、OSC8路径及跨软换行链接 | terminal/view.dart、links.dart | 已编码；应用实际点击和链接待复测 |
+| 旧版tmux也可拖动真实历史 | inspection/tmux_history.py、terminal_tmux_history、terminal/tmux_history.dart | 已编码，正式FRB已生成；远端Python3依赖；元数据串行/身份保护/真实历史限位；组件及协议测试交CI，agy实测待用户 |
+| tmux可信Shell新窗口与历史联想 | 上轮遗留 | **未实现**，不凭屏幕猜输入 |
+
+本轮按用户要求仅静态操作，不将新增回归源码视为测试通过；细节和边界见validation/windows-feedback-round17-2026-11-12/README.md。
+
 ## 2026-11-11 tmux兼容增量（静态源码，待CI/实机）
 
 - 稳定本地选区/Alt远端鼠标、显式Shift+Enter→LF兼容开关已接入terminal/controller.dart、view.dart。

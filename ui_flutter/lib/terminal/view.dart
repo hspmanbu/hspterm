@@ -20,6 +20,7 @@ import 'suggestions.dart';
 import 'suggestions_overlay.dart';
 import 'painter.dart';
 import 'scrollbar.dart';
+import 'tmux_history.dart';
 import 'links.dart';
 import 'typography.dart';
 
@@ -61,6 +62,7 @@ class TerminalViewState extends State<TerminalView>
   Point<int>? _anchor;
   int _button = 3;
   bool _remoteDrag = false;
+  int? _dragMouseModifiers;
   Size _cell = const Size(9, 20);
   static const _empty = TextEditingValue(
     text: '\u200b',
@@ -635,13 +637,18 @@ class TerminalViewState extends State<TerminalView>
         source.connected;
     if (id == null || !current()) return;
     final data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (!mounted || !current() || data?.text == null) return;
-    final result = await source.paste(data!.text!, false);
+    if (!current()) return;
+    final text = data?.text;
+    if (text == null || text.isEmpty) {
+      await widget.onPasteImage?.call();
+      return;
+    }
+    final result = await source.paste(text, false);
     if (!mounted || !result.needsConfirmation || !current()) return;
     final confirmed = await showAppDialog<String>(
       context: context,
       builder: (_) => TerminalPastePreview(
-        text: data.text!,
+        text: text,
         target: source.connectionLabel,
         lines: result.lines,
         bytes: result.bytes,
@@ -663,7 +670,15 @@ class TerminalViewState extends State<TerminalView>
     final id = c.id;
     final p = _point(position);
     if (id != null && c.connected) {
-      _run(c.mouse(p.x, p.y, action, button, _mods));
+      _run(
+        c.mouse(
+          p.x,
+          p.y,
+          action,
+          button,
+          _remoteDrag ? (_dragMouseModifiers ?? _mods) : _mods,
+        ),
+      );
     }
   }
 
@@ -695,6 +710,15 @@ class TerminalViewState extends State<TerminalView>
         !HardwareKeyboard.instance.isAltPressed &&
         _point(event.localPosition).x < (c.metadata?.columns ?? 80) - 2;
     _remoteDrag = _forwardRemoteMouse && !tmuxLocal;
+    // Alt is the local selection override here, not an application modifier.
+    // Keep the choice for the whole gesture, including release after Alt-up.
+    _dragMouseModifiers =
+        c.tmuxReadonly != null &&
+            c.tmuxLocalSelection &&
+            _button == 0 &&
+            HardwareKeyboard.instance.isAltPressed
+        ? _mods & ~2
+        : _mods;
     if (_remoteDrag) {
       _mouse(event.localPosition, 0, _button);
       return;
@@ -765,8 +789,6 @@ class TerminalViewState extends State<TerminalView>
             ),
           ],
           const PopupMenuItem(value: 'paste', child: Text('粘贴')),
-          if (widget.onPasteImage != null && c.connected)
-            const PopupMenuItem(value: 'paste-image', child: Text('粘贴图片')),
           const PopupMenuItem(value: 'search', child: Text('搜索终端历史')),
           if (c.commandOperationsAvailable && commandFrame != null) ...[
             const PopupMenuItem(
@@ -839,7 +861,8 @@ class TerminalViewState extends State<TerminalView>
                 title: const Text('tmux 兼容设置'),
                 content: const SelectableText(
                   '本地拖选默认保留选区；Alt+拖动转发给 tmux/TUI。\n'
-                  '右侧最后一列保留给 tmux 自身滚动条；内部窗格滚动条可用 Alt 拖动。\n\n'
+                  '右侧滚动条显示 tmux 实际保留的历史，可直接拖动；需要远端 Python 3。\n'
+                  '它不会越过 tmux 历史上限，也不会读取应用自己管理的历史。\n\n'
                   '支持 pane-scrollbars 的 tmux 版本可在普通 Shell 手动执行：\n'
                   'tmux set-option mouse on\n'
                   'tmux set-window-option pane-scrollbars on\n'
@@ -862,9 +885,6 @@ class TerminalViewState extends State<TerminalView>
         if (v == 'search') showSearch();
         if (v == 'copy') _run(copy());
         if (v == 'paste') _run(paste());
-        if (v == 'paste-image' && widget.onPasteImage != null) {
-          _run(widget.onPasteImage!());
-        }
         if (commandFrame != null && commandRow != null) {
           if (v == 'commandCopy') {
             _run(() async {
@@ -974,9 +994,7 @@ class TerminalViewState extends State<TerminalView>
     return LayoutBuilder(
       builder: (context, constraints) {
         c.resize(
-          ((constraints.maxWidth - (c.tmuxReadonly == null ? 12 : 0)) /
-                  _cell.width)
-              .floor(),
+          ((constraints.maxWidth - 12) / _cell.width).floor(),
           (constraints.maxHeight / _cell.height).floor(),
           _cell.width,
           _cell.height,
@@ -984,7 +1002,7 @@ class TerminalViewState extends State<TerminalView>
         return Stack(
           children: [
             Positioned.fill(
-              right: c.tmuxReadonly == null ? 12 : 0,
+              right: 12,
               child: Focus(
                 focusNode: _focus,
                 onKeyEvent: _key,
@@ -1083,14 +1101,15 @@ class TerminalViewState extends State<TerminalView>
                 ),
               ),
             ),
-            if (c.tmuxReadonly == null)
-              Positioned(
-                top: 0,
-                bottom: 0,
-                right: 0,
-                width: 12,
-                child: HistoryScrollbar(controller: c),
-              ),
+            Positioned(
+              top: 0,
+              bottom: 0,
+              right: 0,
+              width: 12,
+              child: c.tmuxReadonly == null
+                  ? HistoryScrollbar(controller: c)
+                  : TmuxHistoryScrollbar(controller: c),
+            ),
             TerminalSuggestionsOverlay(
               controller: _suggestions,
               viewport: Size(constraints.maxWidth, constraints.maxHeight),

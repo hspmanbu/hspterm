@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -2113017969;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 2071133827;
 
 // Section: executor
 
@@ -9802,6 +9802,51 @@ fn wire__crate__api__terminal_suggestions_impl(
         },
     )
 }
+fn wire__crate__api__terminal_tmux_history_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "terminal_tmux_history",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <u32>::sse_decode(&mut deserializer);
+            let api_generation = <u64>::sse_decode(&mut deserializer);
+            let api_pane = <Option<String>>::sse_decode(&mut deserializer);
+            let api_offset = <Option<u32>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::terminal_tmux_history(
+                            api_id,
+                            api_generation,
+                            api_pane,
+                            api_offset,
+                        )
+                        .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__terminal_tmux_prompt_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -13202,25 +13247,26 @@ fn pde_ffi_dispatcher_primary_impl(
         246 => wire__crate__api__terminal_metrics_impl(port, ptr, rust_vec_len, data_len),
         247 => wire__crate__api__terminal_relative_paths_impl(port, ptr, rust_vec_len, data_len),
         248 => wire__crate__api__terminal_suggestions_impl(port, ptr, rust_vec_len, data_len),
-        249 => wire__crate__api__terminal_tmux_prompt_impl(port, ptr, rust_vec_len, data_len),
-        250 => {
+        249 => wire__crate__api__terminal_tmux_history_impl(port, ptr, rust_vec_len, data_len),
+        250 => wire__crate__api__terminal_tmux_prompt_impl(port, ptr, rust_vec_len, data_len),
+        251 => {
             wire__crate__api__terminal_tmux_restore_enabled_impl(port, ptr, rust_vec_len, data_len)
         }
-        251 => wire__crate__api__terminal_working_directory_impl(port, ptr, rust_vec_len, data_len),
-        252 => wire__crate__api__terminate_remote_process_impl(port, ptr, rust_vec_len, data_len),
-        253 => wire__crate__api__test_display_rules_impl(port, ptr, rust_vec_len, data_len),
-        254 => wire__crate__api__test_host_connection_impl(port, ptr, rust_vec_len, data_len),
-        255 => wire__crate__api__transfer_failures_impl(port, ptr, rust_vec_len, data_len),
-        256 => wire__crate__api__transfer_preferences_impl(port, ptr, rust_vec_len, data_len),
-        257 => wire__crate__api__transfer_reconnect_notice_impl(port, ptr, rust_vec_len, data_len),
-        258 => wire__crate__api__unlock_existing_vault_impl(port, ptr, rust_vec_len, data_len),
-        259 => wire__crate__api__unlock_vault_impl(port, ptr, rust_vec_len, data_len),
-        260 => wire__crate__api__update_editor_impl(port, ptr, rust_vec_len, data_len),
-        261 => wire__crate__api__upload_clipboard_image_impl(port, ptr, rust_vec_len, data_len),
-        262 => wire__crate__api__vault_unlock_hint_impl(port, ptr, rust_vec_len, data_len),
-        263 => wire__crate__api__verify_secure_unlock_impl(port, ptr, rust_vec_len, data_len),
-        264 => wire__crate__api__watch_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
-        265 => wire__crate__api__watch_events_impl(port, ptr, rust_vec_len, data_len),
+        252 => wire__crate__api__terminal_working_directory_impl(port, ptr, rust_vec_len, data_len),
+        253 => wire__crate__api__terminate_remote_process_impl(port, ptr, rust_vec_len, data_len),
+        254 => wire__crate__api__test_display_rules_impl(port, ptr, rust_vec_len, data_len),
+        255 => wire__crate__api__test_host_connection_impl(port, ptr, rust_vec_len, data_len),
+        256 => wire__crate__api__transfer_failures_impl(port, ptr, rust_vec_len, data_len),
+        257 => wire__crate__api__transfer_preferences_impl(port, ptr, rust_vec_len, data_len),
+        258 => wire__crate__api__transfer_reconnect_notice_impl(port, ptr, rust_vec_len, data_len),
+        259 => wire__crate__api__unlock_existing_vault_impl(port, ptr, rust_vec_len, data_len),
+        260 => wire__crate__api__unlock_vault_impl(port, ptr, rust_vec_len, data_len),
+        261 => wire__crate__api__update_editor_impl(port, ptr, rust_vec_len, data_len),
+        262 => wire__crate__api__upload_clipboard_image_impl(port, ptr, rust_vec_len, data_len),
+        263 => wire__crate__api__vault_unlock_hint_impl(port, ptr, rust_vec_len, data_len),
+        264 => wire__crate__api__verify_secure_unlock_impl(port, ptr, rust_vec_len, data_len),
+        265 => wire__crate__api__watch_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
+        266 => wire__crate__api__watch_events_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

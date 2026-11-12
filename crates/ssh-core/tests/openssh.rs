@@ -3856,34 +3856,35 @@ async fn clipboard_image_upload_is_private_exclusive_and_never_executes_shell_in
     )
     .await
     .unwrap();
-    let root = Path::new(&path).parent().unwrap();
+    assert_eq!(Path::new(&path).parent().unwrap(), Path::new("/tmp"));
+    assert!(
+        Path::new(&path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("clipboard")
+    );
     assert_eq!(fs::read(&path).unwrap(), png);
     assert_eq!(
         fs::metadata(&path).unwrap().permissions().mode() & 0o777,
         0o600
     );
-    assert_eq!(
-        fs::metadata(root).unwrap().permissions().mode() & 0o777,
-        0o700
+    let second = clipboard_image::upload(
+        &remote,
+        &source,
+        &nonce,
+        &CancellationToken::new(),
+        &BandwidthLimiter::default(),
+    )
+    .await
+    .unwrap();
+    assert_ne!(
+        path, second,
+        "exclusive numbered allocation must not reuse an existing file"
     );
-    assert!(
-        clipboard_image::upload(
-            &remote,
-            &source,
-            &nonce,
-            &CancellationToken::new(),
-            &BandwidthLimiter::default()
-        )
-        .await
-        .is_err()
-    );
-    assert_eq!(
-        fs::read(&path).unwrap(),
-        png,
-        "collision never overwrites or deletes original image"
-    );
+    assert_eq!(fs::read(&path).unwrap(), png, "previous image stays intact");
+    fs::remove_file(&second).unwrap();
     fs::remove_file(&path).unwrap();
-    fs::remove_dir(root).unwrap();
     fs::write(&source, b"not an image").unwrap();
     assert!(
         clipboard_image::upload(
@@ -3896,7 +3897,6 @@ async fn clipboard_image_upload_is_private_exclusive_and_never_executes_shell_in
         .await
         .is_err()
     );
-    assert!(!root.exists());
     let stop = CancellationToken::new();
     stop.cancel();
     assert!(
@@ -3910,6 +3910,5 @@ async fn clipboard_image_upload_is_private_exclusive_and_never_executes_shell_in
         .await
         .is_err()
     );
-    assert!(!root.exists());
     remote.close().await.unwrap();
 }

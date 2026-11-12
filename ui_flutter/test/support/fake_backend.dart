@@ -12,6 +12,7 @@ class FakeBackend implements TerminalBackend {
   final navigations = <int>[];
   final searches = <(String, bool, bool)>[];
   final mouseActions = <int>[];
+  final mouseModifiers = <int>[];
   final texts = <String>[];
   final pastes = <(String, bool)>[];
   final hostKeyReplies = <(int, bool)>[];
@@ -82,6 +83,7 @@ class FakeBackend implements TerminalBackend {
     int mods,
   ) async {
     mouseActions.add(action);
+    mouseModifiers.add(mods);
   }
 
   @override

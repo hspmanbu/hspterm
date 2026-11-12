@@ -121,19 +121,33 @@ class TerminalLink {
           return null;
         }
         final parsed = parse(value);
-        return parsed?.uri == null && parsed?.remoteFileUri == null
-            ? null
-            : parsed;
+        if (parsed?.uri != null || parsed?.remoteFileUri != null) return parsed;
+        // Salvage a prose annotation only when the visible token is the SAME
+        // literal absolute path. Unsafe schemes never activate a label URL.
+        final annotation = RegExp(r'^[^:/\\\s\x00-\x1f]{1,40}: +(/[^\s]+)$')
+            .firstMatch(value);
+        final path = annotation == null ? null : parse(annotation[1]!);
+        if (path?.remotePath == null) return null;
+        final label = atGrid(rows, row, column);
+        return label?.remotePath?.path == path!.remotePath!.path ? label : null;
       }
     }
-    bool wraps(int index) =>
-        rows[index].isNotEmpty && rows[index].last.flags & 16 != 0;
+    bool wraps(int index) => rows[index].any((c) => c.flags & 16 != 0);
+    bool delimiter(RenderCell c) =>
+        c.flags & (64 | 1024) == 0 &&
+        (c.text.isEmpty || RegExp(r'''[\s<>'"`]''').hasMatch(c.text));
     var start = row, end = row;
     while (start > 0 && wraps(start - 1)) {
+      if (rows[start]
+          .take(start == row ? column + 1 : rows[start].length)
+          .any(delimiter)) {
+        break;
+      }
       if (row - start >= 15) return null;
       start--;
     }
     while (wraps(end)) {
+      if (rows[end].skip(end == row ? column : 0).any(delimiter)) break;
       if (end + 1 >= rows.length || end - start >= 15) return null;
       end++;
     }

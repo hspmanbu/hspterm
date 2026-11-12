@@ -3,6 +3,112 @@ import 'package:hspterm/terminal/links.dart';
 import 'package:hspterm/src/rust/api.dart';
 
 void main() {
+  test('OSC8 annotations resolve only the matching literal path token', () {
+    final cells = 'APK: /opt/carsum/demo.apk'
+        .split('')
+        .map(
+          (text) => RenderCell(
+            text: text,
+            foreground: 0xffffffff,
+            background: 0xff000000,
+            flags: 0,
+          ),
+        )
+        .toList();
+    final spans = [
+      [
+        RenderHyperlink(
+          start: 0,
+          end: cells.length,
+          uri: 'APK: /opt/carsum/demo.apk',
+        ),
+      ],
+    ];
+    expect(TerminalLink.atGrid([cells], 0, 1, hyperlinks: spans), isNull);
+    expect(
+      TerminalLink.atGrid([cells], 0, 10, hyperlinks: spans)?.remotePath?.path,
+      '/opt/carsum/demo.apk',
+    );
+    expect(
+      TerminalLink.atGrid(
+        [cells],
+        0,
+        10,
+        hyperlinks: [
+          [
+            RenderHyperlink(
+              start: 0,
+              end: cells.length,
+              uri: 'javascript:/opt/carsum/demo.apk',
+            ),
+          ],
+        ],
+      ),
+      isNull,
+    );
+    expect(
+      TerminalLink.atGrid(
+        [cells],
+        0,
+        10,
+        hyperlinks: [
+          [
+            RenderHyperlink(
+              start: 0,
+              end: cells.length,
+              uri: 'APK: /tmp/other.apk',
+            ),
+          ],
+        ],
+      ),
+      isNull,
+    );
+  });
+  test(
+    'early wide-character wraps and whitespace boundaries keep link identity',
+    () {
+      List<RenderCell> row(String text) => text
+          .split('')
+          .map(
+            (c) => RenderCell(
+              text: c,
+              foreground: 0xffffffff,
+              background: 0xff000000,
+              flags: 0,
+            ),
+          )
+          .toList();
+      final first = row('https://example.invalid/');
+      first[first.length - 1] = RenderCell(
+        text: '/',
+        foreground: 0xffffffff,
+        background: 0xff000000,
+        flags: 16,
+      );
+      first.add(
+        const RenderCell(
+          text: '',
+          foreground: 0xffffffff,
+          background: 0xff000000,
+          flags: 1024,
+        ),
+      );
+      final second = row('path?q=1 other text');
+      expect(
+        TerminalLink.atGrid([first, second], 1, 2)?.text,
+        'https://example.invalid/path?q=1',
+      );
+      expect(TerminalLink.atGrid([first, second], 1, 12), isNull);
+      expect(
+        TerminalLink.atGrid(
+          [row('https://example.invalid/'), second],
+          0,
+          2,
+        )?.text,
+        'https://example.invalid/',
+      );
+    },
+  );
   test('recognition is pure and distinguishes URLs, bare addresses and explicit ports', () {
     final http = TerminalLink.parse('http://localhost:8080/path?q=one#two')!;
     expect(http.loopback, true);

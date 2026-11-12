@@ -53,18 +53,26 @@ class _PasteEditorState extends State<PasteEditor> {
 
   @override
   Widget build(BuildContext context) {
-    const style = TextStyle(
-      fontFamily: 'JetBrainsMono',
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final style = theme.textTheme.bodyMedium!.copyWith(
       fontSize: 14,
       height: 1.4,
     );
-    const strut = StrutStyle(
-      fontFamily: 'JetBrainsMono',
-      fontSize: 14,
-      height: 1.4,
-      forceStrutHeight: true,
+    final strut = StrutStyle.fromTextStyle(style, forceStrutHeight: true);
+    final background = Color.alphaBlend(
+      Colors.white.withValues(
+        alpha: theme.brightness == Brightness.dark ? .035 : .3,
+      ),
+      scheme.surface,
     );
-    final scheme = Theme.of(context).colorScheme;
+    // Selection rectangles can overlap around wrapped and empty lines. Blend
+    // once, then paint opaque rectangles so overlaps never form darker bands.
+    final selection = Color.alphaBlend(
+      theme.textSelectionTheme.selectionColor ??
+          scheme.primary.withValues(alpha: .3),
+      background,
+    );
     final maxHeight = math.max(100.0, MediaQuery.sizeOf(context).height * .55);
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -72,7 +80,7 @@ class _PasteEditorState extends State<PasteEditor> {
         Container(
           height: _height.clamp(100.0, maxHeight),
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHigh,
+            color: background,
             border: Border.all(color: Theme.of(context).dividerColor),
             borderRadius: BorderRadius.circular(4),
           ),
@@ -123,31 +131,36 @@ class _PasteEditorState extends State<PasteEditor> {
                             behavior: const _EditorScrollBehavior(),
                             child: KeyedSubtree(
                               key: _field,
-                              child: TextField(
-                                key: const ValueKey('terminal-paste-editor'),
-                                controller: widget.controller,
-                                scrollController: _scroll,
-                                onChanged: (value) {
-                                  setState(() {});
-                                  widget.onChanged(value);
-                                },
-                                style: style,
-                                strutStyle: strut,
-                                selectionHeightStyle: ui.BoxHeightStyle.max,
-                                selectionWidthStyle: ui.BoxWidthStyle.max,
-                                textAlignVertical: TextAlignVertical.top,
-                                expands: true,
-                                minLines: null,
-                                maxLines: null,
-                                decoration: const InputDecoration(
-                                  isDense: true,
-                                  filled: false,
-                                  border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 10,
+                              child: TextSelectionTheme(
+                                data: theme.textSelectionTheme.copyWith(
+                                  selectionColor: selection,
+                                ),
+                                child: TextField(
+                                  key: const ValueKey('terminal-paste-editor'),
+                                  controller: widget.controller,
+                                  scrollController: _scroll,
+                                  onChanged: (value) {
+                                    setState(() {});
+                                    widget.onChanged(value);
+                                  },
+                                  style: style,
+                                  strutStyle: strut,
+                                  selectionHeightStyle: ui.BoxHeightStyle.max,
+                                  selectionWidthStyle: ui.BoxWidthStyle.max,
+                                  textAlignVertical: TextAlignVertical.top,
+                                  expands: true,
+                                  minLines: null,
+                                  maxLines: null,
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    filled: false,
+                                    border: InputBorder.none,
+                                    enabledBorder: InputBorder.none,
+                                    focusedBorder: InputBorder.none,
+                                    contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 10,
+                                    ),
                                   ),
                                 ),
                               ),

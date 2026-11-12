@@ -70,7 +70,7 @@ impl Session {
             && self.created == identity.created
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Identity {
     id: String,
     server_pid: u32,

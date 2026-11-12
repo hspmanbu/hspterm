@@ -6993,6 +6993,31 @@ pub async fn configure_remote_inspection(
     crate::public_errors::finish(outcome)
 }
 
+/// Read/seek the attached tmux pane's real bounded history. No PTY injection.
+pub async fn terminal_tmux_history(
+    id: u32,
+    generation: u64,
+    pane: Option<String>,
+    offset: Option<u32>,
+) -> Result<String> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        let target = entry(id)?;
+        let inspector = target.session.inspector_for(generation).await?;
+        let value = inspector
+            .tmux_history(pane, offset, tokio_util::sync::CancellationToken::new())
+            .await?;
+        ensure!(
+            target.session.status().generation == generation
+                && target.session.status().phase == SessionPhase::Connected,
+            "原终端会话已改变"
+        );
+        Ok(serde_json::to_string(&value)?)
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
 pub async fn sample_remote_resources(id: u32, generation: u64) -> Result<String> {
     /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
     let outcome: Result<_> = crate::public_errors::guard(async move {

@@ -620,7 +620,7 @@ class _TerminalPreferencesPanelState extends State<TerminalPreferencesPanel> {
                   key: const ValueKey('image-paste-enabled'),
                   contentPadding: EdgeInsets.zero,
                   title: const Text('图片粘贴快捷键'),
-                  subtitle: const Text('上传至远端私有临时目录，填入路径，不按回车。普通文本粘贴不变。'),
+                  subtitle: const Text('普通粘贴自动识别文字或图片；图片编号上传至远端 /tmp，仅填入路径。'),
                   value: _imagePaste.enabled,
                   onChanged: (v) => setState(
                     () => _imagePaste = ImagePasteBinding(

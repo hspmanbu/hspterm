@@ -679,7 +679,12 @@ impl SshConnection {
         );
         let tcp = TcpConnector::new(handle.clone(), lifetime.0.clone());
         let remote = RemoteConnector::new(handle.clone(), lifetime.0.clone(), router);
-        let inspector = inspection::Inspector::new(handle.clone(), lifetime.0.clone());
+        let inspector = inspection::Inspector::new(
+            handle.clone(),
+            lifetime.0.clone(),
+            tmux_session.clone(),
+            startup.readonly,
+        );
         let sftp = sftp_connector::SftpConnector::new(handle.clone(), lifetime.0.clone());
         let direct = direct_transfer::DirectConnector::new(
             handle.clone(),

@@ -1,4 +1,5 @@
 import '../prototype/design.dart';
+import 'local_file_actions.dart';
 
 //! Double-click "open in local editor with write-back" sessions.
 //!
@@ -15,7 +16,6 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../app_notice.dart';
 import '../prototype/model.dart';
@@ -500,7 +500,7 @@ class LocalEditSession extends ChangeNotifier {
   }
 
   static Future<bool> _launchFileUri(Uri uri) {
-    return launchUrl(uri, mode: LaunchMode.externalApplication);
+    return openLocalUri(uri);
   }
 
   Future<void> _open(Future<bool> Function(Uri uri) launch) async {
@@ -520,7 +520,7 @@ class LocalEditSession extends ChangeNotifier {
         ? idleTimeout
         : _idleCheckInterval;
     _idleTimer = Timer.periodic(idleCheckEvery, (_) => _checkIdle());
-    final opened = await launch(Uri.file(_file.absolute.path));
+    final opened = await launch(localFileUri(_file.path));
     if (!opened) {
       throw StateError('系统没有成功打开本地文件');
     }

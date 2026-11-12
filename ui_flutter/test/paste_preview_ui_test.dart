@@ -30,6 +30,13 @@ void main() {
       final input = find.byKey(const ValueKey('terminal-paste-editor'));
       final field = tester.widget<TextField>(input);
       expect(field.style!.fontSize, 14);
+      final inputContext = tester.element(input);
+      expect(
+        field.style!.fontFamily,
+        Theme.of(inputContext).textTheme.bodyMedium!.fontFamily,
+      );
+      expect(TextSelectionTheme.of(inputContext).selectionColor!.a, 1);
+
       expect(field.selectionHeightStyle, ui.BoxHeightStyle.max);
       expect(field.selectionWidthStyle, ui.BoxWidthStyle.max);
       expect(find.byKey(const ValueKey('paste-line-numbers')), findsOneWidget);

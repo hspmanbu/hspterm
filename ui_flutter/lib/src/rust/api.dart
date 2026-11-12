@@ -1968,6 +1968,19 @@ Future<void> configureRemoteInspection({
   processes: processes,
 );
 
+/// Read/seek the attached tmux pane's real bounded history. No PTY injection.
+Future<String> terminalTmuxHistory({
+  required int id,
+  required int generation,
+  String? pane,
+  int? offset,
+}) => RustLib.instance.api.crateApiTerminalTmuxHistory(
+  id: id,
+  generation: generation,
+  pane: pane,
+  offset: offset,
+);
+
 Future<String> sampleRemoteResources({
   required int id,
   required int generation,

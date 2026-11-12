@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hspterm/terminal/controller.dart';
 import 'package:hspterm/terminal/view.dart';
@@ -44,6 +45,38 @@ void main() {
       }
     },
   );
+  testWidgets('Alt override sends an ordinary tmux click through release', (
+    tester,
+  ) async {
+    final backend = FakeBackend();
+    final c = TerminalController(backend);
+    await c.start();
+    c.phase = 'Connected';
+    c.tmuxReadonly = false;
+    c.applyFrame(fixture(line: 'hello-world', mouse: true));
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: TerminalView(controller: c)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      final click = await tester.startGesture(
+        const Offset(4, 6),
+        kind: ui.PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await click.up();
+      await tester.pump();
+      expect(backend.mouseActions, [0, 1]);
+      expect(backend.mouseModifiers.every((m) => m & 2 == 0), isTrue);
+    } finally {
+      await tester.pumpWidget(const SizedBox());
+      await closeTerminal(tester, c);
+    }
+  });
   test('newline compatibility is explicit, per tmux tab and consumes matching release', () async {
     final backend = FakeBackend();
     final c = TerminalController(backend);

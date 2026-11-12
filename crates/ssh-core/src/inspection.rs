@@ -1,5 +1,6 @@
 //! Explicit, bounded inspection of the original SSH Transport. No PTY input,
-//! automatic SSH connection, background probing or arbitrary remote exec API.
+//! automatic SSH connection or arbitrary remote exec API. The visible tmux
+//! history rail polls bounded metadata on its explicitly attached Transport.
 use crate::{Client, SshError};
 use russh::{Channel, ChannelMsg, client};
 use serde::{Deserialize, Serialize};
@@ -117,10 +118,24 @@ enum Action {
     Sample,
     Processes,
     ServerCopy(String),
+    TmuxHistory(String),
     DirSize(String),
     Terminate { pid: u32, start: u64, boot: String },
 }
 fn command(action: &Action) -> Result<String, InspectionError> {
+    if let Action::TmuxHistory(request) = action {
+        if request.is_empty()
+            || request.len() > 4096
+            || !request.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(InspectionError::Identity);
+        }
+        return Ok(format!(
+            "python3 -I -S -c '{}' {request}",
+            include_str!("inspection/tmux_history.py").replace('\'', "'\\''")
+        ));
+    }
+
     if let Action::DirSize(path) = action {
         // Fixed script, plain argv: the path is never interpolated into a
         // shell string, and only an absolute POSIX path is accepted.
@@ -179,13 +194,22 @@ pub struct Inspector {
     handle: Arc<client::Handle<Client>>,
     transport: CancellationToken,
     slot: Arc<Semaphore>,
+    tmux: Option<crate::tmux::Identity>,
+    readonly: bool,
 }
 impl Inspector {
-    pub(crate) fn new(handle: Arc<client::Handle<Client>>, transport: CancellationToken) -> Self {
+    pub(crate) fn new(
+        handle: Arc<client::Handle<Client>>,
+        transport: CancellationToken,
+        tmux: Option<crate::tmux::Identity>,
+        readonly: bool,
+    ) -> Self {
         Self {
             handle,
             transport,
             slot: Arc::new(Semaphore::new(1)),
+            tmux,
+            readonly,
         }
     }
     pub(crate) async fn wait_closed(&self) {
@@ -331,6 +355,39 @@ impl Inspector {
             return Err(InspectionError::Unconfirmed.into());
         }
         Ok(())
+    }
+    /// Uses the identity remembered at attach, never a caller-supplied session.
+    pub async fn tmux_history(
+        &self,
+        pane: Option<String>,
+        offset: Option<u32>,
+        cancel: CancellationToken,
+    ) -> Result<serde_json::Value, SshError> {
+        let identity = self.tmux.as_ref().ok_or(InspectionError::Unavailable)?;
+        if offset.is_some()
+            && (self.readonly
+                || pane.as_ref().is_none_or(|p| {
+                    p.len() < 2
+                        || !p.starts_with('%')
+                        || p.len() > 13
+                        || !p[1..].bytes().all(|b| b.is_ascii_digit())
+                }))
+        {
+            return Err(InspectionError::Identity.into());
+        }
+        let mut request = serde_json::to_value(identity).map_err(|_| InspectionError::Identity)?;
+        request["pane"] = serde_json::json!(pane);
+        request["offset"] = serde_json::json!(offset);
+        request["readonly"] = serde_json::json!(self.readonly);
+        let payload = serde_json::to_vec(&request).map_err(|_| InspectionError::Identity)?;
+        let hex = payload.iter().map(|b| format!("{b:02x}")).collect();
+        let output = self.execute(Action::TmuxHistory(hex), cancel).await?;
+        let line = output
+            .split(|b| *b == b'\n')
+            .rev()
+            .find(|l| !l.is_empty())
+            .ok_or(InspectionError::Unavailable)?;
+        serde_json::from_slice(line).map_err(|_| InspectionError::Unavailable.into())
     }
     pub async fn sample(&self, cancel: CancellationToken) -> Result<Sample, SshError> {
         Ok(Sample::parse(&self.execute(Action::Sample, cancel).await?)?)

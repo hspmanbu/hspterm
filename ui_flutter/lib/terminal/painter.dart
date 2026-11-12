@@ -103,7 +103,9 @@ class TerminalPaintCache {
     final old = _rows[index];
     if (old != null && old.$1 == controller.rowVersions[index]) return old.$2;
     old?.$2.dispose();
-    final recorder = ui.PictureRecorder(), paint = Paint();
+    // Separate row pictures meet at fractional physical pixels on scaled
+    // displays. Solid grid edges must not blend with the underlying screen.
+    final recorder = ui.PictureRecorder(), paint = Paint()..isAntiAlias = false;
     final canvas = Canvas(recorder);
     final cells = controller.rows[index];
     // Adjacent background cells are identical rectangles without gaps.

@@ -1,4 +1,5 @@
 import 'image_upload_task.dart';
+import 'local_file_actions.dart';
 import 'staging_cleanup.dart';
 import 'transfer_connections.dart';
 
@@ -10,8 +11,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../prototype/design.dart';
-
-import 'package:url_launcher/url_launcher.dart';
 
 import '../run_log.dart';
 import '../src/rust/api.dart' as rust;
@@ -34,7 +33,7 @@ class LiveTransferQueue extends StatefulWidget {
 class _LiveTransferQueueState extends State<LiveTransferQueue> {
   final selected = <String>{};
   String? expanded, anchor;
-  bool completedOpen = false;
+  bool completedOpen = false, imagesOpen = true;
   LiveWorkbenchModel get m => widget.model;
 
   @override
@@ -111,7 +110,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       dense: true,
       leading: const Icon(Icons.image_outlined, size: 18),
       title: Text(
-        'clipboard.png · ${task.state}',
+        '${task.path?.split('/').last ?? '剪贴板图片'} · ${task.state}',
         style: const TextStyle(fontSize: 12),
       ),
       subtitle: Tooltip(
@@ -202,14 +201,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
           Tool(
             Icons.open_in_new,
             '打开本地文件',
-            () => run(
-              launchUrl(
-                Uri.file(edit.localFile.absolute.path),
-                mode: LaunchMode.externalApplication,
-              ).then((ok) {
-                if (!ok) throw StateError('系统未打开本地文件');
-              }),
-            ),
+            () => run(_launchLocal(localFileUri(edit.localFile.path))),
           ),
           Tool(
             Icons.folder_open,
@@ -226,12 +218,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
             onSelected: (action) {
               switch (action) {
                 case 'open':
-                  run(
-                    launchUrl(
-                      Uri.file(edit.localFile.absolute.path),
-                      mode: LaunchMode.externalApplication,
-                    ),
-                  );
+                  run(_launchLocal(localFileUri(edit.localFile.path)));
                 case 'folder':
                   run(_revealFile(edit.localFile));
                 case 'close':
@@ -248,57 +235,26 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
     );
   }
 
-  /// Reveals the temp copy in the OS file manager. On Windows the shell API
-  /// (via the runner channel) opens the parent folder with the file
-  /// preselected; `explorer /select` is only a fallback because a reused
-  /// Explorer process exits non-zero even on success, and a plain folder
-  /// open is the last resort when selection cannot be done at all.
+  /// Selects the actual file through the runner's Unicode shell API. A failed
+  /// selection is reported rather than silently opening an unrelated folder.
   Future<void> _revealFile(File file) async {
     final dir = file.parent.path;
     if (widget.launchLocal != null) {
-      await _launchLocal(Uri.directory(dir));
+      await _launchLocal(localFileUri(dir, directory: true));
       return;
     }
     if (Platform.isWindows) {
-      if (!file.parent.existsSync()) {
-        throw StateError('本地编辑目录已不存在，无法打开所在文件夹：$dir');
-      }
-      if (!file.existsSync()) {
-        throw StateError('本地文件已不存在，无法定位：${file.path}');
-      }
-      final absolute = file.absolute.path.replaceAll('/', '\\');
-      try {
-        await const MethodChannel('hspterm/prototype_window')
-            .invokeMethod<void>('reveal', {'path': absolute});
-        return;
-      } on MissingPluginException {
-        // Older runner or non-standard embedding; fall through to explorer.
-      } on PlatformException catch (error) {
-        if (error.code == 'reveal') rethrow;
-        // reveal_failed: selection was not possible — open the parent.
-      }
-      try {
-        // Explorer hand the request to its existing process and exits with 1
-        // even when the window opened fine, so the exit code is ignored.
-        await launchUrl(
-          Uri.directory(file.absolute.parent.path, windows: true),
-          mode: LaunchMode.externalApplication,
-        );
-      } catch (_) {
-        await launchUrl(
-          Uri.directory(dir),
-          mode: LaunchMode.externalApplication,
-        );
-      }
+      if (!file.existsSync()) throw StateError('本地文件已不存在，无法定位');
+      await const MethodChannel(
+        'hspterm/prototype_window',
+      ).invokeMethod<void>('reveal', {'path': normalizeLocalPath(file.path)});
       return;
     }
-    await _launchLocal(Uri.directory(dir));
+    await _launchLocal(localFileUri(dir, directory: true));
   }
 
   Future<void> _launchLocal(Uri uri) async {
-    final opened =
-        await (widget.launchLocal?.call(uri) ??
-            launchUrl(uri, mode: LaunchMode.externalApplication));
+    final opened = await (widget.launchLocal?.call(uri) ?? openLocalUri(uri));
     if (!opened) throw StateError('系统未打开本地文件或目录');
   }
 
@@ -322,11 +278,11 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       throw StateError('下载文件或目录已不存在，或已被替换');
     }
     if (task.folder) {
-      await _launchLocal(Uri.directory(Directory(task.local).absolute.path));
+      await _launchLocal(localFileUri(task.local, directory: true));
     } else if (reveal) {
       await _revealFile(File(task.local));
     } else {
-      await _launchLocal(Uri.file(File(task.local).absolute.path));
+      await _launchLocal(localFileUri(task.local));
     }
   }
 
@@ -997,16 +953,19 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         .toList();
     final rows = <Object>[
       if (images.isNotEmpty) ...[
-        SectionHeading(
-          '图片上传 · ${images.length}',
-          trailing: Tool(
-            Icons.playlist_remove,
-            '清理已结束图片任务',
-            m.clearFinishedImageUploads,
-            size: 14,
+        InkWell(
+          onTap: () => setState(() => imagesOpen = !imagesOpen),
+          child: SectionHeading(
+            '${imagesOpen ? '▾' : '▸'} 图片上传 · ${images.length}',
+            trailing: Tool(
+              Icons.playlist_remove,
+              '清理已结束图片任务',
+              m.clearFinishedImageUploads,
+              size: 14,
+            ),
           ),
         ),
-        ...images,
+        if (imagesOpen) ...images,
       ],
       if (edits.isNotEmpty) ...[
         SectionHeading(
