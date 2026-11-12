@@ -21,6 +21,8 @@
 
 # Development notes and execution records are kept only on the workstation.
 *.md
+# Public project introduction; internal development records stay local.
+!/README.md
 # Dependency metadata and legal notices remain distributable.
 !vendor/**/README.md
 !**/LICENSE*.md
