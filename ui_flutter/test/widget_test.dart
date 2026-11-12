@@ -483,6 +483,7 @@ void main() {
       final cache = TerminalPaintCache(batchAscii: batch),
           recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
+      cache.backgrounds(canvas, c, cell);
       for (var row = 0; row < c.rows.length; row++) {
         canvas.save();
         canvas.translate(0, row * cell.height);

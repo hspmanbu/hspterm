@@ -244,6 +244,17 @@ LiveTerminalSession? chooseTransferConnection(
   return connected.firstOrNull;
 }
 
+Future<void> _persistSftpColumns(String hostId, SftpColumnLayout layout) =>
+    rust.recordSftpColumnPref(
+      hostId: hostId,
+      order: layout.order,
+      hidden: layout.hidden.toList(),
+      widths: [
+        for (final e in layout.widths.entries)
+          if (e.value.isFinite) (e.key, e.value.round()),
+      ],
+    );
+
 class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   final imageUploads = <ImageUploadTask>[];
   final imageUploadRevision = ValueNotifier<int>(0);
@@ -491,6 +502,9 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     this.previewCacheDirectory,
     this.editorSupportDirectory,
     this.paletteLoader = rust.commandPaletteShortcut,
+    this.columnPreferenceLoader = rust.loadSftpColumnPrefs,
+    this.columnPreferenceWriter = _persistSftpColumns,
+    this.sortPreferenceLoader = rust.loadSftpSortPrefs,
     TerminalTypographyController? typographyController,
     AppearanceController? appearanceController,
     SftpViewSettingsController? sftpViewController,
@@ -510,6 +524,9 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       ..addAll(['全部主机', '收藏', '未分组']);
   }
   final Future<shortcut.PaletteShortcutView> Function() paletteLoader;
+  final Future<List<rust.SftpColumnPref>> Function() columnPreferenceLoader;
+  final Future<void> Function(String, SftpColumnLayout) columnPreferenceWriter;
+  final Future<List<rust.SftpSortPref>> Function() sortPreferenceLoader;
   PaletteBinding paletteBinding = const PaletteBinding(enabled: false);
   shortcut.PaletteShortcutView? _paletteShortcut;
   int _paletteEpoch = 0;
@@ -588,8 +605,11 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   @override
   bool get fileCompact => sftpView.confirmed?.settings.compact ?? false;
   @override
-  Object get fileDefaultsRevision =>
-      (sftpView.confirmed?.scope, sftpView.confirmed?.revision);
+  Object get fileDefaultsRevision => (
+    sftpView.confirmed?.scope,
+    sftpView.confirmed?.revision,
+    _sftpPreferenceRevision,
+  );
   final AppearanceController appearance;
   void _appearanceChanged() {
     if (_disposed) return;
@@ -2159,6 +2179,8 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   }
 
   final _sftpColumnPrefs = <String, SftpColumnLayout>{};
+  bool _sftpColumnsLoaded = false;
+  int _sftpPreferenceRevision = 0;
 
   @override
   SftpColumnLayout? rememberedColumns(String hostId) =>
@@ -2168,24 +2190,14 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   void rememberColumns(String hostId, SftpColumnLayout layout) {
     if (_disposed || _shutdown != null) return;
     _sftpColumnPrefs[hostId] = layout;
-    _track(
-      rust.recordSftpColumnPref(
-        hostId: hostId,
-        order: layout.order,
-        hidden: layout.hidden.toList(),
-        widths: [
-          for (final entry in layout.widths.entries)
-            if (entry.value.isFinite) (entry.key, entry.value.round()),
-        ],
-      ),
-      reportFailure: () => false,
-    );
+    _track(columnPreferenceWriter(hostId, layout));
   }
 
   Future<void> _loadSftpColumnPrefs() async {
-    if (_sftpSortLoaded || _disposed || _shutdown != null) return;
+    if (_sftpColumnsLoaded || _disposed || _shutdown != null) return;
+    _sftpColumnsLoaded = true;
     try {
-      final entries = await rust.loadSftpColumnPrefs();
+      final entries = await columnPreferenceLoader();
       if (_disposed || _shutdown != null) return;
       for (final e in entries) {
         if (!_sftpColumnPrefs.containsKey(e.hostId)) {
@@ -2199,23 +2211,25 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
           );
         }
       }
-    } catch (_) {
-      // Preference loading is best-effort; defaults apply on any failure.
+      _sftpPreferenceRevision++;
+      changed();
+    } catch (error) {
+      _sftpColumnsLoaded = false;
+      if (!_disposed && _shutdown == null) reportOperation(error);
     }
   }
 
   Future<void> _loadSftpSortPrefs() async {
+    unawaited(_loadSftpColumnPrefs());
     if (_sftpSortLoaded || _disposed || _shutdown != null) return;
     _sftpSortLoaded = true;
-    unawaited(_loadSftpColumnPrefs());
     try {
-      final entries = await rust.loadSftpSortPrefs();
+      final entries = await sortPreferenceLoader();
       if (_disposed || _shutdown != null) return;
-      _sftpSortPrefs
-        ..clear()
-        ..addEntries(
-          entries.map((e) => MapEntry(e.hostId, (e.column, e.ascending))),
-        );
+      for (final e in entries) {
+        _sftpSortPrefs.putIfAbsent(e.hostId, () => (e.column, e.ascending));
+      }
+      _sftpPreferenceRevision++;
       changed();
     } catch (_) {
       // Convenience only; the default sort stays.

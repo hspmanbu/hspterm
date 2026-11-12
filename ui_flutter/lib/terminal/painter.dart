@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 
 import 'controller.dart';
 import 'same_word.dart';
@@ -21,6 +22,11 @@ class TerminalPaintCache {
   final _glyphs = <(String, int, int, double), TextPainter>{};
   final _runs = <(String, int, int, double), TextPainter>{};
   final _rows = <int, (int, ui.Picture)>{};
+  ui.Picture? _backgroundPicture;
+  List<int> _backgroundVersions = const [];
+  TerminalController? _backgroundOwner;
+  Size _backgroundCell = Size.zero;
+  int backgroundBuilds = 0;
   double _fontSize = 0;
   Size _cellSize = Size.zero;
   int rowBuilds = 0;
@@ -89,17 +95,77 @@ class TerminalPaintCache {
     return painter;
   }
 
+  /// Merge vertically identical color runs before recording any glyph row.
+  /// Cell height includes line spacing: there is no separate line-gap color.
+  void backgrounds(Canvas target, TerminalController controller, Size cell) {
+    if (_backgroundPicture != null &&
+        identical(_backgroundOwner, controller) &&
+        _backgroundCell == cell &&
+        listEquals(_backgroundVersions, controller.rowVersions)) {
+      target.drawPicture(_backgroundPicture!);
+      return;
+    }
+    _backgroundPicture?.dispose();
+    _backgroundOwner = controller;
+    _backgroundCell = cell;
+    _backgroundVersions = List.of(controller.rowVersions);
+    backgroundBuilds++;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final active = <(int, int, int), Rect>{};
+    final paint = Paint()..isAntiAlias = false;
+    void draw((int, int, int) key, Rect rect) {
+      canvas.drawRect(rect, paint..color = Color(key.$3));
+    }
+
+    for (var y = 0; y < controller.rows.length; y++) {
+      final cells = controller.rows[y];
+      final next = <(int, int, int), Rect>{};
+      for (var x = 0; x < cells.length;) {
+        final start = x, c = cells[x];
+        final color = c.flags & 1 != 0 ? c.foreground : c.background;
+        while (++x < cells.length) {
+          final n = cells[x];
+          if ((n.flags & 1 != 0 ? n.foreground : n.background) != color) break;
+        }
+        final key = (start, x, color);
+        final prior = active.remove(key);
+        next[key] = Rect.fromLTRB(
+          start * cell.width,
+          prior?.top ?? y * cell.height,
+          x * cell.width,
+          (y + 1) * cell.height,
+        );
+      }
+      for (final entry in active.entries) {
+        draw(entry.key, entry.value);
+      }
+      active
+        ..clear()
+        ..addAll(next);
+    }
+    for (final entry in active.entries) {
+      draw(entry.key, entry.value);
+    }
+    _backgroundPicture = recorder.endRecording();
+    target.drawPicture(_backgroundPicture!);
+  }
+
+  void _prepare(double fontSize, Size cell) {
+    if (_fontSize != fontSize || _cellSize != cell) {
+      clear();
+      _fontSize = fontSize;
+      _cellSize = cell;
+    }
+  }
+
   ui.Picture row(
     TerminalController controller,
     int index,
     double fontSize,
     Size cell,
   ) {
-    if (_fontSize != fontSize || _cellSize != cell) {
-      clear();
-      _fontSize = fontSize;
-      _cellSize = cell;
-    }
+    _prepare(fontSize, cell);
     final old = _rows[index];
     if (old != null && old.$1 == controller.rowVersions[index]) return old.$2;
     old?.$2.dispose();
@@ -108,27 +174,8 @@ class TerminalPaintCache {
     final recorder = ui.PictureRecorder(), paint = Paint()..isAntiAlias = false;
     final canvas = Canvas(recorder);
     final cells = controller.rows[index];
-    // Adjacent background cells are identical rectangles without gaps.
-    for (var x = 0; x < cells.length;) {
-      final start = x, c = cells[x];
-      final color = c.flags & 1 != 0 ? c.foreground : c.background;
-      while (++x < cells.length) {
-        final next = cells[x];
-        if ((next.flags & 1 != 0 ? next.foreground : next.background) !=
-            color) {
-          break;
-        }
-      }
-      canvas.drawRect(
-        Rect.fromLTWH(
-          start * cell.width,
-          0,
-          (x - start) * cell.width,
-          cell.height,
-        ),
-        paint..color = Color(color),
-      );
-    }
+    // Only foreground belongs in per-row pictures. Backgrounds are painted
+    // across the viewport in one pass so cached row textures cannot leave seams.
     for (var x = 0; x < cells.length; x++) {
       final c = cells[x];
       final inverse = c.flags & 1 != 0;
@@ -266,6 +313,10 @@ class TerminalPaintCache {
   }
 
   void clear() {
+    _backgroundPicture?.dispose();
+    _backgroundPicture = null;
+    _backgroundOwner = null;
+    _backgroundVersions = const [];
     _sameWordKey = null;
     _sameWords = const [];
     for (final row in _rows.values) {
@@ -308,14 +359,18 @@ class TerminalPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (!controller.visible) return;
     cache.configure(typography);
+    cache._prepare(fontSize, cell);
     cache.paints++;
     final frame = controller.metadata;
     canvas.drawRect(
       Offset.zero & size,
-      Paint()..color = Color(frame?.background ?? 0xff10151d),
+      Paint()
+        ..isAntiAlias = false
+        ..color = Color(frame?.background ?? 0xff10151d),
     );
     canvas.save();
-    canvas.clipRect(Offset.zero & size);
+    canvas.clipRect(Offset.zero & size, doAntiAlias: false);
+    cache.backgrounds(canvas, controller, cell);
     for (var y = 0; y < controller.rows.length; y++) {
       canvas.save();
       canvas.translate(0, y * cell.height);

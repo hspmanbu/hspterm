@@ -35,12 +35,22 @@ pub(super) async fn select(
         }
         check_pair(source, target)?;
         let connector = source.session.direct_connector(source.generation).await?;
-        if connector
+        match connector
             .probe(&peer, &target.target.username, grant.epoch, stop.clone())
             .await?
-            != ProbeStatus::Available
         {
-            bail!("安全直传工具、认证或原目标主机校验不可用");
+            ProbeStatus::Available => {}
+            ProbeStatus::MissingTools => {
+                bail!("直传所需工具缺失：来源需要ssh、rsync与Python 3，目标需要rsync与Python 3")
+            }
+            ProbeStatus::AgentUnavailable => {
+                bail!("来源会话的直传密钥授权不可用，请配置应用Agent后重试")
+            }
+            ProbeStatus::AuthenticationFailed => {
+                bail!("来源未能连接并验证目标，请检查网络、密钥认证和主机指纹；未改用本机中转")
+            }
+            ProbeStatus::Timeout => bail!("来源服务器无法及时连接目标SSH地址，未改用本机中转"),
+            ProbeStatus::Unsupported => bail!("远端工具版本不支持安全直传，未改用本机中转"),
         }
         check_pair(source, target)?;
         Ok::<_, anyhow::Error>(DirectRoute::new(
@@ -61,7 +71,7 @@ pub(super) async fn select(
     match candidate {
         Ok(route) => Ok(Some(route)),
         Err(_) if relay_permitted => Ok(None),
-        Err(_) => bail!("安全直传不可用且未允许内存中转；本次未开始新的目标写入或来源删除"),
+        Err(error) => Err(error),
     }
 }
 pub(crate) async fn preflight(

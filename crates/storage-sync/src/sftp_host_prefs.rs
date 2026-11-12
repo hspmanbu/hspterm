@@ -256,6 +256,15 @@ mod tests {
             assert!(record_columns(&mut v, &bad).is_err());
         }
         assert_eq!(load_columns(&v).unwrap(), vec![entry]);
+        let expected = load_columns(&v).unwrap();
+        drop(v);
+        let mut v = Vault::open(&dir.path().join("cols.vault"), b"synthetic-cols-master").unwrap();
+        assert_eq!(
+            load_columns(&v).unwrap(),
+            expected,
+            "column layout survives closing and unlocking the Vault"
+        );
+        assert_eq!(load(&v).unwrap(), vec![(host.to_owned(), 2, false)]);
         // Old records without the columns field still load.
         let raw = br#"{"version":1,"hosts":[["host-33333333333333333333333333333333",1,true]]}"#;
         let prior = v.get_bounded(RECORD, MAX_RECORD_BYTES).unwrap();

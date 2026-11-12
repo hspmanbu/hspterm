@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
+import 'package:hspterm/prototype/files.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hspterm/prototype/model.dart';
 import 'package:hspterm/workbench/model.dart';
@@ -16,7 +19,7 @@ class _Model extends LiveWorkbenchModel {
   RemoteFileSelection? partial;
   int? targetGeneration;
   String? destination;
-  bool? relay;
+  bool? relay, direct;
   @override
   List<TerminalSession> get sessions => fixtures;
   @override
@@ -33,6 +36,7 @@ class _Model extends LiveWorkbenchModel {
     targetGeneration = expectedGeneration;
     destination = directory;
     relay = allowMemoryRelay;
+    direct = allowDirect;
     final rest = partial;
     partial = null;
     if (rest != null) {
@@ -109,6 +113,65 @@ Future<void> _mount(
 }
 
 void main() {
+  testWidgets(
+    'file Copy To menu requests server direct only and preserves partial acceptance',
+    (tester) async {
+      final m = await _fixture();
+      final source = m.fixtures.first, target = m.fixtures.last;
+      for (final session in m.fixtures) {
+        session.disconnected = false;
+        session.connectionGeneration = session.controller.generation;
+      }
+      m.partial = m.prepareRemoteFileSelection(source, [source.files.last]);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: FilesPanel(model: m, pane: source),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(source.files.first.name).first);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.tap(find.text(source.files.last.name).first);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.tap(
+        find.text(source.files.first.name).first,
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('复制到'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('${target.host.name} · ${target.path}'));
+      await tester.pumpAndSettle();
+      expect(m.relay, isFalse);
+      expect(m.direct, isTrue);
+      expect(m.destination, target.path);
+      expect(m.submitted, hasLength(1));
+      expect(m.submitted.single.paths, hasLength(2));
+      expect(find.byType(RemoteDestinationDialog), findsOneWidget);
+      expect(find.text('待提交 1 项 · 已入队 1 项'), findsOneWidget);
+      expect(
+        tester
+            .widget<CheckboxListTile>(
+              find.byKey(const ValueKey('remote-destination-relay-policy')),
+            )
+            .value,
+        isFalse,
+      );
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+      expect(
+        m.submitted,
+        hasLength(1),
+        reason: 'failure must not silently resubmit via local relay',
+      );
+      await tester.pumpWidget(const SizedBox());
+      await m.shutdown();
+      m.dispose();
+    },
+  );
+
   testWidgets('IME candidate text cannot be submitted as a destination', (
     tester,
   ) async {
@@ -129,7 +192,7 @@ void main() {
       text: '/候选',
       composing: TextRange(start: 1, end: 3),
     );
-    await tester.tap(find.text('允许中转并复制'));
+    await tester.tap(find.text('仅尝试安全直传'));
     await tester.pumpAndSettle();
     expect(resolutions, 0);
     expect(m.submitted, isEmpty);
@@ -145,14 +208,15 @@ void main() {
     (tester) async {
       final m = await _fixture();
       await _mount(tester, m);
-      await tester.tap(
+      final relay = tester.widget<CheckboxListTile>(
         find.byKey(const ValueKey('remote-destination-relay-policy')),
       );
-      await tester.pumpAndSettle();
+      expect(relay.value, isFalse);
       expect(find.text('允许中转并复制'), findsNothing);
       await tester.tap(find.text('仅尝试安全直传'));
       await tester.pumpAndSettle();
       expect(m.relay, false);
+      expect(m.direct, isTrue);
       expect(m.submitted, hasLength(1));
       await tester.pumpWidget(const SizedBox());
       await m.shutdown();
@@ -165,7 +229,7 @@ void main() {
       final m = await _fixture();
       final pending = Completer<String>();
       await _mount(tester, m, resolve: (_, _) => pending.future);
-      await tester.tap(find.text('允许中转并复制'));
+      await tester.tap(find.text('仅尝试安全直传'));
       await tester.pump();
       m.fixtures.first.controller.generation++;
       pending.complete('/resolved');
@@ -188,6 +252,10 @@ void main() {
       ]);
       final revision = m.remoteFileClipboardRevision;
       await _mount(tester, m);
+      await tester.tap(
+        find.byKey(const ValueKey('remote-destination-relay-policy')),
+      );
+      await tester.pumpAndSettle();
       m.fixtures.first.path = '/later navigation';
       await tester.enterText(
         find.byKey(const ValueKey('remote-destination-path')),
@@ -219,6 +287,10 @@ void main() {
       m.fixtures.first.files.last,
     ], cut: true);
     await _mount(tester, m, move: true);
+    await tester.tap(
+      find.byKey(const ValueKey('remote-destination-relay-policy')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('确认移动并允许跨服中转'));
     await tester.pumpAndSettle();
     expect(find.text('待提交 1 项 · 已入队 1 项'), findsOneWidget);
@@ -247,7 +319,7 @@ void main() {
       },
     );
     m.fixtures.last.controller.generation++;
-    await tester.tap(find.text('允许中转并复制'));
+    await tester.tap(find.text('仅尝试安全直传'));
     await tester.pumpAndSettle();
     expect(m.submitted, isEmpty);
     expect(resolved, 0);
@@ -265,7 +337,7 @@ void main() {
     final m = await _fixture();
     final pending = Completer<String>();
     await _mount(tester, m, resolve: (_, _) => pending.future);
-    await tester.tap(find.text('允许中转并复制'));
+    await tester.tap(find.text('仅尝试安全直传'));
     await tester.pump();
     await tester.tap(find.text('停止继续入队'));
     pending.complete('/resolved');

@@ -289,9 +289,11 @@ class ResizeGrip extends StatelessWidget {
     super.key,
     required this.horizontal,
     required this.onDelta,
+    this.onEnd,
   });
   final bool horizontal;
   final ValueChanged<double> onDelta;
+  final VoidCallback? onEnd;
   @override
   Widget build(BuildContext context) => MouseRegion(
     cursor: horizontal
@@ -300,6 +302,8 @@ class ResizeGrip extends StatelessWidget {
     child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onPanUpdate: (d) => onDelta(horizontal ? d.delta.dx : d.delta.dy),
+      onPanEnd: (_) => onEnd?.call(),
+      onPanCancel: onEnd,
       child: SizedBox(
         width: horizontal ? 7 : null,
         height: horizontal ? null : 7,

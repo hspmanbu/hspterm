@@ -1,7 +1,9 @@
 import '../workbench/file_properties.dart';
 import '../workbench/explorer_export.dart';
-import '../workbench/model.dart' show LiveTerminalSession, LiveWorkbenchModel;
+import '../workbench/model.dart'
+    show LiveTerminalSession, LiveWorkbenchModel, RemoteFileSubmissionFailure;
 import '../workbench/terminal_paths.dart';
+import '../workbench/remote_destination.dart';
 
 import 'dart:async';
 
@@ -237,22 +239,29 @@ class _FilesPanelState extends State<FilesPanel> {
       _columnOrder.where((id) => !_hiddenColumns.contains(id));
   int _sortIndexOf(String id) => _columnIds.indexOf(id);
   Timer? _columnSave;
+  VoidCallback? _flushColumns;
 
-  /// Coalesces column writes: width drags fire continuously, the persisted
-  /// layout must not write the vault per pixel.
-  void _rememberColumns() {
+  /// Only width-drag updates are debounced. Reorder/show-hide writes enter the
+  /// model's pending-operation registry before a window can be closed.
+  void _rememberColumns({bool debounce = false}) {
     _columnSave?.cancel();
-    _columnSave = Timer(const Duration(milliseconds: 800), () {
-      if (!mounted) return;
-      m.rememberColumns(
-        p.host.id,
-        SftpColumnLayout(
-          order: List.of(_columnOrder),
-          hidden: Set.of(_hiddenColumns),
-          widths: Map.of(widths),
-        ),
-      );
-    });
+    final model = m, host = p.host.id;
+    final layout = SftpColumnLayout(
+      order: List.of(_columnOrder),
+      hidden: Set.of(_hiddenColumns),
+      widths: Map.of(widths),
+    );
+    void save() {
+      _flushColumns = null;
+      model.rememberColumns(host, layout);
+    }
+
+    _flushColumns = save;
+    if (debounce) {
+      _columnSave = Timer(const Duration(milliseconds: 800), save);
+    } else {
+      save();
+    }
   }
 
   Future<void> configureColumns() async {
@@ -392,12 +401,21 @@ class _FilesPanelState extends State<FilesPanel> {
   }
 
   void _applyBrowserDefaults() {
-    final revision = m.fileDefaultsRevision;
+    final revision = (m, m.fileDefaultsRevision, p.host.id);
     if (_defaultsRevision == revision) return;
+    _columnSave?.cancel();
+    _flushColumns?.call();
     _defaultsRevision = revision;
     foldersFirst = m.fileFoldersFirst;
     hidden = m.fileShowHidden;
     compact = m.fileCompact;
+    sortColumn = 0;
+    ascending = true;
+    _columnOrder = List.of(_columnIds);
+    _hiddenColumns = {};
+    widths
+      ..clear()
+      ..addAll(_columnDefaultWidths);
     final remembered = m.rememberedSort(p.host.id);
     if (remembered case final pref?) {
       sortColumn = pref.$1;
@@ -504,6 +522,7 @@ class _FilesPanelState extends State<FilesPanel> {
     _filter.dispose();
     _horizontal.dispose();
     _columnSave?.cancel();
+    _flushColumns?.call();
     _vertical.dispose();
     super.dispose();
   }
@@ -1419,19 +1438,40 @@ class _FilesPanelState extends State<FilesPanel> {
           files,
           cut: moving,
         );
-        final ids = await live.enqueueRemoteFileSelection(
-          selection,
-          target.$1,
-          target.$3,
-          target.$2,
-          allowMemoryRelay: true,
-          allowDirect: true,
+        final fixedTarget = RemoteDestinationTarget(
+          target.$1 as LiveTerminalSession,
+          directory: target.$3,
         );
-        if (mounted) {
-          notice(
-            context,
-            '已加入 ${ids.length} 个${moving ? '移动' : '复制'}任务',
-            level: AppNoticeLevel.success,
+        try {
+          final ids = await live.enqueueRemoteFileSelection(
+            selection,
+            target.$1,
+            target.$3,
+            target.$2,
+            allowMemoryRelay: false,
+            allowDirect: true,
+          );
+          if (mounted) {
+            notice(
+              context,
+              '已加入 ${ids.length} 个${moving ? '移动' : '复制'}任务',
+              level: AppNoticeLevel.success,
+            );
+          }
+        } on RemoteFileSubmissionFailure catch (error) {
+          if (!mounted) return;
+          // Already-admitted items stay in the queue. Retry/relay consent only
+          // applies to the remaining frozen selection, never to accepted work.
+          await showAppDialog<void>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => RemoteDestinationDialog(
+              model: live,
+              selection: error.remaining,
+              targets: [fixedTarget],
+              initialError: appMessage(error.cause),
+              alreadyAccepted: error.acceptedIds.length,
+            ),
           );
         }
       } else {
@@ -2207,57 +2247,72 @@ class _FilesPanelState extends State<FilesPanel> {
                                     key: const ValueKey('sftp-path-bar'),
                                     behavior: HitTestBehavior.opaque,
                                     onTap: _editPath,
-                                    child: SingleChildScrollView(
-                                      scrollDirection: Axis.horizontal,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          InkWell(
-                                            onTap: () => navigate('/'),
-                                            child: const Padding(
-                                              padding: EdgeInsets.symmetric(
-                                                horizontal: 7,
-                                                vertical: 8,
-                                              ),
-                                              child: Text('/'),
-                                            ),
+                                    child: LayoutBuilder(
+                                      builder: (context, box) => SingleChildScrollView(
+                                        key: ValueKey(
+                                          'sftp-breadcrumbs-${p.id}-${p.connectionGeneration}-${p.path}',
+                                        ),
+                                        reverse: true,
+                                        scrollDirection: Axis.horizontal,
+                                        child: ConstrainedBox(
+                                          constraints: BoxConstraints(
+                                            minWidth: box.maxWidth,
                                           ),
-                                          for (
-                                            var i = 0;
-                                            i <
-                                                p.path
-                                                    .split('/')
-                                                    .where((s) => s.isNotEmpty)
-                                                    .length;
-                                            i++
-                                          ) ...[
-                                            const Icon(
-                                              Icons.chevron_right,
-                                              size: 13,
-                                            ),
-                                            Builder(
-                                              builder: (context) {
-                                                final parts = p.path
-                                                    .split('/')
-                                                    .where((s) => s.isNotEmpty)
-                                                    .toList();
-                                                return InkWell(
-                                                  onTap: () => navigate(
-                                                    '/${parts.take(i + 1).join('/')}',
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              InkWell(
+                                                onTap: () => navigate('/'),
+                                                child: const Padding(
+                                                  padding: EdgeInsets.symmetric(
+                                                    horizontal: 7,
+                                                    vertical: 8,
                                                   ),
-                                                  child: Padding(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 5,
-                                                          vertical: 8,
-                                                        ),
-                                                    child: Text(parts[i]),
-                                                  ),
-                                                );
-                                              },
-                                            ),
-                                          ],
-                                        ],
+                                                  child: Text('/'),
+                                                ),
+                                              ),
+                                              for (
+                                                var i = 0;
+                                                i <
+                                                    p.path
+                                                        .split('/')
+                                                        .where(
+                                                          (s) => s.isNotEmpty,
+                                                        )
+                                                        .length;
+                                                i++
+                                              ) ...[
+                                                const Icon(
+                                                  Icons.chevron_right,
+                                                  size: 13,
+                                                ),
+                                                Builder(
+                                                  builder: (context) {
+                                                    final parts = p.path
+                                                        .split('/')
+                                                        .where(
+                                                          (s) => s.isNotEmpty,
+                                                        )
+                                                        .toList();
+                                                    return InkWell(
+                                                      onTap: () => navigate(
+                                                        '/${parts.take(i + 1).join('/')}',
+                                                      ),
+                                                      child: Padding(
+                                                        padding:
+                                                            const EdgeInsets.symmetric(
+                                                              horizontal: 5,
+                                                              vertical: 8,
+                                                            ),
+                                                        child: Text(parts[i]),
+                                                      ),
+                                                    );
+                                                  },
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -2283,24 +2338,6 @@ class _FilesPanelState extends State<FilesPanel> {
                       ),
                     );
                   }),
-                  Builder(
-                    builder: (c) => Tool(
-                      Icons.bookmark_border,
-                      '书签',
-                      () => run(
-                        showDirectoryBookmarkPopup(c, m, p, global: false),
-                      ),
-                    ),
-                  ),
-                  Builder(
-                    builder: (c) => Tool(
-                      Icons.public,
-                      '全局书签',
-                      () => run(
-                        showDirectoryBookmarkPopup(c, m, p, global: true),
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -2354,6 +2391,24 @@ class _FilesPanelState extends State<FilesPanel> {
                     () => setState(() => filtering = !filtering),
                   ),
                   const Spacer(),
+                  Builder(
+                    builder: (c) => Tool(
+                      Icons.bookmark_border,
+                      '书签',
+                      () => run(
+                        showDirectoryBookmarkPopup(c, m, p, global: false),
+                      ),
+                    ),
+                  ),
+                  Builder(
+                    builder: (c) => Tool(
+                      Icons.public,
+                      '全局书签',
+                      () => run(
+                        showDirectoryBookmarkPopup(c, m, p, global: true),
+                      ),
+                    ),
+                  ),
                   PopupMenuButton<String>(
                     tooltip: '文件视图选项',
                     icon: const Icon(Icons.more_horiz, size: 17),
@@ -2535,18 +2590,25 @@ class _FilesPanelState extends State<FilesPanel> {
                                                               'file-column-$id',
                                                             ),
                                                             horizontal: true,
-                                                            onDelta: (d) => setState(
-                                                              () => widths[id] =
-                                                                  ((widths[id] ?? _columnDefaultWidths[id]!).clamp(
-                                                                            70,
-                                                                            500,
-                                                                          ) +
-                                                                          d)
-                                                                      .clamp(
-                                                                        70,
-                                                                        500,
-                                                                      ),
-                                                            ),
+                                                            onEnd: () =>
+                                                                _rememberColumns(),
+                                                            onDelta: (d) {
+                                                              setState(
+                                                                () => widths[id] =
+                                                                    ((widths[id] ?? _columnDefaultWidths[id]!).clamp(
+                                                                              70,
+                                                                              500,
+                                                                            ) +
+                                                                            d)
+                                                                        .clamp(
+                                                                          70,
+                                                                          500,
+                                                                        ),
+                                                              );
+                                                              _rememberColumns(
+                                                                debounce: true,
+                                                              );
+                                                            },
                                                           ),
                                                         ],
                                                       ),

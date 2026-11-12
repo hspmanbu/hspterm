@@ -20,6 +20,54 @@ Future<void> mount(WidgetTester tester, WorkbenchModel model) async {
 
 void main() {
   testWidgets(
+    'long paths start at their last breadcrumb and bookmark tools use the second row',
+    (tester) async {
+      final m = WorkbenchModel()..demo();
+      m.focus!.path =
+          '/root/${List.generate(15, (i) => 'folder-$i').join('/')}/last-directory';
+      await mount(tester, m);
+      final view = find.byWidgetPredicate(
+        (w) =>
+            w is SingleChildScrollView &&
+            w.key is ValueKey<String> &&
+            (w.key! as ValueKey<String>).value.startsWith('sftp-breadcrumbs-'),
+      );
+      final scroll = tester.widget<SingleChildScrollView>(view);
+      expect(scroll.reverse, isTrue);
+      final viewport = tester.getRect(view);
+      final tail = tester.getRect(find.text('last-directory'));
+      expect(tail.right, lessThanOrEqualTo(viewport.right + 1));
+      expect(tail.left, greaterThanOrEqualTo(viewport.left));
+      final bookmarks = tester.getCenter(find.byTooltip('书签'));
+      final global = tester.getCenter(find.byTooltip('全局书签'));
+      final options = tester.getCenter(find.byTooltip('文件视图选项'));
+      expect(bookmarks.dy, greaterThan(viewport.bottom));
+      expect(bookmarks.dy, closeTo(options.dy, 2));
+      expect(global.dy, closeTo(options.dy, 2));
+      expect(bookmarks.dx, lessThan(global.dx));
+      expect(global.dx, lessThan(options.dx));
+      final pane = m.focus!;
+      pane.path = '/short';
+      m.changed();
+      await tester.pumpAndSettle();
+      final shortView = find.byWidgetPredicate(
+        (w) =>
+            w is SingleChildScrollView &&
+            w.key is ValueKey<String> &&
+            (w.key! as ValueKey<String>).value.startsWith('sftp-breadcrumbs-'),
+      );
+      expect(
+        tester.getRect(find.text('short')).left -
+            tester.getRect(shortView).left,
+        lessThan(55),
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      m.dispose();
+    },
+  );
+
+  testWidgets(
     'first and idle path entry selects all and one outside click exits',
     (tester) async {
       final model = WorkbenchModel()..demo();

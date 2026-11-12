@@ -129,6 +129,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'WebDAV HTTP tests failed' }
           cargo test -p hspterm-storage-sync --lib --locked webdav_http_targets -- --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'Sync target protocol tests failed' }
+          cargo test -p hspterm-storage-sync --lib --locked sftp_host_prefs -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'SFTP column persistence tests failed' }
 
       - name: Verify tmux history protocol guards
         run: |
@@ -143,7 +145,7 @@ jobs:
       - name: Test font settings and navigation
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         working-directory: ui_flutter
-        run: flutter test --no-pub test/typography_settings_test.dart test/host_typography_test.dart test/settings_leave_guard_test.dart test/widget_test.dart test/directory_reader_test.dart test/terminal_paths_send_test.dart test/run_log_test.dart test/diagnostics_test.dart test/ime_buffer_test.dart test/app_notice_test.dart test/minimized_terminal_test.dart test/file_properties_dialog_test.dart test/sftp_feedback_ui_test.dart test/terminal_feedback_test.dart test/dialog_bounds_test.dart test/history_controls_test.dart test/terminal_suggestions_test.dart test/clipboard_image_test.dart test/explorer_drag_handoff_test.dart test/explorer_export_test.dart test/local_edit_queue_test.dart test/local_edit_session_test.dart test/transfer_rate_test.dart test/transfer_queue_test.dart test/remote_inspection_test.dart test/connection_status_test.dart test/cached_path_field_test.dart test/paste_preview_ui_test.dart test/configuration_sync_settings_test.dart test/display_selection_test.dart test/tmux_compatibility_test.dart test/tmux_history_test.dart test/local_file_actions_test.dart test/terminal_links_test.dart test/terminal_background_test.dart --reporter expanded
+        run: flutter test --no-pub test/typography_settings_test.dart test/host_typography_test.dart test/settings_leave_guard_test.dart test/widget_test.dart test/directory_reader_test.dart test/terminal_paths_send_test.dart test/run_log_test.dart test/diagnostics_test.dart test/ime_buffer_test.dart test/app_notice_test.dart test/minimized_terminal_test.dart test/file_properties_dialog_test.dart test/sftp_feedback_ui_test.dart test/terminal_feedback_test.dart test/dialog_bounds_test.dart test/history_controls_test.dart test/terminal_suggestions_test.dart test/clipboard_image_test.dart test/explorer_drag_handoff_test.dart test/explorer_export_test.dart test/local_edit_queue_test.dart test/local_edit_session_test.dart test/transfer_rate_test.dart test/transfer_queue_test.dart test/remote_inspection_test.dart test/connection_status_test.dart test/cached_path_field_test.dart test/paste_preview_ui_test.dart test/configuration_sync_settings_test.dart test/display_selection_test.dart test/tmux_compatibility_test.dart test/tmux_history_test.dart test/local_file_actions_test.dart test/terminal_links_test.dart test/terminal_background_test.dart test/file_columns_test.dart test/sftp_column_persistence_test.dart test/remote_destination_test.dart --reporter expanded
 
       - name: Check native Windows startup and normal exit
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}

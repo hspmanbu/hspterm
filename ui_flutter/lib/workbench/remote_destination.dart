@@ -1,18 +1,21 @@
 import '../prototype/design.dart';
+import '../app_notice.dart';
 
 import 'package:flutter/material.dart';
 
 import '../prototype/model.dart';
 import '../src/rust/api.dart' as rust;
 import 'model.dart';
+import 'agent_dialog.dart';
 
 /// A destination picker never connects a host or follows the current UI focus.
 class RemoteDestinationTarget {
-  RemoteDestinationTarget(this.session)
+  RemoteDestinationTarget(this.session, {String? directory})
     : nativeId = session.controller.id!,
       generation = session.controller.generation,
       label = '${session.host.name} · ${session.controller.connectionLabel}',
-      initialDirectory = session.path.startsWith('/') ? session.path : '/';
+      initialDirectory =
+          directory ?? (session.path.startsWith('/') ? session.path : '/');
   final LiveTerminalSession session;
   final int nativeId, generation;
   final String label, initialDirectory;
@@ -59,11 +62,15 @@ class RemoteDestinationDialog extends StatefulWidget {
     required this.selection,
     required this.targets,
     this.resolveDirectory,
+    this.initialError,
+    this.alreadyAccepted = 0,
   });
   final LiveWorkbenchModel model;
   final RemoteFileSelection selection;
   final List<RemoteDestinationTarget> targets;
   final RemoteDirectoryResolver? resolveDirectory;
+  final String? initialError;
+  final int alreadyAccepted;
   @override
   State<RemoteDestinationDialog> createState() =>
       _RemoteDestinationDialogState();
@@ -75,13 +82,15 @@ class _RemoteDestinationDialogState extends State<RemoteDestinationDialog> {
   late final TextEditingController _directory;
   late final String _sourceLabel;
   String? _error;
-  bool _busy = false, _stop = false, _allowRelay = true, _allowDirect = true;
+  bool _busy = false, _stop = false, _allowRelay = false, _allowDirect = true;
   int _accepted = 0;
 
   @override
   void initState() {
     super.initState();
     _selection = widget.selection;
+    _error = widget.initialError;
+    _accepted = widget.alreadyAccepted;
     _sourceLabel =
         '${_selection.source.host.name} · ${_selection.source.controller.connectionLabel}';
     _target = widget.targets.firstWhere(
@@ -156,11 +165,12 @@ class _RemoteDestinationDialogState extends State<RemoteDestinationDialog> {
         setState(() {
           _accepted += error.acceptedIds.length;
           _selection = error.remaining;
-          _error = '仅剩 ${_selection.paths.length} 项未入队：${error.cause}';
+          _error =
+              '仅剩 ${_selection.paths.length} 项未入队：${appMessage(error.cause)}';
         });
       }
     } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      if (mounted) setState(() => _error = appMessage(error));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -250,13 +260,45 @@ class _RemoteDestinationDialogState extends State<RemoteDestinationDialog> {
                 value: _allowDirect,
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                title: const Text('优先安全直传（确认 SSH 与 SFTP 路径一致）'),
+                title: const Text('服务器直传（SSH 与 SFTP 使用相同路径）'),
                 subtitle: const Text(
-                  '自定义 SFTP 虚拟根与 SSH 路径不对应时请关闭。需要原会话已有明确应用 Agent 授权，不上传私钥。',
+                  '来源需能访问目标 SSH 地址，两端需 Python 3 和 rsync，来源需 ssh。使用已授权的目标密钥，不上传私钥；自定义 SFTP 虚拟根可能不适用。',
                 ),
                 onChanged: _busy
                     ? null
                     : (value) => setState(() => _allowDirect = value ?? false),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 4, bottom: 2),
+                child: Text(
+                  '首次使用：在来源主机配置中开启 Agent 转发并重新连接，再授权目标主机的密钥。目标需接受该公钥。',
+                  style: TextStyle(fontSize: 11),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const ValueKey('remote-destination-agent'),
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          try {
+                            _checkCurrent(_target);
+                            await showTerminalAgent(
+                              context,
+                              widget.model,
+                              _selection.source,
+                            );
+                            if (mounted) setState(() {});
+                          } catch (error) {
+                            if (mounted) {
+                              setState(() => _error = appMessage(error));
+                            }
+                          }
+                        },
+                  icon: const Icon(Icons.key, size: 16),
+                  label: const Text('配置来源会话的直传认证'),
+                ),
               ),
               CheckboxListTile(
                 key: const ValueKey('remote-destination-relay-policy'),
@@ -273,8 +315,8 @@ class _RemoteDestinationDialogState extends State<RemoteDestinationDialog> {
               ),
               Text(
                 _selection.cut
-                    ? '同账户使用无覆盖更名；跨账户优先使用已授权应用Agent和原目标指纹保护的直传，不可用时允许中转；整树复制确认后再删除来源，未知删除不重发。来源可能被其他程序替换，大小/类型不能证明身份；请确保来源不被修改。暂停/取消不恢复已经删除的来源，目标副本保留；未结束任务会保留来源编辑保护。'
-                    : '优先使用已授权应用Agent和原目标指纹保护的服务器直传；不可用时允许本机中转，使用上下行带宽；正文不落本机临时文件。同名按入队时设置处理。',
+                    ? '同账户使用无覆盖更名；跨账户默认只用服务器直传，本机中转须单独勾选。整树复制确认后才删除来源，未知删除不重发；暂停或取消不恢复已删除来源，请确保来源不被其他程序修改。'
+                    : '默认只用服务器直传。只有勾选本机中转才会使用本机上下行带宽；文件正文不落本机临时文件。同名按入队时设置处理。',
               ),
               const SizedBox(height: 8),
               const Text('不会修改文件剪贴板。每项独立入队，已接受任务在传输队列管理；停止只阻止后续入队。'),

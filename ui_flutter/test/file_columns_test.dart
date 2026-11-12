@@ -10,7 +10,74 @@ Future<void> openColumns(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+class RememberingColumns extends WorkbenchModel {
+  final saved = <String, SftpColumnLayout>{};
+  int revision = 0;
+  @override
+  Object get fileDefaultsRevision => (super.fileDefaultsRevision, revision);
+  @override
+  SftpColumnLayout? rememberedColumns(String hostId) => saved[hostId];
+  @override
+  void rememberColumns(String hostId, SftpColumnLayout layout) {
+    saved[hostId] = layout;
+  }
+}
+
 void main() {
+  testWidgets(
+    'reorder is saved before disposing the panel and late restore updates headers',
+    (tester) async {
+      final m = RememberingColumns()..demo();
+      Future<void> show() => tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AnimatedBuilder(
+              animation: m,
+              builder: (_, _) => FilesPanel(model: m, pane: m.focus!),
+            ),
+          ),
+        ),
+      );
+      await show();
+      await tester.pumpAndSettle();
+      await openColumns(tester);
+      tester
+          .widget<ReorderableListView>(find.byType(ReorderableListView))
+          .onReorderItem!(0, 3);
+      await tester.pump();
+      await tester.tap(find.text('应用'));
+      await tester.pump(); // do not wait for the old 800ms debounce
+      expect(m.saved[m.focus!.host.id]!.order.first, 'modified');
+      await tester.pumpWidget(const SizedBox());
+      await show();
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .getTopLeft(find.byKey(const ValueKey('file-column-modified')))
+            .dx,
+        lessThan(
+          tester.getTopLeft(find.byKey(const ValueKey('file-column-name'))).dx,
+        ),
+      );
+      m.saved[m.focus!.host.id] = SftpColumnLayout(
+        order: ['size', 'name', 'modified', 'kind', 'permissions', 'owner'],
+        hidden: {},
+        widths: {},
+      );
+      m.revision++;
+      m.changed();
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('file-column-size'))).dx,
+        lessThan(
+          tester.getTopLeft(find.byKey(const ValueKey('file-column-name'))).dx,
+        ),
+      );
+      await tester.pumpWidget(const SizedBox());
+      m.dispose();
+    },
+  );
+
   testWidgets(
     'column visibility is applied explicitly and cancelling preserves the current layout',
     (tester) async {
