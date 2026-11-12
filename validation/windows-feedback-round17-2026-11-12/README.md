@@ -22,6 +22,12 @@
 - 离线pub get仅将既有path 1.9.1从传递依赖升级为直接声明，无依赖版本升级。
 - **没有在Ubuntu执行本轮应用构建、Rust/Flutter/Python运行测试、真实SSH或真实TUI验收。** FRB生成所需宏展开不能算应用编译/运行通过。
 
+## 提交与CI
+
+- 主源码：`4814dd5`；最终清理守卫：`c141ddc`，均已推送当前分支。
+- Windows x64 Release CI：https://github.com/hspmanbu/hspterm/actions/runs/43145153511 。dispatch HTTP204；一次查询确认head_sha为c141ddc。之后不再监视或等待结果，本轮未确认构建成功/产物可下载。
+- Flutter Analyze最终零问题；Rust/Dart格式、diff检查、266 API词法契约与261公共Result错误边界静态检查全部通过。新增运行测试均交由CI，没有本机执行。
+
 ## CI与后续实机
 
 Windows workflow新增路径/像素/链接/tmux历史组件及Python协议防护用例；保留原FRB一致性、严格Clippy、Rust库测试、Analyze、既有组件、正式Release和原生窗口检查。CI链接在PROGRESS记录；本轮不等待结果。

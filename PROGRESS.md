@@ -1,10 +1,10 @@
-## 2026-11-12 第17轮终端/本地路径/图片/tmux反馈（静态修改，待CI和实机）
+## 2026-11-12 第17轮终端/本地路径/图片/tmux反馈（源码c141ddc，CI已发起）
 
 - 分支fix/round7-windows-feedback，从60fbb66/a7ddf79继续；用户最新要求仅静态修改/复核后推送、dispatch即结束，不监视CI；第三阶段优化与Android仍暂停。
 - 八项代码已接：终端实色边缘去抗锯齿；粘贴预览统一主题字体/浅色背景/不透明选区；本地文件规范化并由Windows Shell直接打开/父子PIDL选中；图片组折叠和/tmp编号PNG排他创建；统一粘贴自动分流；tmux Alt覆盖不转发Alt位；软换行token和OSC8路径标注识别；原SSH/原tmux身份/真实pane历史元数据驱动远端滚动条。
 - tmux历史条只在可见已连接标签串行采样，拖动合并/限制真实历史/校验PID、session创建时间和pane，隐藏/断线退休；需要远端Python3；只读禁止导航，应用自己的历史不伪装为tmux缓冲。保留原生pane-scrollbars兼容及原终端功能。
 - 静态：Flutter Analyze零问题，18个Dart文件格式、Rust fmt/diff检查；正式FRB2.13生成；266 API/82 DTO/338 Dart词法契约零发现、261个公共Result错误边界齐全；Python AST通过。新增组件/像素/协议防护与OpenSSH测试源码，已纳入适用CI；**本轮没有本机运行这些测试/构建，不能称通过**。
-- 详细修改、边界和Windows11复测步骤：validation/windows-feedback-round17-2026-11-12/README.md。CI和提交链接在发布后补充。用户日志、ssh-screen/、tools/AGENTS.md、round13未跟踪目录未改动/未提交。
+- 详细修改、边界和Windows11复测步骤：validation/windows-feedback-round17-2026-11-12/README.md。主源码4814dd5，排他编号图片失败清理守卫c141ddc已推送；Windows x64 Release run43145153511已发起：https://github.com/hspmanbu/hspterm/actions/runs/43145153511 。仅查询一次确认run归属c141ddc，不监视/不等待结果；测试与构建成功状态尚未确认。用户日志、ssh-screen/、tools/AGENTS.md、round13未跟踪目录未改动/未提交。
 - 仍未完成：tmux可信Shell新窗口/历史联想；原下载覆盖待处理问题待用户复测确认；Stage3专项与Android仍暂停。不要把本轮静态修正当成Windows实机验收完成。
 
 ## 2026-11-11 tmux基础兼容改进（源码a7ddf79，CI已发起，联想集成未完成）
