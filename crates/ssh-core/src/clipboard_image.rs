@@ -155,12 +155,11 @@ pub async fn upload_observed(
         Ok(path.clone())
     }
     .await;
-    if result.is_err() {
-        if let Err(error) = sftp.remove_file(&path).await
-            && !missing(&error)
-        {
-            return Err(ImageUploadError::Cleanup);
-        }
+    if result.is_err()
+        && let Err(error) = sftp.remove_file(&path).await
+        && !missing(&error)
+    {
+        return Err(ImageUploadError::Cleanup);
     }
     result
 }
