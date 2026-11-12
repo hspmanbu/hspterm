@@ -1,9 +1,0 @@
-2026-11-11T05:59:08.1150841Z     Finished `dev` profile [unoptimized] target(s) in 2m 18s
-2026-11-11T06:04:04.2826982Z test result: ok. 77 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 75.25s
-2026-11-11T06:04:06.7656699Z test history::tests::concurrent_creation_never_cleans_a_live_run ... ok
-2026-11-11T06:04:06.7693158Z test history::tests::encrypted_round_trip_tamper_fails_closed_and_files_are_removed ... ok
-2026-11-11T06:04:06.7751655Z test history::tests::stale_cleanup_preserves_active_runs ... ok
-2026-11-11T06:04:10.4354619Z test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.14s
-2026-11-11T06:04:33.3264102Z No issues found! (ran in 19.2s)
-2026-11-11T06:06:06.0297292Z 01:18 +158: All tests passed!
-2026-11-11T06:06:28.9958999Z Native normal-close position and size restoration passed (locked startup). Integrated border dragging needs interactive Windows verification.

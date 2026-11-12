@@ -19,8 +19,16 @@
 **/__pycache__/
 *.pyc
 
-# Generated verification screenshots; retain textual results and source assets.
-/validation/**/*.png
-/validation/**/*.jpg
-/validation/**/*.jpeg
-/validation/**/*.webp
+# Development notes and execution records are kept only on the workstation.
+*.md
+# Dependency metadata and legal notices remain distributable.
+!vendor/**/README.md
+!**/LICENSE*.md
+!**/COPYING*.md
+!**/NOTICE*.md
+/docs/
+/validation/
+/ssh-screen/
+/*.log
+/tools/requirements_coverage.py
+/vendor/**/Cargo.toml.orig
