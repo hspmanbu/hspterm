@@ -170,7 +170,7 @@ void main() {
     },
   );
   testWidgets(
-    'image shortcut runs once without sending keys and keeps text paste intact',
+    'paste handles text and images while Ctrl+V stays with the remote application',
     (tester) async {
       final backend = FakeBackend();
       final c = TerminalController(backend);
@@ -178,66 +178,100 @@ void main() {
       c.phase = 'Connected';
       c.generation = 1;
       var images = 0;
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: TerminalView(
-              controller: c,
-              onPasteImage: () async {
-                images++;
-              },
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: TerminalView(
+                controller: c,
+                onPasteImage: () async {
+                  images++;
+                },
+              ),
             ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(TerminalView));
-      await tester.pump();
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyV);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyV);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-      await tester.pump();
-      expect(images, 1);
-      expect(backend.pastes, isEmpty);
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        (call) async => call.method == 'Clipboard.getData'
-            ? {'text': 'ordinary text'}
-            : null,
-      );
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyV);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyV);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-      await tester.pumpAndSettle();
-      expect(images, 1);
-      expect(backend.pastes, [('ordinary text', false)]);
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        (call) async => null,
-      );
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-      await tester.pump();
-      expect(
-        images,
-        2,
-        reason: 'ordinary paste falls back to the image clipboard when text is absent',
-      );
-      expect(backend.pastes, [('ordinary text', false)]);
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byType(TerminalView));
+        await tester.pump();
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.keyV);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.keyV);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pump();
+        expect(images, 1);
+        expect(backend.pastes, isEmpty);
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async => call.method == 'Clipboard.getData'
+              ? {'text': 'ordinary text'}
+              : null,
+        );
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.keyV);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.keyV);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pumpAndSettle();
+        expect(images, 1);
+        expect(backend.pastes, [('ordinary text', false)]);
+        var clipboardReads = 0;
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async {
+            if (call.method == 'Clipboard.getData') clipboardReads++;
+            return null;
+          },
+        );
+        final before = backend.keys.length;
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pumpAndSettle();
+        expect(
+          clipboardReads,
+          0,
+          reason: 'Ctrl+V must not read the local clipboard',
+        );
+        expect(images, 1);
+        final remoteV = backend.keys
+            .skip(before)
+            .where((key) => key.key == 'v')
+            .toList();
+        expect(remoteV.map((key) => key.kind), [0, 2]);
+        expect(remoteV.every((key) => key.modifiers & 63 == 4), isTrue);
 
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        null,
-      );
-      await tester.pumpWidget(const SizedBox());
-      await closeTerminal(tester, c);
+        // The terminal's paste shortcut is Ctrl+Shift+V. Both text and images
+        // must follow this route; Ctrl+V belongs to the remote shell/TUI.
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pumpAndSettle();
+        expect(clipboardReads, 1);
+        expect(
+          images,
+          2,
+          reason: 'terminal paste falls back to the image clipboard when text is absent',
+        );
+        expect(backend.pastes, [('ordinary text', false)]);
+        expect(
+          backend.keys.skip(before).where((key) => key.key == 'v').length,
+          2,
+          reason: 'local paste must not forward V key events',
+        );
+      } finally {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        );
+        await tester.pumpWidget(const SizedBox());
+        await closeTerminal(tester, c);
+      }
     },
   );
   testWidgets(
