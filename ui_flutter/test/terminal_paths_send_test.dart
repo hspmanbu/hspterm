@@ -161,54 +161,82 @@ void main() {
     expect(() => drag.files.clear(), throwsUnsupportedError);
   });
 
-  testWidgets('unavailable insert direct-pastes quoted paths when allowed', (
-    tester,
-  ) async {
-    final original = session('Original', 1, 4);
-    final model = PathSessions([original]);
-    final clipboard = <String>[];
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.platform,
-      (call) async {
-        if (call.method == 'Clipboard.setData') {
-          clipboard.add((call.arguments as Map)['text'] as String);
-        }
-        return null;
-      },
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              child: const Text('send'),
-              onPressed: () => sendSessionPaths(
-                context,
-                model,
-                original,
-                ["/tmp/a b'.txt"],
-                expectedGeneration: 4,
-                request: (id, generation, paths, cd) async => 'Unavailable',
-                directPasteAllowed: () async => true,
+  for (final tmux in [false, true]) {
+    testWidgets(
+      'allowed path paste stays quiet in ${tmux ? 'tmux' : 'ordinary shell'}',
+      (tester) async {
+        final original = session('Original', 1, 4);
+        original.host.shellIntegration = true;
+        original.controller.tmuxReadonly = tmux ? false : null;
+        final model = PathSessions([original]);
+        quietNoticeNotifier.value = null;
+        addTearDown(() async {
+          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            null,
+          );
+          await model.shutdown();
+          model.dispose();
+          quietNoticeNotifier.value = null;
+        });
+        final clipboard = <String>[];
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async {
+            if (call.method == 'Clipboard.setData') {
+              clipboard.add((call.arguments as Map)['text'] as String);
+            }
+            return null;
+          },
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  child: const Text('send'),
+                  onPressed: () => sendSessionPaths(
+                    context,
+                    model,
+                    original,
+                    ["/tmp/a b'.txt"],
+                    expectedGeneration: 4,
+                    request: (id, generation, paths, cd) async => 'Unavailable',
+                    directPasteAllowed: () async => true,
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+        await tester.tap(find.text('send'));
+        await tester.pumpAndSettle();
+        final backend = original.controller.backend as FakeBackend;
+        expect(
+          backend.pastes.single.$1,
+          "'/tmp/a b'\\''.txt'",
+          reason: 'quoted literal, no Enter, no newline',
+        );
+        expect(backend.pastes.single.$2, isFalse);
+        expect(clipboard, isEmpty, reason: 'no clipboard fallback when pasted');
+        expect(quietNoticeNotifier.value?.message, '已填入安全引用路径，未执行。');
+        expect(quietNoticeNotifier.value?.level, AppNoticeLevel.success);
+        expect(quietNoticeNotifier.value?.message, isNot(contains('未启用')));
+        expect(quietNoticeNotifier.value?.message, isNot(contains('重连')));
+        expect(
+          backend.keys,
+          isEmpty,
+          reason: 'no extra Enter or keyboard injection',
+        );
+        expect(
+          backend.texts,
+          isEmpty,
+          reason: 'only the quoted paste is submitted',
+        );
+        expect(find.byType(SnackBar), findsNothing);
+      },
     );
-    await tester.tap(find.text('send'));
-    await tester.pumpAndSettle();
-    final backend = original.controller.backend as FakeBackend;
-    expect(
-      backend.pastes.single.$1,
-      "'/tmp/a b'\\''.txt'",
-      reason: 'quoted literal, no Enter, no newline',
-    );
-    expect(backend.pastes.single.$2, isFalse);
-    expect(clipboard, isEmpty, reason: 'no clipboard fallback when pasted');
-    expect(quietNoticeNotifier.value?.message, contains('普通终端粘贴'));
-    expect(find.byType(SnackBar), findsNothing);
-  });
+  }
 
   testWidgets('direct paste disabled keeps the clipboard-only fallback', (
     tester,
