@@ -474,6 +474,10 @@ pub struct SshConnection {
     tmux: Option<tmux::TmuxState>,
     tmux_session: Option<tmux::Identity>,
     integration_nonce: Option<Zeroizing<String>>,
+    fallback_integration: Option<integration::Launch>,
+    fallback_agent: bool,
+    fallback_timeout: Duration,
+    pty_exit_status: Option<u32>,
 }
 #[derive(Debug, PartialEq, Eq)]
 pub enum PtyEvent {
@@ -579,6 +583,11 @@ impl SshConnection {
             size_locked: startup.lock_size,
         });
         let tmux_session = startup.session.clone();
+        let fallback_integration = if tmux.is_some() {
+            config.integration.clone()
+        } else {
+            None
+        };
         let mut integration = config
             .integration
             .take()
@@ -709,6 +718,10 @@ impl SshConnection {
             tmux,
             tmux_session,
             integration_nonce,
+            fallback_integration,
+            fallback_agent: config.agent_forwarding,
+            fallback_timeout: config.timeout,
+            pty_exit_status: None,
         })
     }
 
@@ -787,6 +800,7 @@ impl SshConnection {
                     return Err(russh::Error::Inconsistent.into());
                 }
                 Some(ChannelMsg::ExitStatus { exit_status }) => {
+                    self.pty_exit_status = Some(exit_status);
                     return Ok(PtyEvent::ExitStatus(exit_status));
                 }
                 Some(ChannelMsg::Close) | None => {
@@ -796,6 +810,73 @@ impl SshConnection {
                 _ => {}
             }
         }
+    }
+
+    /// A clean tmux client exit replaces only the interactive channel. This is
+    /// not a Transport reconnect; SFTP/forwardings keep their original owners.
+    /// Called outside the actor's cancelable read select, so a key/resize cannot
+    /// drop a half-open PTY while it is being installed.
+    pub(crate) async fn restore_shell(
+        &mut self,
+        columns: u16,
+        rows: u16,
+        cancel: CancellationToken,
+    ) -> Result<bool, SshError> {
+        if self.tmux.is_none()
+            || self.pty_exit_status != Some(0)
+            || self.lifetime.0.is_cancelled()
+            || self.handle.is_closed()
+        {
+            return Ok(false);
+        }
+        let (_pause, paused) = tokio::sync::watch::channel(false);
+        let mut budget = crate::budget::Budget::new(self.fallback_timeout, paused, cancel);
+        // Prior PTY has ended. Do not re-authenticate, reconnect or touch files.
+        budget
+            .run(Stage::Shell, async {
+                self.pty.close().await?;
+                Ok(())
+            })
+            .await?;
+        let launch = self.fallback_integration.take();
+        let launch = if launch.is_some()
+            && integration::probe_on_exec_channel(&self.handle, &mut budget).await?
+        {
+            launch
+        } else {
+            None
+        };
+        let (mut next, _) = open_interactive_channel(
+            &self.handle,
+            &mut budget,
+            columns,
+            rows,
+            &mut self.early_output,
+            self.fallback_agent.then(|| (self.agent.as_ref(), false)),
+        )
+        .await?;
+        // Install the owner before awaiting startup. Failure still leaves the
+        // channel owned by this connection and its explicit close path.
+        std::mem::swap(&mut self.pty, &mut next);
+        budget
+            .run(Stage::Shell, async {
+                if let Some(ref launch) = launch {
+                    self.pty.exec(true, launch.command().as_bytes()).await?;
+                } else {
+                    self.pty.request_shell(true).await?;
+                }
+                expect_success(&mut self.pty, &mut self.early_output, Stage::Shell).await
+            })
+            .await?;
+        self.integration_nonce = launch
+            .as_ref()
+            .map(|v| Zeroizing::new(v.nonce().to_owned()));
+        self.tmux = None;
+        self.tmux_session = None;
+        self.inspector.clear_tmux();
+        self.pty_exit_status = None;
+        self.closed = false;
+        Ok(true)
     }
 
     /// Opens an SFTP channel on this transport. Caller must close the returned session.

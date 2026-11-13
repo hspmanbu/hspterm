@@ -1024,7 +1024,7 @@ async fn connect_terminal_run(
             username: receipt.username,
             fingerprint: receipt.host_key.sha256,
         };
-        if integration_enabled && receipt.tmux.is_none() {
+        if integration_enabled {
             *entry.integration_scope.lock() = Some((
                 receipt.generation,
                 vault_scope.clone(),
@@ -2283,6 +2283,13 @@ pub async fn watch_events(id: u32, sink: StreamSink<BridgeEvent>) -> Result<()> 
                 if sink.add(message).is_err(){break;}
             }}
             r=events.recv()=>{match r {Some(SessionEvent::Reconnected{generation})=>{entry.pending_clipboard.lock().clear();if sink.add(event("reconnected",generation,None)).is_err(){break;}},
+                Some(SessionEvent::ShellRestored{generation})=>{
+                    pending_directory=None;
+                    directory_at=None;
+                    entry.pending_clipboard.lock().clear();
+                    entry.tmux.shell_restored(generation);
+                    if sink.add(event("tmuxState",generation,Some("shell".into()))).is_err(){break;}
+                },
                 Some(SessionEvent::Notification{generation,notice})=>{
                     let current = entry.session.notification_policy();
                     if notice.policy != current.to_string() { continue; }

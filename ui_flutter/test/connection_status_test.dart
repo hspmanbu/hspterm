@@ -23,7 +23,7 @@ class _StatusModel extends LiveWorkbenchModel {
 
 void main() {
   testWidgets(
-    'resource metrics stay on the right and scroll instead of ellipsizing',
+    'connection stays at far right with resource immediately left; both scroll',
     (tester) async {
       final source = session('Fixture', 1, 4);
       final model = _StatusModel(source);
@@ -65,18 +65,28 @@ void main() {
             matching: find.byType(SingleChildScrollView),
           );
           expect(resource, findsOneWidget);
+          final connectionView = find.ancestor(
+            of: find.byKey(const ValueKey('workbench-connection-status')),
+            matching: find.byType(SingleChildScrollView),
+          );
           expect(
-            tester.getRect(resource).right,
+            tester.getRect(connectionView).right,
             closeTo(
               tester.getRect(find.byType(WorkbenchConnectionStatus)).right,
               1,
             ),
+          );
+          expect(
+            tester.getRect(resource).right,
+            closeTo(tester.getRect(connectionView).left - 12, 1),
           );
           expect(find.textContaining('内存 75%'), findsOneWidget);
           final connection = tester.widget<Text>(
             find.byKey(const ValueKey('workbench-connection-status')),
           );
           expect(connection.overflow, isNot(TextOverflow.ellipsis));
+          expect(connection.data, isNot(contains('任务')));
+          expect(connection.data, isNot(contains('终端')));
           expect(tester.takeException(), isNull);
         }
       } finally {

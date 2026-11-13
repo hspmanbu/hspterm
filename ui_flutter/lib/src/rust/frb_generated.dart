@@ -12157,14 +12157,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   SshNetworkDefaults dco_decode_ssh_network_defaults(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return SshNetworkDefaults(
       timeoutSeconds: dco_decode_u_32(arr[0]),
       keepaliveSeconds: dco_decode_u_32(arr[1]),
       keepaliveFailures: dco_decode_u_32(arr[2]),
       responseTimeoutSeconds: dco_decode_u_32(arr[3]),
       autoReconnect: dco_decode_bool(arr[4]),
+      tmuxLocalSelection: dco_decode_bool(arr[5]),
+      tmuxShiftEnterLf: dco_decode_bool(arr[6]),
     );
   }
 
@@ -14558,12 +14560,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_keepaliveFailures = sse_decode_u_32(deserializer);
     var var_responseTimeoutSeconds = sse_decode_u_32(deserializer);
     var var_autoReconnect = sse_decode_bool(deserializer);
+    var var_tmuxLocalSelection = sse_decode_bool(deserializer);
+    var var_tmuxShiftEnterLf = sse_decode_bool(deserializer);
     return SshNetworkDefaults(
       timeoutSeconds: var_timeoutSeconds,
       keepaliveSeconds: var_keepaliveSeconds,
       keepaliveFailures: var_keepaliveFailures,
       responseTimeoutSeconds: var_responseTimeoutSeconds,
       autoReconnect: var_autoReconnect,
+      tmuxLocalSelection: var_tmuxLocalSelection,
+      tmuxShiftEnterLf: var_tmuxShiftEnterLf,
     );
   }
 
@@ -16642,6 +16648,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_32(self.keepaliveFailures, serializer);
     sse_encode_u_32(self.responseTimeoutSeconds, serializer);
     sse_encode_bool(self.autoReconnect, serializer);
+    sse_encode_bool(self.tmuxLocalSelection, serializer);
+    sse_encode_bool(self.tmuxShiftEnterLf, serializer);
   }
 
   @protected

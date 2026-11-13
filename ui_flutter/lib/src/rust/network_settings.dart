@@ -13,6 +13,8 @@ class SshNetworkDefaults {
   final int keepaliveFailures;
   final int responseTimeoutSeconds;
   final bool autoReconnect;
+  final bool tmuxLocalSelection;
+  final bool tmuxShiftEnterLf;
 
   const SshNetworkDefaults({
     required this.timeoutSeconds,
@@ -20,6 +22,8 @@ class SshNetworkDefaults {
     required this.keepaliveFailures,
     required this.responseTimeoutSeconds,
     required this.autoReconnect,
+    required this.tmuxLocalSelection,
+    required this.tmuxShiftEnterLf,
   });
 
   @override
@@ -28,7 +32,9 @@ class SshNetworkDefaults {
       keepaliveSeconds.hashCode ^
       keepaliveFailures.hashCode ^
       responseTimeoutSeconds.hashCode ^
-      autoReconnect.hashCode;
+      autoReconnect.hashCode ^
+      tmuxLocalSelection.hashCode ^
+      tmuxShiftEnterLf.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -39,5 +45,7 @@ class SshNetworkDefaults {
           keepaliveSeconds == other.keepaliveSeconds &&
           keepaliveFailures == other.keepaliveFailures &&
           responseTimeoutSeconds == other.responseTimeoutSeconds &&
-          autoReconnect == other.autoReconnect;
+          autoReconnect == other.autoReconnect &&
+          tmuxLocalSelection == other.tmuxLocalSelection &&
+          tmuxShiftEnterLf == other.tmuxShiftEnterLf;
 }

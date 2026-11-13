@@ -252,6 +252,10 @@ void main() {
       ]);
       final revision = m.remoteFileClipboardRevision;
       await _mount(tester, m);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('remote-destination-relay-policy')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(
         find.byKey(const ValueKey('remote-destination-relay-policy')),
       );
@@ -287,6 +291,10 @@ void main() {
       m.fixtures.first.files.last,
     ], cut: true);
     await _mount(tester, m, move: true);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('remote-destination-relay-policy')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(const ValueKey('remote-destination-relay-policy')),
     );

@@ -28,6 +28,13 @@ pub struct NetworkDefaults {
     /// drop, one automatic reconnect attempt per connection generation.
     #[serde(default)]
     pub auto_reconnect: bool,
+    #[serde(default = "default_tmux_local_selection")]
+    pub tmux_local_selection: bool,
+    #[serde(default)]
+    pub tmux_shift_enter_lf: bool,
+}
+fn default_tmux_local_selection() -> bool {
+    true
 }
 impl Default for NetworkDefaults {
     fn default() -> Self {
@@ -38,6 +45,8 @@ impl Default for NetworkDefaults {
             keepalive_failures: 3,
             response_timeout_seconds: 10,
             auto_reconnect: false,
+            tmux_local_selection: true,
+            tmux_shift_enter_lf: false,
         }
     }
 }
@@ -79,6 +88,14 @@ impl NetworkDefaults {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn old_records_keep_tmux_defaults() {
+        let raw = br#"{"version":1,"timeout_seconds":30,"keepalive_seconds":30,"keepalive_failures":3,"response_timeout_seconds":10}"#;
+        let value: NetworkDefaults = serde_json::from_slice(raw).unwrap();
+        assert!(value.tmux_local_selection);
+        assert!(!value.tmux_shift_enter_lf);
+        assert!(!value.auto_reconnect);
+    }
     #[test]
     fn limits_and_disabled_keepalive_are_checked_without_silently_clamping() {
         NetworkDefaults::default().validate().unwrap();
@@ -129,6 +146,8 @@ mod tests {
             response_timeout_seconds: 7,
             version: 1,
             auto_reconnect: false,
+            tmux_local_selection: false,
+            tmux_shift_enter_lf: true,
         };
         chosen.save(&mut vault).unwrap();
         drop(vault);

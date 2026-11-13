@@ -24,6 +24,14 @@ tmx.TmuxPrompt prompt({int generation = 7, bool restoreAvailable = false}) =>
       ],
     );
 void main() {
+  test('default tmux names use the first free positive suffix', () {
+    expect(nextTmuxSessionName([]), 'hspterm1');
+    expect(
+      nextTmuxSessionName(['hspterm', 'hspterm1', 'hspterm2', 'hspterm4']),
+      'hspterm3',
+    );
+    expect(nextTmuxSessionName(['hspterm2', 'fixture']), 'hspterm1');
+  });
   testWidgets(
     'new-session restore consent explains retained creation and future control takeover',
     (tester) async {

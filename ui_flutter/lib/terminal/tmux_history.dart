@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'backend.dart';
+import '../app_notice.dart' show appMessage;
 import 'controller.dart';
 
 class TmuxHistorySnapshot {
@@ -16,6 +17,7 @@ class TmuxHistorySnapshot {
     rows = value['rows'] as int;
     available = value['available'] as bool;
     readonly = value['readonly'] as bool;
+    shell = value['shell'] == true;
     if (!RegExp(r'^%[0-9]{1,12}$').hasMatch(pane) ||
         history < 0 ||
         history > 10000000 ||
@@ -28,7 +30,7 @@ class TmuxHistorySnapshot {
   }
   late final String pane;
   late final int history, offset, rows;
-  late final bool available, readonly;
+  late final bool available, readonly, shell;
 }
 
 /// Metadata only; one request at a time, only for a visible attached terminal.
@@ -99,6 +101,7 @@ class _TmuxHistoryScrollbarState extends State<TmuxHistoryScrollbar> {
     final pending = _pending;
     _pending = null;
     _busy = true;
+    var busyRetry = false;
     try {
       final raw = await (c.backend as TerminalTmuxHistoryBackend).tmuxHistory(
         id,
@@ -112,6 +115,10 @@ class _TmuxHistoryScrollbarState extends State<TmuxHistoryScrollbar> {
           c.generation == generation &&
           _eligible) {
         final snapshot = TmuxHistorySnapshot(raw);
+        c.reportTmuxShell(
+          snapshot.pane,
+          snapshot.shell && snapshot.available && snapshot.offset == 0,
+        );
         // An in-flight response from a different pane cannot redirect a drag.
         if (pending != null && pending.$1 != snapshot.pane) _pending = null;
         setState(() {
@@ -119,8 +126,20 @@ class _TmuxHistoryScrollbarState extends State<TmuxHistoryScrollbar> {
           _error = null;
         });
       }
-    } catch (_) {
-      if (mounted &&
+    } catch (error) {
+      busyRetry = appMessage(error) == '远端检查正在处理或等待旧通道结束；未开始新请求';
+      if (busyRetry) {
+        // Preserve the proven snapshot while metrics owns the exec slot.
+        // Retry a pending seek via the normal timer, never a busy loop.
+        if (_pending == null &&
+            c.id == id &&
+            c.generation == generation &&
+            _eligible) {
+          _pending = pending;
+        }
+      }
+      if (!busyRetry &&
+          mounted &&
           identical(source, c) &&
           c.id == id &&
           c.generation == generation) {
@@ -132,7 +151,9 @@ class _TmuxHistoryScrollbarState extends State<TmuxHistoryScrollbar> {
       }
     } finally {
       _busy = false;
-      if (mounted && _pending != null && _eligible) unawaited(_request());
+      if (!busyRetry && mounted && _pending != null && _eligible) {
+        unawaited(_request());
+      }
     }
   }
 

@@ -26,8 +26,10 @@ class SshNetworkDefaultsPanel extends StatefulWidget {
   const SshNetworkDefaultsPanel({
     super.key,
     this.gateway = const NativeSshDefaultsGateway(),
+    this.onSaved,
   });
   final SshDefaultsGateway gateway;
+  final ValueChanged<SshNetworkDefaults>? onSaved;
   @override
   State<SshNetworkDefaultsPanel> createState() =>
       _SshNetworkDefaultsPanelState();
@@ -40,7 +42,9 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
       _response = TextEditingController(),
       _failures = TextEditingController();
   bool _busy = true, _loaded = false;
-  bool _autoReconnect = false;
+  bool _autoReconnect = false,
+      _tmuxLocalSelection = true,
+      _tmuxShiftEnterLf = false;
   String? _error, _status;
   Object? _originalView;
   Object get _view => (
@@ -49,6 +53,8 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
     _response.text,
     _failures.text,
     _autoReconnect,
+    _tmuxLocalSelection,
+    _tmuxShiftEnterLf,
   );
   bool get _dirty => _loaded && _originalView != _view;
   @override
@@ -72,6 +78,8 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
       _response.text = '${value.responseTimeoutSeconds}';
       _failures.text = '${value.keepaliveFailures}';
       _autoReconnect = value.autoReconnect;
+      _tmuxLocalSelection = value.tmuxLocalSelection;
+      _tmuxShiftEnterLf = value.tmuxShiftEnterLf;
       _originalView = _view;
       setState(() => _loaded = true);
     } catch (error) {
@@ -89,19 +97,22 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
       _status = null;
     });
     try {
-      await widget.gateway.save(
+      final saved = await widget.gateway.save(
         SshNetworkDefaults(
           timeoutSeconds: int.parse(_timeout.text),
           keepaliveSeconds: int.parse(_interval.text),
           responseTimeoutSeconds: int.parse(_response.text),
           keepaliveFailures: int.parse(_failures.text),
           autoReconnect: _autoReconnect,
+          tmuxLocalSelection: _tmuxLocalSelection,
+          tmuxShiftEnterLf: _tmuxShiftEnterLf,
         ),
       );
+      widget.onSaved?.call(saved);
       if (mounted) {
         setState(() {
           _originalView = _view;
-          _status = '已加密保存；只在下次明确连接时使用，不改变当前会话。';
+          _status = '已加密保存；网络参数只在下次明确连接时使用。tmux 输入选项立即生效。';
         });
       }
     } catch (error) {
@@ -169,6 +180,37 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
               ],
             ),
             const SizedBox(height: 12),
+            const Text('tmux 兼容设置'),
+            CompactSettingsToggle(
+              child: SwitchListTile(
+                key: const ValueKey('ssh-tmux-local-selection'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('本地拖动选择文字'),
+                subtitle: const Text('Alt+鼠标操作转发给 tmux 或其中的应用。'),
+                value: _tmuxLocalSelection,
+                onChanged: _busy || !_loaded
+                    ? null
+                    : (v) => setState(() => _tmuxLocalSelection = v),
+              ),
+            ),
+            CompactSettingsToggle(
+              child: SwitchListTile(
+                key: const ValueKey('ssh-tmux-shift-enter'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Shift+Enter 换行兼容'),
+                subtitle: const Text(
+                  '在 tmux 中发送 Ctrl+J，适用于无法换行的 Codex；也影响该会话的其他程序。',
+                ),
+                value: _tmuxShiftEnterLf,
+                onChanged: _busy || !_loaded
+                    ? null
+                    : (v) => setState(() => _tmuxShiftEnterLf = v),
+              ),
+            ),
+            const Text(
+              '历史条依赖远端 Python 3，范围受 tmux 缓冲上限约束。tmux 内层的历史联想仍需可信 Shell 集成。',
+            ),
+            const SizedBox(height: 12),
             if (_error != null)
               Text(
                 _error!,
@@ -191,7 +233,7 @@ class _SshNetworkDefaultsPanelState extends State<SshNetworkDefaultsPanel> {
                 ),
               ],
             ),
-            const Text('断线后保留画面；只有明确点击或焦点窗格 Enter 才尝试一次重连。确认等待时间不计入总连接超时。'),
+            const Text('断线后保留画面；重启或关机命令引发的中断需手动重连。确认等待时间不计入总连接超时。'),
           ],
         ),
       ).guardSettings(

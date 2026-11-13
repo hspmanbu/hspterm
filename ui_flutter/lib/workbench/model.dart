@@ -1,4 +1,5 @@
 import 'image_upload_task.dart';
+import '../src/rust/network_settings.dart';
 import '../app_notice.dart';
 import '../run_log.dart';
 import 'staging_cleanup_port.dart';
@@ -1999,7 +2000,19 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       };
       tabById(focusedGroup!.selectedId)?.name = '${host.name} · 本次';
     }
-    s.controller.prepareConnection = () {
+    s.controller.prepareConnection = () async {
+      final preferences = s.controller.backend;
+      final network = preferences is TerminalSshPreferencesBackend
+          ? await (preferences as TerminalSshPreferencesBackend)
+                .sshPreferences()
+          : null;
+      if (_disposed || _shutdown != null || !sessions.contains(s)) {
+        throw StateError('原终端正在关闭');
+      }
+      if (network != null) {
+        s.controller.setTmuxLocalSelection(network.tmuxLocalSelection);
+        s.controller.setTmuxShiftEnterLf(network.tmuxShiftEnterLf);
+      }
       final current = _records[s.host.id];
       if (current == null) throw StateError('主机配置已删除，请先保存配置后再连接');
       final target = s.temporaryConnection
@@ -2050,13 +2063,12 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       // connections never reconnect implicitly.
       final connected = s.controller.connected;
       if (s.wasConnected && !connected && !s.temporaryConnection) {
-        // Brief delay before the single attempt: avoids hammering a
-        // transport that is still retiring (the 2026-11-06 log's rejected
-        // auto attempt was the user's own server restart — failure then is
-        // correct and manual retry stays available).
+        // Give the original Transport time to retire. Power-command intent
+        // and generation are checked again immediately before reconnect.
+        final droppedGeneration = s.controller.generation;
         Timer(const Duration(seconds: 3), () {
           if (!_disposed && _shutdown == null && sessions.contains(s)) {
-            unawaited(_autoReconnectIfEnabled(s));
+            unawaited(_autoReconnectIfEnabled(s, droppedGeneration));
           }
         });
       }
@@ -2121,9 +2133,21 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     }
   }
 
-  Future<void> _autoReconnectIfEnabled(LiveTerminalSession s) async {
-    final generation = s.controller.generation;
-    if (s.autoReconnectAttempted == generation ||
+  void applyTmuxCompatibility(SshNetworkDefaults value) {
+    if (_disposed || _shutdown != null) return;
+    for (final source in sessions.whereType<LiveTerminalSession>()) {
+      source.controller.setTmuxLocalSelection(value.tmuxLocalSelection);
+      source.controller.setTmuxShiftEnterLf(value.tmuxShiftEnterLf);
+    }
+  }
+
+  Future<void> _autoReconnectIfEnabled(
+    LiveTerminalSession s,
+    int generation,
+  ) async {
+    if (s.controller.generation != generation ||
+        s.controller.manualReconnectRequired ||
+        s.autoReconnectAttempted == generation ||
         _disposed ||
         _shutdown != null ||
         !sessions.contains(s)) {
@@ -2135,6 +2159,9 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
           _shutdown != null ||
           !sessions.contains(s) ||
           s.controller.connected ||
+          s.controller.phase != 'Disconnected' ||
+          s.controller.generation != generation ||
+          s.controller.manualReconnectRequired ||
           !defaults.autoReconnect ||
           s.autoReconnectAttempted == generation) {
         return;

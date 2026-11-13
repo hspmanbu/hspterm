@@ -122,6 +122,64 @@ async fn remembered_creation_receipts_prove_the_new_session_and_name_collision_n
             .success()
     );
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn clean_tmux_exit_restores_shell_on_original_transport_and_keeps_sftp() {
+    use hspterm_ssh_core::{ManagedSession, SessionEvent, SessionPhase};
+    let f = Fixture::new().await;
+    let (mut session, mut events) = ManagedSession::new(Size::new(80, 24).unwrap(), 1000).unwrap();
+    let (send, mut choices) = mpsc::channel(1);
+    let mut config = f.server.config.clone();
+    config.tmux = Some(Policy { requests: send });
+    config.integration = Some(hspterm_ssh_core::integration::Launch::fresh());
+    let receipt = {
+        let connect = session.connect_verified(config, f.server.auth(), f.server.pinned());
+        tokio::pin!(connect);
+        let request = tokio::select! {
+            result = &mut connect => panic!("tmux choice was not requested: {:?}", result),
+            request = choices.recv() => request.unwrap(),
+        };
+        request
+            .reply
+            .send(Choice::Create {
+                name: "hspterm1".into(),
+                lock_size: true,
+            })
+            .ok()
+            .unwrap();
+        connect.await.unwrap()
+    };
+    session
+        .write(b"printf '%s%s\\n' BEFORE_ EXIT\n".to_vec())
+        .await
+        .unwrap();
+    session_text(&session, "BEFORE_EXIT").await;
+    let sftp = session.open_sftp().await.unwrap();
+    let before = sftp.canonicalize(".").await.unwrap();
+    session.write(b"exit\n".to_vec()).await.unwrap();
+    timeout(Duration::from_secs(15), async {
+        loop {
+            if let Some(SessionEvent::ShellRestored { generation }) = events.recv().await {
+                assert_eq!(generation, receipt.generation);
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(session.status().phase, SessionPhase::Connected);
+    assert_eq!(session.status().generation, receipt.generation);
+    assert!(!session.snapshot().unwrap().size_locked);
+    assert!(!session.snapshot().unwrap().alternate_screen);
+    assert_eq!(sftp.canonicalize(".").await.unwrap(), before);
+    session
+        .write(b"printf '%s%s\\n' AFTER_ EXIT\n".to_vec())
+        .await
+        .unwrap();
+    session_text(&session, "AFTER_EXIT").await;
+    sftp.close().await.unwrap();
+    session.close().await.unwrap();
+}
+
 impl Drop for Fixture {
     fn drop(&mut self) {
         // Only the explicitly owned absolute socket, never plain kill-server.

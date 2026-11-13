@@ -1,4 +1,5 @@
 import 'image_paste_binding.dart';
+import 'shutdown_intent.dart';
 import '../run_log.dart';
 
 import 'dart:async';
@@ -111,9 +112,61 @@ class TerminalController extends ChangeNotifier {
   (int, int, int, int)? _desiredSize;
   Future<bool> Function(rust.BridgeEvent)? confirmHostKey;
   Future<tmx.TmuxSelection?> Function(tmx.TmuxPrompt)? chooseTmux;
+  final _shutdownIntent = ShutdownIntent();
+  bool manualReconnectRequired = false;
+  String? _tmuxPane;
+  DateTime? _tmuxShellAt;
+  bool _tmuxShell = false;
+  void reportTmuxShell(String pane, bool shell) {
+    if (_tmuxPane != pane || _tmuxShell != shell) _shutdownIntent.invalidate();
+    // A fresh pane has its own input line. Do not inherit partial input.
+    if (shell && (_tmuxPane != pane || !_tmuxShell)) {
+      _shutdownIntent.cancelLine();
+    }
+    _tmuxPane = pane;
+    _tmuxShell = shell;
+    _tmuxShellAt = DateTime.now();
+  }
+
+  bool get _shutdownInputEligible => tmuxReadonly != null
+      ? tmuxReadonly == false &&
+            _tmuxShell &&
+            _tmuxShellAt != null &&
+            DateTime.now().difference(_tmuxShellAt!) <
+                const Duration(seconds: 4)
+      : shellInputReady ||
+            (metadata != null &&
+                !metadata!.alternateScreen &&
+                !metadata!.mouseReporting);
+  void _trackPowerKey(rust.KeyboardInput input) {
+    if (input.kind == 2) return;
+    if (!_shutdownInputEligible) {
+      _shutdownIntent.invalidate();
+      return;
+    }
+    if (input.key == 'Enter' && input.modifiers == 0) {
+      _shutdownIntent.enter();
+      return;
+    }
+    if (input.key == 'Backspace' && input.modifiers == 0) {
+      _shutdownIntent.backspace();
+      return;
+    }
+    if (input.modifiers == 4 && ['u', 'U', 'c', 'C'].contains(input.key)) {
+      _shutdownIntent.cancelLine();
+      return;
+    }
+    if (['Shift', 'Control', 'Alt', 'Meta'].contains(input.key)) return;
+    if ((input.modifiers & ~1) == 0 && input.text?.isNotEmpty == true) {
+      _shutdownIntent.text(input.text!);
+    } else {
+      _shutdownIntent.invalidate();
+    }
+  }
+
   int? _tmuxToken;
   bool? tmuxReadonly;
-  // Per-tab compatibility choices; never synced or applied to ordinary SSH.
+  // Encrypted SSH preferences; applied to live tmux tabs without reconnect.
   bool tmuxLocalSelection = true;
   bool tmuxShiftEnterLf = false;
   void setTmuxLocalSelection(bool value) {
@@ -165,6 +218,7 @@ class TerminalController extends ChangeNotifier {
   bool composing = false;
 
   Future<String> controlledInput(Future<String> Function(int, int) action) {
+    _shutdownIntent.invalidate();
     final native = id, expected = generation;
     if (_disposed || composing || !connected || native == null) {
       return Future.value('Unavailable');
@@ -193,7 +247,7 @@ class TerminalController extends ChangeNotifier {
   }
 
   /// Refresh non-secret target metadata before an explicit connection attempt.
-  VoidCallback? prepareConnection;
+  FutureOr<void> Function()? prepareConnection;
   Future<void> Function(int id, String profileId)? connectRequest;
   Future<void> Function()? reconnectRequest;
   bool _requestingReconnect = false;
@@ -361,9 +415,22 @@ class TerminalController extends ChangeNotifier {
               ? _pendingTmuxMode
               : null;
         }
+        if (generation != event.generation || event.text == 'Connecting') {
+          _shutdownIntent.reset();
+          manualReconnectRequired = false;
+          _tmuxPane = null;
+          _tmuxShellAt = null;
+        }
+        if (phase == 'Connected' &&
+            event.text == 'Disconnected' &&
+            _shutdownIntent.pending) {
+          manualReconnectRequired = true;
+        }
         generation = event.generation;
         phase = event.text ?? phase;
-        error = event.detail;
+        error = manualReconnectRequired && phase == 'Disconnected'
+            ? '检测到服务器重启/关机，请手动重连。'
+            : event.detail;
         _roundTrip(connected ? event.rttMicros : null);
         notifyListeners();
         // A host-key/tmux choice can outlive a layout change. Startup used its
@@ -404,6 +471,16 @@ class TerminalController extends ChangeNotifier {
             : event.text == 'readonly';
         if (event.generation == generation) {
           tmuxReadonly = _pendingTmuxMode;
+          _shutdownIntent.invalidate();
+          _tmuxPane = null;
+          _tmuxShellAt = null;
+          if (event.text == 'shell') {
+            shellInputReady = false;
+            reportedDirectory = null;
+            directoryReportVersion++;
+            _shutdownIntent.cancelLine();
+            _scheduleResize();
+          }
           notifyListeners();
         }
       case 'tmux':
@@ -617,11 +694,19 @@ class TerminalController extends ChangeNotifier {
     profileId = savedProfileId;
     if (label != null) connectionLabel = label;
     phase = 'Connecting';
+    _shutdownIntent.reset();
+    manualReconnectRequired = false;
     error = null;
     reconnectNotice = null;
     final noticeEpoch = ++_connectNoticeEpoch;
     try {
-      prepareConnection?.call();
+      await prepareConnection?.call();
+      if (_disposed ||
+          id != value ||
+          noticeEpoch != _connectNoticeEpoch ||
+          closingChanges.value) {
+        return;
+      }
       notifyListeners();
       await (connectRequest?.call(value, savedProfileId) ??
           backend.connect(value, savedProfileId));
@@ -685,10 +770,20 @@ class TerminalController extends ChangeNotifier {
           input.key == 'Enter' &&
           input.modifiers == 1) {
         if (tmuxReadonly == true || input.kind == 2) return;
-        await _ordered((id) => backend.text(id, '\n'));
+        await _ordered((id) async {
+          if (_shutdownInputEligible) {
+            _shutdownIntent.enter();
+          } else {
+            _shutdownIntent.invalidate();
+          }
+          await backend.text(id, '\n');
+        });
         return;
       }
-      await _ordered((id) => backend.key(id, input));
+      await _ordered((id) async {
+        _trackPowerKey(input);
+        await backend.key(id, input);
+      });
     } catch (failure) {
       report(failure);
     }
@@ -698,7 +793,14 @@ class TerminalController extends ChangeNotifier {
     final value = id;
     if (value != null && connected && text.isNotEmpty) {
       try {
-        await _ordered((id) => backend.text(id, text));
+        await _ordered((id) async {
+          if (_shutdownInputEligible) {
+            _shutdownIntent.text(text);
+          } else {
+            _shutdownIntent.invalidate();
+          }
+          await backend.text(id, text);
+        });
       } catch (failure) {
         report(failure);
       }
@@ -740,7 +842,15 @@ class TerminalController extends ChangeNotifier {
               generation != expected) {
             throw StateError('粘贴所属连接已结束');
           }
-          result.complete(await backend.paste(value, text, confirmed));
+          final pasted = await backend.paste(value, text, confirmed);
+          if (!pasted.needsConfirmation) {
+            if (_shutdownInputEligible) {
+              _shutdownIntent.text(text);
+            } else {
+              _shutdownIntent.invalidate();
+            }
+          }
+          result.complete(pasted);
         })
         .catchError((Object error, StackTrace stack) {
           if (!result.isCompleted) result.completeError(error, stack);

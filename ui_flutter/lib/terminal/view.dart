@@ -772,22 +772,6 @@ class TerminalViewState extends State<TerminalView>
         ),
         items: [
           const PopupMenuItem(value: 'copy', child: Text('复制')),
-          if (c.tmuxReadonly != null) ...[
-            CheckedPopupMenuItem(
-              value: 'tmux-local-selection',
-              checked: c.tmuxLocalSelection,
-              child: const Text('tmux 本地拖选（Alt 转发鼠标）'),
-            ),
-            CheckedPopupMenuItem(
-              value: 'tmux-newline',
-              checked: c.tmuxShiftEnterLf,
-              child: const Text('tmux 换行兼容：Shift+Enter → Ctrl+J'),
-            ),
-            const PopupMenuItem(
-              value: 'tmux-help',
-              child: Text('tmux 滚动与键盘设置…'),
-            ),
-          ],
           const PopupMenuItem(value: 'paste', child: Text('粘贴')),
           const PopupMenuItem(value: 'search', child: Text('搜索终端历史')),
           if (c.commandOperationsAvailable && commandFrame != null) ...[
@@ -847,40 +831,6 @@ class TerminalViewState extends State<TerminalView>
             selectedReference != null &&
             openLink != null) {
           _run(openLink(selectedReference));
-        }
-        if (v == 'tmux-local-selection') {
-          c.setTmuxLocalSelection(!c.tmuxLocalSelection);
-        }
-        if (v == 'tmux-newline') c.setTmuxShiftEnterLf(!c.tmuxShiftEnterLf);
-        if (v == 'tmux-help') {
-          unawaited(
-            showAppDialog<void>(
-              context: context,
-              builder: (dialog) => AlertDialog(
-                scrollable: true,
-                title: const Text('tmux 兼容设置'),
-                content: const SelectableText(
-                  '本地拖选默认保留选区；Alt+拖动转发给 tmux/TUI。\n'
-                  '右侧滚动条显示 tmux 实际保留的历史，可直接拖动；需要远端 Python 3。\n'
-                  '它不会越过 tmux 历史上限，也不会读取应用自己管理的历史。\n\n'
-                  '支持 pane-scrollbars 的 tmux 版本可在普通 Shell 手动执行：\n'
-                  'tmux set-option mouse on\n'
-                  'tmux set-window-option pane-scrollbars on\n'
-                  'tmux set-window-option pane-scrollbars-position right\n\n'
-                  '这些命令只配置当前会话/窗口，不修改配置文件；旧版本提示未知选项时需升级 tmux，或使用 Ctrl+B 后按 [ 进入复制模式。\n\n'
-                  'Codex 换行：优先使用原始键盘协议；若 Shift+Enter 仍提交，可启用本标签的换行兼容选项。'
-                  '该选项把 Shift+Enter 作为 Ctrl+J 发送，对该标签内其他应用也生效，可随时关闭。\n\n'
-                  'tmux 内的 HSPTerm 历史联想仍需可信 Shell 集成，当前不凭屏幕内容猜测输入。',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(dialog),
-                    child: const Text('关闭'),
-                  ),
-                ],
-              ),
-            ),
-          );
         }
         if (v == 'search') showSearch();
         if (v == 'copy') _run(copy());

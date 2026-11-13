@@ -9,6 +9,8 @@ pub struct SshNetworkDefaults {
     pub keepalive_failures: u32,
     pub response_timeout_seconds: u32,
     pub auto_reconnect: bool,
+    pub tmux_local_selection: bool,
+    pub tmux_shift_enter_lf: bool,
 }
 impl From<NetworkDefaults> for SshNetworkDefaults {
     fn from(value: NetworkDefaults) -> Self {
@@ -18,6 +20,8 @@ impl From<NetworkDefaults> for SshNetworkDefaults {
             keepalive_failures: value.keepalive_failures,
             response_timeout_seconds: value.response_timeout_seconds,
             auto_reconnect: value.auto_reconnect,
+            tmux_local_selection: value.tmux_local_selection,
+            tmux_shift_enter_lf: value.tmux_shift_enter_lf,
         }
     }
 }
@@ -35,6 +39,8 @@ pub(crate) async fn save(value: SshNetworkDefaults) -> Result<SshNetworkDefaults
                 keepalive_failures: value.keepalive_failures,
                 response_timeout_seconds: value.response_timeout_seconds,
                 auto_reconnect: value.auto_reconnect,
+                tmux_local_selection: value.tmux_local_selection,
+                tmux_shift_enter_lf: value.tmux_shift_enter_lf,
             };
             value.save(v)?;
             Ok(value.into())

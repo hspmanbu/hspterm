@@ -194,7 +194,8 @@ pub struct Inspector {
     handle: Arc<client::Handle<Client>>,
     transport: CancellationToken,
     slot: Arc<Semaphore>,
-    tmux: Option<crate::tmux::Identity>,
+    sample_waiter: Arc<Semaphore>,
+    tmux: Arc<parking_lot::Mutex<Option<crate::tmux::Identity>>>,
     readonly: bool,
 }
 impl Inspector {
@@ -208,9 +209,13 @@ impl Inspector {
             handle,
             transport,
             slot: Arc::new(Semaphore::new(1)),
-            tmux,
+            sample_waiter: Arc::new(Semaphore::new(1)),
+            tmux: Arc::new(parking_lot::Mutex::new(tmux)),
             readonly,
         }
+    }
+    pub(crate) fn clear_tmux(&self) {
+        self.tmux.lock().take();
     }
     pub(crate) async fn wait_closed(&self) {
         // Called only AFTER original Root cancellation. Pending open workers
@@ -236,11 +241,14 @@ impl Inspector {
         if cancel.is_cancelled() {
             return Err(InspectionError::Unconfirmed.into());
         }
-        let permit = self
-            .slot
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| InspectionError::Busy)?;
+        let permit = acquire_slot(
+            &self.slot,
+            &self.sample_waiter,
+            matches!(action, Action::Sample),
+            &cancel,
+            &self.transport,
+        )
+        .await?;
         let local = cancel.child_token();
         let _lifetime = crate::transport::Lifetime(local.clone());
         let worker_cancel = local.clone();
@@ -363,7 +371,11 @@ impl Inspector {
         offset: Option<u32>,
         cancel: CancellationToken,
     ) -> Result<serde_json::Value, SshError> {
-        let identity = self.tmux.as_ref().ok_or(InspectionError::Unavailable)?;
+        let identity = self
+            .tmux
+            .lock()
+            .clone()
+            .ok_or(InspectionError::Unavailable)?;
         if offset.is_some()
             && (self.readonly
                 || pane.as_ref().is_none_or(|p| {
@@ -429,6 +441,35 @@ impl Inspector {
         Ok(())
     }
 }
+// Fair admission for a metrics request waiting on a short tmux history probe.
+// One waiter, one active channel; history/CRUD continue to fail fast.
+async fn acquire_slot(
+    slot: &Arc<Semaphore>,
+    waiter: &Arc<Semaphore>,
+    sample: bool,
+    cancel: &CancellationToken,
+    root: &CancellationToken,
+) -> Result<tokio::sync::OwnedSemaphorePermit, SshError> {
+    if !sample {
+        return slot
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| InspectionError::Busy.into());
+    }
+    let _waiting = waiter
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| InspectionError::Busy)?;
+    tokio::select! {
+        biased;
+        _ = root.cancelled() => Err(SshError::Disconnected),
+        _ = cancel.cancelled() => Err(InspectionError::Unconfirmed.into()),
+        permit = tokio::time::timeout(Duration::from_secs(2), slot.clone().acquire_owned()) => {
+            permit.map_err(|_| InspectionError::Busy)?.map_err(|_| InspectionError::Busy.into())
+        }
+    }
+}
+
 async fn close_channel(
     channel: &mut Channel<client::Msg>,
     mut peer_closed: bool,
@@ -549,6 +590,41 @@ mod dir_size_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn metrics_wait_fairly_without_extra_channels_or_unbounded_waiters() {
+        let slot = Arc::new(Semaphore::new(1));
+        let waiter = Arc::new(Semaphore::new(1));
+        let cancel = CancellationToken::new();
+        let root = CancellationToken::new();
+        let old = slot.clone().try_acquire_owned().unwrap();
+        let pending = acquire_slot(&slot, &waiter, true, &cancel, &root);
+        tokio::pin!(pending);
+        tokio::select! {
+            biased;
+            _ = &mut pending => panic!("sample admitted before old channel retired"),
+            _ = std::future::ready(()) => {}
+        }
+        assert!(matches!(
+            acquire_slot(&slot, &waiter, true, &cancel, &root).await,
+            Err(SshError::Inspection(InspectionError::Busy))
+        ));
+        drop(old);
+        // The queued metrics request owns next admission, even if history polls.
+        assert!(matches!(
+            acquire_slot(&slot, &waiter, false, &cancel, &root).await,
+            Err(SshError::Inspection(InspectionError::Busy))
+        ));
+        let metrics = pending.await.unwrap();
+        assert_eq!(slot.available_permits(), 0);
+        drop(metrics);
+        assert_eq!(slot.available_permits(), 1);
+        cancel.cancel();
+        assert!(matches!(
+            acquire_slot(&slot, &waiter, true, &cancel, &root).await,
+            Err(SshError::Inspection(InspectionError::Unconfirmed))
+        ));
+        assert_eq!(slot.available_permits(), 1);
+    }
     const BOOT: &str = "01234567-89ab-cdef-0123-456789abcdef";
     #[test]
     fn terminate_arguments_are_typed_and_reject_shell_fragments_or_pid_one() {

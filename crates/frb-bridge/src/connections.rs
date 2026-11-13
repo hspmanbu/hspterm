@@ -199,6 +199,8 @@ mod tests {
             keepalive_failures: 2,
             response_timeout_seconds: 5,
             auto_reconnect: false,
+            tmux_local_selection: true,
+            tmux_shift_enter_lf: false,
         };
         chosen.save(&mut vault).unwrap();
         let mut host = HostRecord::new(

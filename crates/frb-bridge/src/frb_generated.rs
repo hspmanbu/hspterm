@@ -12571,12 +12571,16 @@ impl SseDecode for crate::network_settings::SshNetworkDefaults {
         let mut var_keepaliveFailures = <u32>::sse_decode(deserializer);
         let mut var_responseTimeoutSeconds = <u32>::sse_decode(deserializer);
         let mut var_autoReconnect = <bool>::sse_decode(deserializer);
+        let mut var_tmuxLocalSelection = <bool>::sse_decode(deserializer);
+        let mut var_tmuxShiftEnterLf = <bool>::sse_decode(deserializer);
         return crate::network_settings::SshNetworkDefaults {
             timeout_seconds: var_timeoutSeconds,
             keepalive_seconds: var_keepaliveSeconds,
             keepalive_failures: var_keepaliveFailures,
             response_timeout_seconds: var_responseTimeoutSeconds,
             auto_reconnect: var_autoReconnect,
+            tmux_local_selection: var_tmuxLocalSelection,
+            tmux_shift_enter_lf: var_tmuxShiftEnterLf,
         };
     }
 }
@@ -14901,6 +14905,8 @@ impl flutter_rust_bridge::IntoDart for crate::network_settings::SshNetworkDefaul
             self.keepalive_failures.into_into_dart().into_dart(),
             self.response_timeout_seconds.into_into_dart().into_dart(),
             self.auto_reconnect.into_into_dart().into_dart(),
+            self.tmux_local_selection.into_into_dart().into_dart(),
+            self.tmux_shift_enter_lf.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -16608,6 +16614,8 @@ impl SseEncode for crate::network_settings::SshNetworkDefaults {
         <u32>::sse_encode(self.keepalive_failures, serializer);
         <u32>::sse_encode(self.response_timeout_seconds, serializer);
         <bool>::sse_encode(self.auto_reconnect, serializer);
+        <bool>::sse_encode(self.tmux_local_selection, serializer);
+        <bool>::sse_encode(self.tmux_shift_enter_lf, serializer);
     }
 }
 

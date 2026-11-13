@@ -38,6 +38,9 @@ pub struct SessionStatus {
 
 /// Process platform requests even when the pane is invisible. Payloads must not be logged.
 pub enum SessionEvent {
+    ShellRestored {
+        generation: u64,
+    },
     /// No command body crosses the platform event boundary.
     HistoryWarning {
         generation: u64,
@@ -1224,10 +1227,46 @@ async fn run(
             }
             Action::Output(Ok(PtyEvent::ExitStatus(_))) => {}
             Action::Output(Ok(PtyEvent::End)) | Action::Output(Err(_)) => {
-                let error = match action {
+                let mut error = match action {
                     Action::Output(Err(error)) => Some(error.to_string()),
                     _ => None,
                 };
+                if error.is_none()
+                    && let Some(conn) = connection.as_mut()
+                {
+                    let size = terminal.lock().size();
+                    match conn
+                        .restore_shell(size.columns, size.rows, stop.child_token())
+                        .await
+                    {
+                        Ok(true) => {
+                            {
+                                let mut term = terminal.lock();
+                                term.begin_new_generation();
+                                term.set_size_locked(false);
+                                term.configure_integration(conn.integration_nonce().and_then(
+                                    |n| hspterm_term_core::integration::Nonce::parse(n.to_owned()),
+                                ));
+                            }
+                            let generation = control.lock().status.generation;
+                            if !send_event(
+                                &events,
+                                &stop,
+                                SessionEvent::ShellRestored { generation },
+                            )
+                            .await
+                            {
+                                break;
+                            }
+                            frames.send_replace(terminal.lock().revision());
+                            integration_updates
+                                .send_replace((generation, terminal.lock().integration_revision()));
+                            continue;
+                        }
+                        Ok(false) => {}
+                        Err(failure) => error = Some(failure.to_string()),
+                    }
+                }
                 terminal.lock().finish_stream();
                 let cleanup_error = retire_connection(&mut connection)
                     .await

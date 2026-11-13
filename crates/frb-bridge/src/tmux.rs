@@ -156,6 +156,21 @@ impl TmuxRegistry {
         *self.active.lock() = Some((generation, state));
         self.changed();
     }
+    pub fn shell_restored(&self, generation: u64) {
+        // Same lock order as TmuxOwner::bind (memory -> active).
+        let mut memory = self.memory.lock();
+        let mut active = self.active.lock();
+        if active.as_ref().is_some_and(|(g, _)| *g == generation) {
+            *active = Some((generation, None));
+            if memory.generation == Some(generation) {
+                memory.remembered = None;
+                memory.selected = None;
+            }
+            drop(active);
+            drop(memory);
+            self.changed();
+        }
+    }
     pub fn active(&self) -> Option<(u64, Option<hspterm_ssh_core::tmux::TmuxState>)> {
         *self.active.lock()
     }
@@ -492,6 +507,22 @@ impl Drop for TmuxOwner {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shell_transition_clears_only_the_original_active_tmux_mode() {
+        let registry = super::TmuxRegistry::default();
+        let mode = hspterm_ssh_core::tmux::TmuxState {
+            readonly: true,
+            size_locked: true,
+        };
+        registry.bind(7, Some(mode));
+        registry.shell_restored(6);
+        assert!(registry.active().unwrap().1.is_some());
+        registry.shell_restored(7);
+        let active = registry.active().unwrap();
+        assert_eq!(active.0, 7);
+        assert!(active.1.is_none());
+    }
+
     use super::*;
     use crate::connections::Verification;
     use hspterm_ssh_core::{ManagedSession, tmux::Listing};

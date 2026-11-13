@@ -7,7 +7,7 @@ import sys
 
 def run(*args):
     return subprocess.run(['tmux', *args], check=True, stdout=subprocess.PIPE,
-                          stderr=subprocess.DEVNULL, timeout=3).stdout.decode('ascii').strip()
+                          stderr=subprocess.DEVNULL, timeout=3).stdout.decode('utf-8', 'replace').strip()
 
 
 def main():
@@ -16,11 +16,11 @@ def main():
     if not re.fullmatch(r'\$[0-9]{1,12}', sid) or not isinstance(pid, int) or pid <= 0:
         raise ValueError('identity')
     target = sid + ':'
-    fmt = '#{pid}|#{session_created}|#{pane_id}|#{history_size}|#{scroll_position}|#{pane_height}|#{pane_mode}|#{history_limit}'
+    fmt = '#{pid}|#{session_created}|#{pane_id}|#{history_size}|#{scroll_position}|#{pane_height}|#{pane_mode}|#{history_limit}|#{pane_current_command}'
 
     def snapshot():
         fields = run('display-message', '-p', '-t', target, fmt).split('|')
-        if len(fields) != 8 or fields[0] != str(pid) or fields[1] != str(created):
+        if len(fields) != 9 or fields[0] != str(pid) or fields[1] != str(created):
             raise ValueError('stale session')
         pane, mode = fields[2], fields[6]
         if not re.fullmatch(r'%[0-9]{1,12}', pane):
@@ -28,9 +28,9 @@ def main():
         history, offset, height, limit = [int(fields[i] or '0') for i in (3, 4, 5, 7)]
         if not (0 <= history <= limit <= 10_000_000 and 1 <= height <= 65535 and 0 <= offset <= history):
             raise ValueError('bounds')
-        return pane, mode, history, offset, height
+        return pane, mode, history, offset, height, mode == '' and fields[8] in ('bash', 'sh', 'zsh', 'fish', 'dash', 'ksh', 'ash')
 
-    pane, mode, history, offset, height = snapshot()
+    pane, mode, history, offset, height, shell = snapshot()
     wanted = request.get('offset')
     if wanted is not None:
         if request.get('readonly') or request.get('pane') != pane or mode not in ('', 'copy-mode'):
@@ -50,9 +50,9 @@ def main():
                 action += ' ; send-keys -t %s -X -N %d scroll-down' % (pane, history - wanted)
         if action:
             run('if-shell', '-F', '-t', target, condition, action, '')
-        pane, mode, history, offset, height = snapshot()
+        pane, mode, history, offset, height, shell = snapshot()
     print(json.dumps(dict(pane=pane, history=history, offset=offset, rows=height,
-                          available=mode in ('', 'copy-mode'), readonly=request['readonly'])))
+                          available=mode in ('', 'copy-mode'), readonly=request['readonly'], shell=shell)))
 
 
 if __name__ == '__main__':

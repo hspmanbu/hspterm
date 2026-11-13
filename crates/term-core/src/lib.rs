@@ -807,6 +807,10 @@ impl Terminal {
             Vec::new()
         }
     }
+    pub fn size(&self) -> Size {
+        self.size
+    }
+
     pub fn set_size_locked(&mut self, locked: bool) {
         self.size_locked = locked;
         self.invalidate_view();

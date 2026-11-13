@@ -35,6 +35,8 @@ void main() {
           keepaliveSeconds: 2,
           responseTimeoutSeconds: 1,
           autoReconnect: false,
+          tmuxLocalSelection: true,
+          tmuxShiftEnterLf: false,
           keepaliveFailures: 1,
         ),
       );
@@ -106,6 +108,8 @@ void main() {
           keepaliveSeconds: 0,
           responseTimeoutSeconds: 1,
           autoReconnect: false,
+          tmuxLocalSelection: true,
+          tmuxShiftEnterLf: false,
           keepaliveFailures: 1,
         ),
       );

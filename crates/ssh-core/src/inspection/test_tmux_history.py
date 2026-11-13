@@ -25,6 +25,7 @@ class HistoryTests(unittest.TestCase):
             self.assertNotIn('shell', kwargs)
             self.assertEqual(argv[0], 'tmux')
             value = next(lines) if argv[1] == 'display-message' else ''
+            if argv[1] == 'display-message' and value.count('|') == 7: value += '|bash'
             return subprocess.CompletedProcess(argv, 0, value.encode())
 
         output = io.StringIO()
@@ -38,6 +39,12 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(result['history'], 80)
         self.assertEqual(result['offset'], 0)
         self.assertEqual(len(calls), 1)
+
+    def test_shell_metadata_is_name_only_and_never_enables_input_trust(self):
+        for command, expected in [('bash', True), ('zsh', True), ('codex', False), ('python3', False)]:
+            result, calls = self.invoke(snapshots=['123|456|%3|80|0|24||100|' + command])
+            self.assertEqual(result['shell'], expected)
+            self.assertEqual(len(calls), 1)
 
     def test_seek_clamps_to_retained_history_and_guards_identity(self):
         result, calls = self.invoke(dict(pane='%3', offset=9999),

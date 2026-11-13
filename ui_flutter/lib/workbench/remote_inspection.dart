@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../src/rust/api.dart' as rust;
+import '../app_notice.dart' show appMessage;
 import '../terminal/controller.dart';
 
 abstract interface class ResourceBarPreference {
@@ -469,7 +470,11 @@ class RemoteInspectionController extends ChangeNotifier {
         done.complete();
       } catch (e, stack) {
         if (_current(source) && epoch == _epoch) {
-          error = '远端检查未获完整确认，已停止自动采样；需要 Linux procfs 与 Python 3。';
+          // tmux metadata and resource requests share a bounded native channel.
+          // Busy is a definite refusal before execution, never an unknown ACK.
+          if (appMessage(e) != '远端检查正在处理或等待旧通道结束；未开始新请求') {
+            error = '资源采样失败，已暂停；请检查连接、procfs 和 Python 3。';
+          }
         }
         done.completeError(e, stack);
       } finally {

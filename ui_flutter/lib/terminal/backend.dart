@@ -4,6 +4,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import '../src/rust/api.dart' as rust;
 import '../src/rust/tmux.dart' as tmx;
+import '../src/rust/network_settings.dart';
 import '../src/rust/frb_generated.dart';
 
 Future<void>? _rustInitialization;
@@ -130,13 +131,20 @@ abstract interface class TerminalReconnectNoticeBackend {
   Future<String?> reconnectNotice(int id);
 }
 
+abstract interface class TerminalSshPreferencesBackend {
+  Future<SshNetworkDefaults> sshPreferences();
+}
+
 class NativeTerminalBackend
     implements
         TerminalBackend,
+        TerminalSshPreferencesBackend,
         TerminalCommandsBackend,
         TerminalTmuxHistoryBackend,
         TerminalReconnectNoticeBackend,
         TerminalSuggestionsBackend {
+  @override
+  Future<SshNetworkDefaults> sshPreferences() => rust.sshNetworkDefaults();
   @override
   Future<String> tmuxHistory(
     int id,

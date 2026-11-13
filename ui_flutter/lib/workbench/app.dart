@@ -494,7 +494,8 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
         navigatorKey: _navigator,
         transferSettingsBuilder: (_) => const TransferSettingsPanel(),
         fileOpenSettingsBuilder: (_) => const FileOpenSettingsPanel(),
-        sshNetworkSettingsBuilder: (_) => const SshNetworkDefaultsPanel(),
+        sshNetworkSettingsBuilder: (_) =>
+            SshNetworkDefaultsPanel(onSaved: m.applyTmuxCompatibility),
         historySettingsBuilder: (_) =>
             HistoryControlsPanel(gateway: NativeHistoryControlsGateway(m)),
         displaySettingsBuilder: (_) => const DisplaySettingsPanel(),

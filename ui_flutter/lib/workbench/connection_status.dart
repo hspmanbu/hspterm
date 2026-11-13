@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'dart:math' as math;
+
 import 'dart:ui' show ViewFocusEvent, ViewFocusState;
 
 import '../prototype/model.dart' show WorkPage;
@@ -100,7 +102,7 @@ class _WorkbenchConnectionStatusState extends State<WorkbenchConnectionStatus>
   Widget build(BuildContext context) {
     Widget label(String text) => Tooltip(
       message:
-          '$text\nRTT 取自当前 SSH 心跳成功 ACK，包含本机排队与当前 SSH 路线。不额外探测；关闭心跳、旧兼容模式或尚无有效样本显示 —。任务数为当前已载入的真实任务记录。可选资源检查需单独授权独立通道；点击查看设置。',
+          '$text\nRTT 取自当前 SSH 心跳成功 ACK，包含本机排队与当前 SSH 路线。不额外探测；关闭心跳、旧兼容模式或尚无有效样本显示 —。资源检查使用原连接的独立通道。',
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Text(
@@ -113,8 +115,14 @@ class _WorkbenchConnectionStatusState extends State<WorkbenchConnectionStatus>
     );
     final source = model.focus;
     if (source is! LiveTerminalSession) {
-      return label(
-        '未选择终端 · ${model.sessions.length} 个终端 · ${model.totalTransferCount} 个任务记录',
+      return Align(
+        alignment: Alignment.centerRight,
+        child: Text(
+          '未选择终端',
+          key: const ValueKey('workbench-connection-status'),
+          maxLines: 1,
+          style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+        ),
       );
     }
     return ValueListenableBuilder<TerminalTransportInfo>(
@@ -125,49 +133,81 @@ class _WorkbenchConnectionStatusState extends State<WorkbenchConnectionStatus>
           final inspection = source.inspection;
           final resource = inspection.summary?.label;
           final details =
-              '${source.statusLabel} · ${terminalTransportSummary(value)} · '
-              '终端 ${model.sessions.length} · 任务 ${model.totalTransferCount}';
-          return Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Expanded(child: label(details)),
-              if (inspection.metrics ||
-                  resource != null ||
-                  inspection.error != null) ...[
-                const SizedBox(width: 12),
-                Expanded(
-                  child: InkWell(
-                    key: const ValueKey('remote-inspection-status'),
-                    onTap: () => showRemoteInspection(context, source),
-                    child: Tooltip(
-                      message: resource ?? inspection.error ?? '资源采样中',
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        reverse: true,
-                        child: Text(
-                          inspection.error != null
-                              ? '资源采样已暂停'
-                              : resource ?? '资源采样中…',
-                          maxLines: 1,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(context).hintColor,
+              '${source.statusLabel} · ${terminalTransportSummary(value)}';
+          final resourceText = inspection.error != null
+              ? '资源采样已暂停'
+              : resource ?? '资源采样中…';
+          final showResource =
+              inspection.metrics ||
+              resource != null ||
+              inspection.error != null;
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              double width(String text) {
+                final painter = TextPainter(
+                  text: TextSpan(
+                    text: text,
+                    style: DefaultTextStyle.of(context).style
+                        .copyWith(fontSize: 12),
+                  ),
+                  textDirection: Directionality.of(context),
+                  textScaler: MediaQuery.textScalerOf(context),
+                  maxLines: 1,
+                )..layout();
+                final result = painter.width + 2;
+                painter.dispose();
+                return result;
+              }
+
+              final space = constraints.maxWidth;
+              if (space < 32) return label(details);
+              final connectionWidth = math.min(
+                width(details),
+                showResource ? space * .65 : math.max(0.0, space - 23),
+              );
+              final resourceWidth = math.max(
+                0.0,
+                math.min(width(resourceText), space - connectionWidth - 12),
+              );
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (showResource) ...[
+                    SizedBox(
+                      width: resourceWidth,
+                      child: InkWell(
+                        key: const ValueKey('remote-inspection-status'),
+                        onTap: () => showRemoteInspection(context, source),
+                        child: Tooltip(
+                          message: resource ?? inspection.error ?? '资源采样中',
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            reverse: true,
+                            child: Text(
+                              resourceText,
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context).hintColor,
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ),
-              ] else
-                InkWell(
-                  key: const ValueKey('remote-inspection-status'),
-                  onTap: () => showRemoteInspection(context, source),
-                  child: const Padding(
-                    padding: EdgeInsets.only(left: 8),
-                    child: Icon(Icons.monitor_heart_outlined, size: 15),
-                  ),
-                ),
-            ],
+                    const SizedBox(width: 12),
+                  ] else ...[
+                    InkWell(
+                      key: const ValueKey('remote-inspection-status'),
+                      onTap: () => showRemoteInspection(context, source),
+                      child: const Icon(Icons.monitor_heart_outlined, size: 15),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  SizedBox(width: connectionWidth, child: label(details)),
+                ],
+              );
+            },
           );
         },
       ),

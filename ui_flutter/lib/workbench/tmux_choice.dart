@@ -14,6 +14,15 @@ bool validTmuxName(String value) =>
     utf8.encode(value).length <= 64 &&
     RegExp(r'^[\p{L}\p{N}_ -]+$', unicode: true).hasMatch(value);
 
+String nextTmuxSessionName(Iterable<String> existing) {
+  final names = existing.toSet();
+  var number = 1;
+  while (names.contains('hspterm$number')) {
+    number++;
+  }
+  return 'hspterm$number';
+}
+
 /// Only the captured source can answer. Pending navigation is removed on a
 /// source lifecycle change; a later tab/focus cannot become the destination.
 Future<tmx.TmuxSelection?> showTmuxChoice(
@@ -71,7 +80,9 @@ class _TmuxChoice extends StatefulWidget {
 
 class _TmuxChoiceState extends State<_TmuxChoice> {
   final form = GlobalKey<FormState>();
-  final name = TextEditingController(text: 'hspterm');
+  late final name = TextEditingController(
+    text: nextTmuxSessionName(widget.prompt.sessions.map((s) => s.name)),
+  );
   late int kind = widget.prompt.sessions.isNotEmpty
       ? 3
       : widget.prompt.version != null

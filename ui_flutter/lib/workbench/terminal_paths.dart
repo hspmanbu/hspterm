@@ -146,17 +146,27 @@ Future<void> sendSessionPaths(
     _ => '路径操作结果未确认，请检查原关联终端；未自动重试或改为粘贴。',
   };
   final detail = switch (reason) {
-    'ShellUnavailable' => '远端未建立兼容的 Bash 5.1+ 集成。',
+    'ShellUnavailable' =>
+      source.controller.tmuxReadonly != null
+          ? 'tmux 内层未建立可信 Shell 集成。'
+          : '远端未建立兼容的 Bash 5.1+ 集成。',
     'WaitingForHelper' => '正在等待 Shell 提示符就绪。',
     'TerminalMode' => '当前为远端程序输入模式。',
     'InputStateUnknown' => 'Shell 输入状态尚未确认，请返回普通提示符。',
-    'ConnectionNotOptedIn' => '此连接尚未启用集成，保存设置后请手动重连。',
+    'ConnectionNotOptedIn' =>
+      source.controller.tmuxReadonly != null
+          ? 'tmux 内层未建立可信 Shell 集成。'
+          : '此连接未启用 Shell 集成，请保存后手动重连。',
     'TemporaryConnection' => '临时连接未启用集成。',
     _ => '',
   };
   showAppNotice(
     context,
-    detail.isEmpty ? message : '$detail $message',
+    directPasted
+        ? '已填入安全引用路径，未执行。'
+        : detail.isEmpty
+        ? message
+        : '$detail $message',
     level: result == 'Applied' || directPasted
         ? AppNoticeLevel.success
         : AppNoticeLevel.warning,
@@ -171,7 +181,7 @@ Future<void> sendSessionPaths(
                   scrollable: true,
                   title: const Text('将路径填入关联终端'),
                   content: const Text(
-                    '在“主机管理 → 终端”启用“可选 Bash Shell 集成”，保存后手动重新连接此标签。\n\n集成支持 Bash 5.1+，用于确认输入位置。Vim、Codex、密码提示、tmux 内层或集成未就绪时只复制路径，避免误输入。仅填入路径不会执行命令。',
+                    '在“主机管理 → 终端”启用“可选 Bash Shell 集成”，保存后手动重新连接此标签。\n\n集成支持 Bash 5.1+，用于确认输入位置。tmux 内层与普通 SSH 的集成状态独立，重新连接不会为已有 tmux 窗口安装助手。输入状态不可信时默认复制路径；若已允许普通粘贴，则按远端粘贴协议填入安全引用文字，不按回车。执行 cd 仍需可信的空白 Shell 输入。',
                   ),
                   actions: [
                     TextButton(

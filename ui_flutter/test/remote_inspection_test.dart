@@ -53,6 +53,7 @@ class _Gateway implements RemoteInspectionGateway {
   int samples = 0, lists = 0, signals = 0;
   Completer<String>? waiting;
   bool failSignal = false;
+  bool sampleBusy = false, sampleInvalid = false;
   @override
   Future<void> configure(
     InspectionSource s,
@@ -65,6 +66,8 @@ class _Gateway implements RemoteInspectionGateway {
   @override
   Future<String> sample(InspectionSource s) async {
     samples++;
+    if (sampleBusy) throw Exception('远端检查正在处理或等待旧通道结束；未开始新请求');
+    if (sampleInvalid) return '{}';
     return waiting?.future ?? _sample();
   }
 
@@ -120,6 +123,34 @@ class _ResourcePreference implements ResourceBarPreference {
 }
 
 void main() {
+  testWidgets(
+    'tmux channel contention retries metrics, actual invalid data stops it',
+    (tester) async {
+      final (terminal, c, gateway) = await _fixture();
+      try {
+        terminal.tmuxReadonly = false;
+        await c.configure(metrics: true, processes: false);
+        gateway.sampleBusy = true;
+        c.setActive(true);
+        await tester.pump(const Duration(milliseconds: 1));
+        expect(c.error, isNull);
+        expect(c.metrics, true);
+        expect(gateway.samples, 1);
+        gateway.sampleBusy = false;
+        await tester.pump(const Duration(seconds: 5));
+        expect(gateway.samples, 2);
+        expect(c.summary, isNotNull);
+        gateway.sampleInvalid = true;
+        await tester.pump(const Duration(seconds: 5));
+        expect(c.error, isNotNull);
+        final requests = gateway.samples;
+        await tester.pump(const Duration(seconds: 20));
+        expect(gateway.samples, requests);
+      } finally {
+        await _close(tester, terminal, c);
+      }
+    },
+  );
   testWidgets(
     'saved resource visibility restores without process consent or background sampling',
     (tester) async {
