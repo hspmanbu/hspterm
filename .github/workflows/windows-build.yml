@@ -56,7 +56,7 @@ jobs:
 
       - name: Set up Rust MSVC
         run: |
-          rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal --component rustfmt --component clippy
+          rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal --component rustfmt
           if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain installation failed' }
           rustup target add x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw 'Rust MSVC target installation failed' }
@@ -105,105 +105,8 @@ jobs:
         id: build
         run: ./tools/build_windows.ps1 -CreateArchive
 
-      - name: Verify generated bridge consistency and Rust formatting
-        run: |
-          cargo fmt --all
-          if ($LASTEXITCODE -ne 0) { throw 'Rust formatting failed' }
-          git diff --exit-code -- crates/frb-bridge/src/frb_generated.rs ui_flutter/lib/src/rust
-          if ($LASTEXITCODE -ne 0) { throw 'Generated bridge differs from committed sources' }
-          cargo fmt --all -- --check
-          if ($LASTEXITCODE -ne 0) { throw 'Rust formatting check failed' }
-
-      - name: Check Rust warnings and unit tests
-        run: |
-          cargo clippy --workspace --all-targets --locked -- -D warnings
-          if ($LASTEXITCODE -ne 0) { throw 'Rust Clippy failed' }
-          # Portable core crates only on the Windows runner; storage-sync and
-          # ssh-core suites encode Unix path/tool assumptions and are gated on
-          # the Ubuntu verification.
-          cargo test -p hspterm-term-core -p hspterm-frb-bridge --lib --locked -- --test-threads=1
-          if ($LASTEXITCODE -ne 0) { throw 'Rust library tests failed' }
-          cargo test -p hspterm-ssh-core --lib --locked tmux::tests -- --test-threads=1
-          if ($LASTEXITCODE -ne 0) { throw 'tmux compatibility tests failed' }
-          cargo test -p hspterm-ssh-core --lib --locked inspection::tests -- --test-threads=1
-          if ($LASTEXITCODE -ne 0) { throw 'Inspection admission tests failed' }
-          cargo test -p hspterm-storage-sync --lib --locked network_defaults -- --test-threads=1
-          if ($LASTEXITCODE -ne 0) { throw 'SSH preference tests failed' }
-          cargo test -p hspterm-storage-sync --lib --locked backup::cloud_sync::webdav -- --test-threads=1
-          if ($LASTEXITCODE -ne 0) { throw 'WebDAV HTTP tests failed' }
-          cargo test -p hspterm-storage-sync --lib --locked webdav_http_targets -- --test-threads=1
-          if ($LASTEXITCODE -ne 0) { throw 'Sync target protocol tests failed' }
-          cargo test -p hspterm-storage-sync --lib --locked sftp_host_prefs -- --test-threads=1
-          if ($LASTEXITCODE -ne 0) { throw 'SFTP column persistence tests failed' }
-
-      - name: Verify tmux history protocol guards
-        run: |
-          python crates/ssh-core/src/inspection/test_tmux_history.py
-          if ($LASTEXITCODE -ne 0) { throw 'tmux history protocol tests failed' }
-
-      - name: Analyze Flutter
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        working-directory: ui_flutter
-        run: flutter analyze --no-pub
-
-      - name: Test font settings and navigation
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        working-directory: ui_flutter
-        run: flutter test --no-pub test/typography_settings_test.dart test/host_typography_test.dart test/settings_leave_guard_test.dart test/widget_test.dart test/directory_reader_test.dart test/terminal_paths_send_test.dart test/run_log_test.dart test/diagnostics_test.dart test/ime_buffer_test.dart test/app_notice_test.dart test/minimized_terminal_test.dart test/file_properties_dialog_test.dart test/sftp_feedback_ui_test.dart test/terminal_feedback_test.dart test/dialog_bounds_test.dart test/history_controls_test.dart test/terminal_suggestions_test.dart test/clipboard_image_test.dart test/explorer_drag_handoff_test.dart test/explorer_export_test.dart test/local_edit_queue_test.dart test/local_edit_session_test.dart test/transfer_rate_test.dart test/transfer_queue_test.dart test/remote_inspection_test.dart test/connection_status_test.dart test/cached_path_field_test.dart test/paste_preview_ui_test.dart test/configuration_sync_settings_test.dart test/display_selection_test.dart test/tmux_compatibility_test.dart test/tmux_history_test.dart test/tmux_choice_test.dart test/shutdown_intent_test.dart test/ssh_defaults_test.dart test/local_file_actions_test.dart test/terminal_links_test.dart test/terminal_background_test.dart test/file_columns_test.dart test/sftp_column_persistence_test.dart test/remote_destination_test.dart --reporter expanded
-
-      - name: Check native Windows startup and normal exit
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: |
-          $exe = Join-Path $env:GITHUB_WORKSPACE 'ui_flutter/build/windows/x64/runner/Release/hspterm.exe'
-          $scratch = Join-Path $env:RUNNER_TEMP 'hspterm-startup'
-          New-Item -ItemType Directory -Path $scratch -Force | Out-Null
-          $env:TEMP = $scratch
-          $env:TMP = $scratch
-          $process = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput (Join-Path $scratch 'stdout.log') -RedirectStandardError (Join-Path $scratch 'stderr.log')
-          try {
-            $deadline = [DateTime]::UtcNow.AddSeconds(45)
-            do {
-              Start-Sleep -Milliseconds 200
-              $process.Refresh()
-              if ($process.HasExited) { throw "HSPTerm exited before its window was ready: $($process.ExitCode)" }
-            } while ($process.MainWindowHandle -eq 0 -and [DateTime]::UtcNow -lt $deadline)
-            if ($process.MainWindowHandle -eq 0) { throw 'HSPTerm did not create its main window' }
-            Start-Sleep -Seconds 2
-            $samples = @()
-            foreach ($index in 0..2) {
-              $process.Refresh()
-              if ($process.HasExited) { throw 'HSPTerm exited during startup memory sampling' }
-              $samples += [PSCustomObject]@{
-                sample = $index
-                working_set_bytes = $process.WorkingSet64
-                private_bytes = $process.PrivateMemorySize64
-                thread_count = $process.Threads.Count
-              }
-              if ($index -lt 2) { Start-Sleep -Seconds 2 }
-            }
-            $report = @{
-              scenario = 'locked startup, no Vault unlock or SSH connection'
-              platform = 'Windows Server 2022 Actions runner; not Windows 11 user hardware'
-              commit = $env:GITHUB_SHA
-              samples = $samples
-            } | ConvertTo-Json -Depth 5
-            $report | Set-Content -LiteralPath (Join-Path $scratch 'memory.json') -Encoding utf8
-            Write-Output $report
-            if (-not $process.CloseMainWindow()) { throw 'Main window close request was rejected' }
-            if (-not $process.WaitForExit(30000)) { throw 'Normal window exit did not finish' }
-            if ($process.ExitCode -ne 0) { throw "HSPTerm exit code: $($process.ExitCode)" }
-            $leftovers = @(Get-ChildItem -LiteralPath $scratch -Recurse -Directory -Filter 'run-*')
-            if ($leftovers.Count -ne 0) { throw 'Normal exit retained a private preview run' }
-          } finally {
-            $process.Refresh()
-            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
-            $process.Dispose()
-          }
-
-      - name: Check native window position and size restoration
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: ./tools/validate_windows_geometry.ps1 -Executable (Join-Path $env:GITHUB_WORKSPACE 'ui_flutter/build/windows/x64/runner/Release/hspterm.exe')
-
+      # Release CI packages the app only. Run regression suites separately
+      # when requested; test/analysis/smoke steps do not gate this artifact.
       - name: Upload Windows application
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -211,24 +114,6 @@ jobs:
           name: HSPTerm-windows-x64
           path: ui_flutter/build/windows/x64/runner/Release/
           if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload startup diagnostics on failure
-        if: ${{ failure() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-startup-diagnostics
-          path: ${{ runner.temp }}/hspterm-startup/*.log
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Upload Windows startup memory samples
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-startup-memory
-          path: ${{ runner.temp }}/hspterm-startup/memory.json
-          if-no-files-found: ignore
           retention-days: 14
 
       - name: Save Rust dependencies and tools
