@@ -8,6 +8,7 @@ import 'package:hspterm/workbench/model.dart';
 import 'package:hspterm/workbench/terminal_paths.dart';
 
 import 'support/fake_backend.dart';
+import 'support/terminal_cleanup.dart';
 import 'transfer_connection_selection_test.dart' show session;
 
 class PathSessions extends LiveWorkbenchModel {
@@ -170,13 +171,14 @@ void main() {
         original.controller.tmuxReadonly = tmux ? false : null;
         final model = PathSessions([original]);
         quietNoticeNotifier.value = null;
-        addTearDown(() async {
+        // Only synchronous global cleanup belongs in package:test teardown.
+        // Controller futures originate in the widget's FakeAsync zone; drain
+        // shutdown inside the test body while that clock can still be pumped.
+        addTearDown(() {
           tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
             SystemChannels.platform,
             null,
           );
-          await model.shutdown();
-          model.dispose();
           quietNoticeNotifier.value = null;
         });
         final clipboard = <String>[];
@@ -189,51 +191,65 @@ void main() {
             return null;
           },
         );
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: Builder(
-                builder: (context) => TextButton(
-                  child: const Text('send'),
-                  onPressed: () => sendSessionPaths(
-                    context,
-                    model,
-                    original,
-                    ["/tmp/a b'.txt"],
-                    expectedGeneration: 4,
-                    request: (id, generation, paths, cd) async => 'Unavailable',
-                    directPasteAllowed: () async => true,
+        try {
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: Builder(
+                  builder: (context) => TextButton(
+                    child: const Text('send'),
+                    onPressed: () => sendSessionPaths(
+                      context,
+                      model,
+                      original,
+                      ["/tmp/a b'.txt"],
+                      expectedGeneration: 4,
+                      request: (id, generation, paths, cd) async =>
+                          'Unavailable',
+                      directPasteAllowed: () async => true,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        );
-        await tester.tap(find.text('send'));
-        await tester.pumpAndSettle();
-        final backend = original.controller.backend as FakeBackend;
-        expect(
-          backend.pastes.single.$1,
-          "'/tmp/a b'\\''.txt'",
-          reason: 'quoted literal, no Enter, no newline',
-        );
-        expect(backend.pastes.single.$2, isFalse);
-        expect(clipboard, isEmpty, reason: 'no clipboard fallback when pasted');
-        expect(quietNoticeNotifier.value?.message, '已填入安全引用路径，未执行。');
-        expect(quietNoticeNotifier.value?.level, AppNoticeLevel.success);
-        expect(quietNoticeNotifier.value?.message, isNot(contains('未启用')));
-        expect(quietNoticeNotifier.value?.message, isNot(contains('重连')));
-        expect(
-          backend.keys,
-          isEmpty,
-          reason: 'no extra Enter or keyboard injection',
-        );
-        expect(
-          backend.texts,
-          isEmpty,
-          reason: 'only the quoted paste is submitted',
-        );
-        expect(find.byType(SnackBar), findsNothing);
+          );
+          await tester.tap(find.text('send'));
+          await tester.pumpAndSettle();
+          final backend = original.controller.backend as FakeBackend;
+          expect(
+            backend.pastes.single.$1,
+            "'/tmp/a b'\\''.txt'",
+            reason: 'quoted literal, no Enter, no newline',
+          );
+          expect(backend.pastes.single.$2, isFalse);
+          expect(
+            clipboard,
+            isEmpty,
+            reason: 'no clipboard fallback when pasted',
+          );
+          expect(quietNoticeNotifier.value?.message, '已填入安全引用路径，未执行。');
+          expect(quietNoticeNotifier.value?.level, AppNoticeLevel.success);
+          expect(quietNoticeNotifier.value?.message, isNot(contains('未启用')));
+          expect(quietNoticeNotifier.value?.message, isNot(contains('重连')));
+          expect(
+            backend.keys,
+            isEmpty,
+            reason: 'no extra Enter or keyboard injection',
+          );
+          expect(
+            backend.texts,
+            isEmpty,
+            reason: 'only the quoted paste is submitted',
+          );
+          expect(find.byType(SnackBar), findsNothing);
+        } finally {
+          await tester.pumpWidget(const SizedBox());
+          await drainAsync(tester, model.shutdown());
+          expect(original.controller.shutdownComplete, true);
+          expect((original.controller.backend as FakeBackend).closes, 1);
+          model.dispose();
+          await tester.pump();
+        }
       },
     );
   }
