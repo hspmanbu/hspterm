@@ -216,6 +216,7 @@ class TerminalPaintCache {
             canvas.save();
             canvas.clipRect(
               Rect.fromLTWH(rect.left, 0, cell.width * (end - x), cell.height),
+              doAntiAlias: false,
             );
             run.paint(
               canvas,
@@ -235,6 +236,7 @@ class TerminalPaintCache {
       canvas.save();
       canvas.clipRect(
         Rect.fromLTWH(rect.left, 0, cell.width * wide, cell.height),
+        doAntiAlias: false,
       );
       final glyph = this.glyph(c.text, fg, c.flags, fontSize);
       // Center the glyph inside its cell span: CJK fallback glyphs can be
@@ -433,19 +435,25 @@ class TerminalPainter extends CustomPainter {
     if (a != null && b != null && frame != null) {
       final reversed = a.y > b.y || a.y == b.y && a.x > b.x;
       final start = reversed ? b : a, end = reversed ? a : b;
+      final selected = Path();
       for (var y = max(0, start.y); y <= min(end.y, frame.rows - 1); y++) {
         final left = y == start.y ? start.x : 0,
             right = y == end.y ? end.x : frame.columns - 1;
-        canvas.drawRect(
+        selected.addRect(
           Rect.fromLTWH(
             left * cell.width,
             y * cell.height,
             (right - left + 1) * cell.width,
             cell.height,
           ),
-          Paint()..color = const Color(0x665c92cc),
         );
       }
+      canvas.drawPath(
+        selected,
+        Paint()
+          ..isAntiAlias = false
+          ..color = const Color(0x665c92cc),
+      );
     }
     if (frame != null &&
         frame.cursorVisible &&

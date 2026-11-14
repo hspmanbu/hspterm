@@ -478,6 +478,7 @@ pub struct SshConnection {
     fallback_agent: bool,
     fallback_timeout: Duration,
     pty_exit_status: Option<u32>,
+    pending_pty: VecDeque<Result<PtyEvent, SshError>>,
 }
 #[derive(Debug, PartialEq, Eq)]
 pub enum PtyEvent {
@@ -722,6 +723,7 @@ impl SshConnection {
             fallback_agent: config.agent_forwarding,
             fallback_timeout: config.timeout,
             pty_exit_status: None,
+            pending_pty: VecDeque::new(),
         })
     }
 
@@ -780,6 +782,14 @@ impl SshConnection {
     }
 
     pub async fn read(&mut self) -> Result<PtyEvent, SshError> {
+        if let Some(event) = self.pending_pty.pop_front() {
+            match &event {
+                Ok(PtyEvent::ExitStatus(status)) => self.pty_exit_status = Some(*status),
+                Ok(PtyEvent::End) => self.closed = true,
+                _ => {}
+            }
+            return event;
+        }
         if let Some(bytes) = self.early_output.pop_front() {
             return Ok(PtyEvent::Data(bytes));
         }
@@ -794,7 +804,44 @@ impl SshConnection {
             };
             match event {
                 Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => {
-                    return Ok(PtyEvent::Data(data.to_vec()));
+                    // Drain only packets already queued in this dispatch turn.
+                    // One TUI redraw often spans several SSH packets; publishing
+                    // its clear packet alone creates a visible empty frame.
+                    // No sleep/quiet-window or lower frame-rate limit is added.
+                    use futures_util::FutureExt;
+                    let mut bytes = data.to_vec();
+                    let started = std::time::Instant::now();
+                    while bytes.len() < 256 * 1024 && started.elapsed() < Duration::from_millis(2) {
+                        match self.pty.wait().now_or_never() {
+                            Some(Some(
+                                ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. },
+                            )) => {
+                                if bytes.len() + data.len() > 256 * 1024 {
+                                    self.pending_pty
+                                        .push_back(Ok(PtyEvent::Data(data.to_vec())));
+                                    break;
+                                }
+                                bytes.extend_from_slice(&data);
+                            }
+                            Some(Some(ChannelMsg::ExitStatus { exit_status })) => {
+                                self.pending_pty
+                                    .push_back(Ok(PtyEvent::ExitStatus(exit_status)));
+                                break;
+                            }
+                            Some(Some(ChannelMsg::Close) | None) => {
+                                self.pending_pty.push_back(Ok(PtyEvent::End));
+                                break;
+                            }
+                            Some(Some(ChannelMsg::ReceiveWindowError)) => {
+                                self.pending_pty
+                                    .push_back(Err(russh::Error::Inconsistent.into()));
+                                break;
+                            }
+                            Some(Some(_)) => {}
+                            None => break,
+                        }
+                    }
+                    return Ok(PtyEvent::Data(bytes));
                 }
                 Some(ChannelMsg::ReceiveWindowError) => {
                     return Err(russh::Error::Inconsistent.into());
