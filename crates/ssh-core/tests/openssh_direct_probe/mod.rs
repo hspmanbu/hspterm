@@ -35,6 +35,35 @@ async fn direct_probe_uses_only_explicit_original_agent_and_pinned_target_withou
             .await
             .is_err()
     );
+    // Explicit copy with source socket opt-in needs no general Agent key
+    // grant. Only the saved destination credential is selected for this task.
+    let scoped = connector.with_authentication(second.auth()).await.unwrap();
+    assert_eq!(agent.status().phase, AgentPhase::Ready);
+    assert_eq!(
+        scoped
+            .probe(
+                &endpoint,
+                &second.config.username,
+                scoped.authentication_epoch(),
+                CancellationToken::new()
+            )
+            .await
+            .unwrap(),
+        ProbeStatus::Available
+    );
+    drop(scoped);
+    assert_eq!(agent.status().phase, AgentPhase::Ready);
+    assert!(
+        connector
+            .probe(
+                &endpoint,
+                &second.config.username,
+                agent.status().epoch,
+                CancellationToken::new()
+            )
+            .await
+            .is_err()
+    );
     let private = Zeroizing::new(fs::read_to_string(second.dir.path().join("client")).unwrap());
     let key = russh::keys::decode_secret_key(&private, Some("test-only-key-passphrase")).unwrap();
     let grant = agent

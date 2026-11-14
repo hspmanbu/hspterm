@@ -1,5 +1,5 @@
-# Fixed read-only direct-transfer probe. No file writes, transferred bodies,
-# remote user configuration, passwords, private keys or remote stderr output.
+# Fixed direct-transfer probe: no transferred bodies or destination changes.
+# Task authentication helpers are temporary, public code with no credentials.
 import base64
 import hashlib
 import json
@@ -12,6 +12,14 @@ import signal
 import stat
 import subprocess
 import sys
+
+
+if 'authentication_environment' not in globals():
+    def authentication_password():
+        return False
+
+    def authentication_environment(original, python):
+        return {'PATH': os.defpath, 'LC_ALL': 'C', 'SSH_AUTH_SOCK': original, 'SSH_ASKPASS_REQUIRE': 'never'}
 
 
 def known_hosts_program(expected):
@@ -39,9 +47,12 @@ def ssh_arguments(endpoint, ssh, python):
     program = known_hosts_program(digest)
     verifier = '"' + python + '" -I -S -c "' + program + '" %I %f %t %K'
     options = [
-        'BatchMode=yes', 'NumberOfPasswordPrompts=0',
-        'PasswordAuthentication=no', 'KbdInteractiveAuthentication=no',
-        'PreferredAuthentications=publickey', 'PubkeyAuthentication=yes',
+        'BatchMode=no' if authentication_password() else 'BatchMode=yes',
+        'NumberOfPasswordPrompts=1' if authentication_password() else 'NumberOfPasswordPrompts=0',
+        'PasswordAuthentication=yes' if authentication_password() else 'PasswordAuthentication=no',
+        'KbdInteractiveAuthentication=no',
+        'PreferredAuthentications=password' if authentication_password() else 'PreferredAuthentications=publickey',
+        'PubkeyAuthentication=no' if authentication_password() else 'PubkeyAuthentication=yes',
         'IdentityFile=none', 'CertificateFile=none', 'IdentitiesOnly=no',
         'IdentityAgent=SSH_AUTH_SOCK', 'PKCS11Provider=none',
         'SecurityKeyProvider=none', 'AddKeysToAgent=no',
@@ -107,7 +118,7 @@ def probe(endpoint):
         if address.startswith('-') or not re.fullmatch(r'[A-Za-z0-9._-]+', address):
             return 'unsupported'
     # Remote application/user PATH cannot select helper programs. No shell=True,
-    # askpass, preloaded library or other inherited SSH/rsync options are used.
+    # inherited askpass, preloaded library or other SSH/rsync options are used.
     ssh = shutil.which('ssh', path=os.defpath)
     rsync = shutil.which('rsync', path=os.defpath)
     python = shutil.which('python3', path=os.defpath)
@@ -119,8 +130,7 @@ def probe(endpoint):
             return 'agent_unavailable'
     except OSError:
         return 'agent_unavailable'
-    environment = {'PATH': os.defpath, 'LC_ALL': 'C', 'SSH_AUTH_SOCK': socket,
-                   'SSH_ASKPASS_REQUIRE': 'never'}
+    environment = authentication_environment(socket, python)
     if run([rsync, '--protect-args', '--version'], environment) != 0:
         return 'unsupported'
     return 'available' if run(ssh_arguments(endpoint, ssh, python), environment) == 0 else 'authentication_failed'

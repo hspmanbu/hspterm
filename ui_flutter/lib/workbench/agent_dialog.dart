@@ -360,7 +360,7 @@ class _AgentDialogState extends State<AgentDialog> {
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Text(
-                  '请在主机的认证设置启用 Agent socket，然后明确重新连接。启用 socket 不会自动授权任何密钥。',
+                  '在主机认证设置启用 Agent socket 并重新连接。直传任务自动使用目标凭据；此处的通用 Agent 密钥仍需单独授权。',
                 ),
               ),
             const SizedBox(height: 12),

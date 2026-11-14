@@ -1554,7 +1554,7 @@ class HostManagerState extends State<HostManager> {
           contentPadding: EdgeInsets.zero,
           title: const Text('申请应用内 Agent socket'),
           subtitle: const Text(
-            '下一次明确连接生效；不自动授权密钥。连接后从终端菜单逐次选择密钥并限时确认。修改所用密钥或删除其主机将撤销相关授权。',
+            '下一次连接生效。跨主机直传可按任务使用目标已保存的密码或密钥；其他 Agent 使用仍需单独限时授权，私钥不离开本机。',
           ),
           value: agentForwarding,
           onChanged: (value) {

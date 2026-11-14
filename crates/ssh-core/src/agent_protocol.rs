@@ -126,33 +126,50 @@ where
     T: AsyncRead + AsyncWrite + Unpin,
     S: Signer,
 {
+    serve_first(&mut stream, signer, permission, None).await
+}
+pub(crate) async fn serve_first<T, S>(
+    mut stream: T,
+    signer: &S,
+    permission: CancellationToken,
+    mut initial: Option<Zeroizing<Vec<u8>>>,
+) -> std::io::Result<()>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+    S: Signer,
+{
     loop {
-        let mut header = [0; 4];
-        tokio::select! {
-            biased;
-            _ = permission.cancelled() => return Ok(()),
-            result = stream.read(&mut header[..1]) => {
-                if result? == 0 { return Ok(()); }
-            },
-        }
-        tokio::select! {
-            biased;
-            _ = permission.cancelled() => return Ok(()),
-            result = stream.read_exact(&mut header[1..]) => { result?; },
-        }
-        let length = u32::from_be_bytes(header) as usize;
-        if length == 0 || length > MAX_FRAME {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "SSH agent frame exceeds bounds",
-            ));
-        }
-        let mut frame = Zeroizing::new(vec![0; length]);
-        tokio::select! {
-            biased;
-            _ = permission.cancelled() => return Ok(()),
-            result = stream.read_exact(&mut frame) => { result?; },
-        }
+        let frame = if let Some(frame) = initial.take() {
+            frame
+        } else {
+            let mut header = [0; 4];
+            tokio::select! {
+                biased;
+                _ = permission.cancelled() => return Ok(()),
+                result = stream.read(&mut header[..1]) => {
+                    if result? == 0 { return Ok(()); }
+                },
+            }
+            tokio::select! {
+                biased;
+                _ = permission.cancelled() => return Ok(()),
+                result = stream.read_exact(&mut header[1..]) => { result?; },
+            }
+            let length = u32::from_be_bytes(header) as usize;
+            if length == 0 || length > MAX_FRAME {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "SSH agent frame exceeds bounds",
+                ));
+            }
+            let mut frame = Zeroizing::new(vec![0; length]);
+            tokio::select! {
+                biased;
+                _ = permission.cancelled() => return Ok(()),
+                result = stream.read_exact(&mut frame) => { result?; },
+            }
+            frame
+        };
         let reply = tokio::select! {
             biased;
             _ = permission.cancelled() => return Ok(()),

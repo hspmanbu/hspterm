@@ -321,6 +321,19 @@ impl AgentRegistry {
             state.authorized_sources = pending.keys.iter().map(|k| k.host_id.clone()).collect();
         }
     }
+    pub fn note_direct_sources(&self, generation: u64, hosts: &[String]) -> Result<()> {
+        let mut state = self.state.lock();
+        ensure!(
+            !state.closed
+                && state
+                    .binding
+                    .as_ref()
+                    .is_some_and(|b| b.generation == generation),
+            "原 Agent 会话已失效"
+        );
+        state.authorized_sources.extend(hosts.iter().cloned());
+        Ok(())
+    }
     pub fn invalidate_sources(&self, ids: &[String]) -> Result<()> {
         let mut state = self.state.lock();
         if ids.iter().any(|id| {
@@ -368,7 +381,7 @@ fn check_pending(state: &State, pending: &Pending, ready: bool) -> Result<()> {
     Ok(())
 }
 
-fn credential_tag(credential: &hspterm_storage_sync::Credential) -> [u8; 32] {
+pub(crate) fn credential_tag(credential: &hspterm_storage_sync::Credential) -> [u8; 32] {
     let mut digest = Sha256::new();
     digest.update(b"hspterm-agent-credential-v1");
     for part in [

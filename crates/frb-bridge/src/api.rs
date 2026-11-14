@@ -3891,6 +3891,10 @@ pub async fn shutdown_file_previews() -> Result<()> {
         crate::public_errors::guard(async move { crate::previews::shutdown().await }).await;
     crate::public_errors::finish(outcome)
 }
+#[flutter_rust_bridge::frb(ignore)]
+pub(crate) fn transfer_agent_registry(id: u32) -> Result<Arc<crate::agents::AgentRegistry>> {
+    Ok(entry(id)?.agents.clone())
+}
 fn transfer_connection(id: u32) -> Result<crate::transfers::Connection> {
     let e = entry(id)?;
     if e.closed.load(Ordering::Acquire) || e.transfer_closing.load(Ordering::Acquire) {

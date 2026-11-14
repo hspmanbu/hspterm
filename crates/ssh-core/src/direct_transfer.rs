@@ -1,4 +1,4 @@
-//! Direct rsync over an already-authorized app Agent: typed read-only probes
+//! Direct rsync over a task-scoped application authentication capability: probes
 //! and fixed writes to a one-use private staging capability from original SFTP.
 //! No grant, arbitrary exec, final-path write, source deletion or new app Root.
 //! The owner binds the destination to its actual authenticated SSH receipt.
@@ -10,10 +10,18 @@ use base64::{
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub(crate) mod auth;
 mod connector;
 pub use connector::DirectConnector;
 
-const SCRIPT: &str = include_str!("direct_transfer/probe.py");
+const PROBE_SCRIPT: &str = include_str!("direct_transfer/probe.py");
+fn script() -> String {
+    format!(
+        "{}\n{}",
+        include_str!("direct_transfer/auth.py"),
+        PROBE_SCRIPT
+    )
+}
 #[derive(Debug, thiserror::Error)]
 pub enum DirectPreparationError {
     #[error("原SSH直传探测正在处理或等待旧通道结束，未开始新请求")]
@@ -22,7 +30,7 @@ pub enum DirectPreparationError {
     Unconfirmed,
     #[error("直传端点或已验证主机指纹无效；未开始直传")]
     InvalidTarget,
-    #[error("原应用Agent没有有效的明确授权；未使用系统Agent或上传凭据")]
+    #[error("直传认证通道不可用或已失效；请检查应用内Agent socket与目标凭据")]
     AgentUnavailable,
     #[error("安全直传响应无效；不能据此确认写入")]
     InvalidReply,
@@ -128,7 +136,7 @@ impl DirectProbe {
         // metadata argument. Endpoint text never becomes shell syntax.
         let command = format!(
             "/usr/bin/python3 -I -S -c '{}' '{}'",
-            SCRIPT.replace('\'', "'\\''"),
+            script().replace('\'', "'\\''"),
             payload
         );
         Ok(Self {
@@ -420,7 +428,8 @@ impl DirectQuery {
             include_str!("direct_transfer/inspect.py")
         );
         let payload = STANDARD.encode(serde_json::to_vec(&serde_json::json!({"endpoint": endpoint, "staged": staged, "bytes": bytes, "nonce": STANDARD.encode(nonce), "inspect": inspect})).map_err(|_| DirectPreparationError::InvalidTarget)?);
-        let common = SCRIPT
+        let base = script();
+        let common = base
             .split_once("\nif __name__ == '__main__':")
             .ok_or(DirectPreparationError::InvalidReply)?
             .0;
@@ -544,7 +553,8 @@ impl DirectWrite {
             }))
             .map_err(|_| DirectPreparationError::InvalidTarget)?,
         );
-        let common = SCRIPT
+        let base = script();
+        let common = base
             .split_once("\nif __name__ == '__main__':")
             .ok_or(DirectPreparationError::InvalidReply)?
             .0;

@@ -36,16 +36,24 @@ struct Key {
 #[derive(Clone)]
 struct Permission {
     stop: CancellationToken,
-    deadline: Instant,
-    wall_deadline: SystemTime,
+    deadline: Option<Instant>,
+    wall_deadline: Option<SystemTime>,
     failed: Arc<AtomicBool>,
 }
 impl Permission {
+    async fn expired(&self) {
+        match self.deadline {
+            Some(deadline) => tokio::time::sleep_until(deadline).await,
+            None => std::future::pending::<()>().await,
+        }
+    }
     fn active(&self) -> bool {
         let active = !self.failed.load(Ordering::Acquire)
             && !self.stop.is_cancelled()
-            && Instant::now() < self.deadline
-            && SystemTime::now() < self.wall_deadline;
+            && self.deadline.is_none_or(|limit| Instant::now() < limit)
+            && self
+                .wall_deadline
+                .is_none_or(|limit| SystemTime::now() < limit);
         if !active {
             self.stop.cancel();
         }
@@ -80,12 +88,26 @@ impl AgentAuthority {
         ttl: Duration,
         original_root: &CancellationToken,
     ) -> Result<Self, AgentError> {
-        if keys.is_empty()
-            || keys.len() > 16
-            || ttl.is_zero()
-            || ttl > Duration::from_secs(3600)
-            || original_root.is_cancelled()
-        {
+        if ttl.is_zero() || ttl > Duration::from_secs(3600) {
+            return Err(AgentError::Invalid);
+        }
+        Self::create(keys, Some(ttl), original_root)
+    }
+    /// An explicit copy owns this single-destination signer. Its lease, root
+    /// disconnect or credential revocation cancels it; long transfers do not
+    /// acquire a new one-hour failure boundary. Never used for general grants.
+    pub(crate) fn for_transfer(
+        keys: Vec<PrivateKey>,
+        original_root: &CancellationToken,
+    ) -> Result<Self, AgentError> {
+        Self::create(keys, None, original_root)
+    }
+    fn create(
+        keys: Vec<PrivateKey>,
+        ttl: Option<Duration>,
+        original_root: &CancellationToken,
+    ) -> Result<Self, AgentError> {
+        if keys.is_empty() || keys.len() > 16 || original_root.is_cancelled() {
             return Err(AgentError::Invalid);
         }
         let mut seen = std::collections::BTreeSet::new();
@@ -122,10 +144,14 @@ impl AgentAuthority {
         let permission = Permission {
             stop: original_root.child_token(),
             failed: Arc::new(AtomicBool::new(false)),
-            deadline: Instant::now() + ttl,
-            wall_deadline: SystemTime::now()
-                .checked_add(ttl)
-                .ok_or(AgentError::Invalid)?,
+            deadline: ttl.map(|ttl| Instant::now() + ttl),
+            wall_deadline: ttl
+                .map(|ttl| {
+                    SystemTime::now()
+                        .checked_add(ttl)
+                        .ok_or(AgentError::Invalid)
+                })
+                .transpose()?,
         };
         let (requests, receiver) = mpsc::channel(4);
         let signer = AgentSigner {
@@ -179,7 +205,7 @@ async fn run(keys: Vec<Key>, permission: Permission, mut requests: mpsc::Receive
         let command = tokio::select! {
             biased;
             _=permission.stop.cancelled()=>return,
-            _=tokio::time::sleep_until(permission.deadline)=>return,
+            _=permission.expired()=>return,
             command=requests.recv()=>match command {Some(c)=>c,None=>return},
         };
         if !permission.active() {
@@ -256,7 +282,7 @@ async fn finish_job(
     let joined = tokio::select! {
         biased;
         _ = permission.stop.cancelled() => { let joined = job.await; (false, joined) },
-        _ = tokio::time::sleep_until(permission.deadline) => { permission.stop.cancel(); let joined = job.await; (false, joined) },
+        _ = permission.expired() => { permission.stop.cancel(); let joined = job.await; (false, joined) },
         result = &mut job => (true, result),
     };
     match joined {
@@ -279,7 +305,7 @@ impl AgentSigner {
     pub(crate) fn stop_token(&self) -> CancellationToken {
         self.permission.stop.clone()
     }
-    pub(crate) fn expires_at(&self) -> SystemTime {
+    pub(crate) fn expires_at(&self) -> Option<SystemTime> {
         self.permission.wall_deadline
     }
     pub(crate) fn revoke(&self) {
@@ -296,7 +322,7 @@ impl AgentSigner {
         tokio::select! {
             biased;
             _=self.permission.stop.cancelled()=>Err(()),
-            _=tokio::time::sleep_until(self.permission.deadline)=>Err(()),
+            _=self.permission.expired()=>Err(()),
             result=async {
                 self.requests.send(command).await.map_err(|_|())?;
                 let result=reply.await.map_err(|_|())??;
@@ -331,6 +357,18 @@ impl AgentSigning for AgentSigner {
 mod tests {
     use super::*;
     use russh::keys::{Algorithm, signature::Verifier};
+    #[tokio::test]
+    async fn task_signer_is_owned_by_root_not_manual_grant_timeout() {
+        let root = CancellationToken::new();
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let mut owner = AgentAuthority::for_transfer(vec![key], &root).unwrap();
+        let signer = owner.signer();
+        assert!(signer.expires_at().is_none());
+        assert_eq!(signer.identities().await.unwrap().len(), 1);
+        root.cancel();
+        assert!(signer.identities().await.is_err());
+        owner.shutdown().await.unwrap();
+    }
     #[tokio::test]
     async fn real_ed25519_signatures_are_verified_and_rejected_after_revoke_expiry_or_original_root_loss()
      {
@@ -381,8 +419,8 @@ mod worker_failure_tests {
     async fn blocking_crypto_panic_is_a_failure_not_a_success_or_expiration() {
         let permission = Permission {
             stop: CancellationToken::new(),
-            deadline: Instant::now() + Duration::from_secs(60),
-            wall_deadline: SystemTime::now() + Duration::from_secs(60),
+            deadline: Some(Instant::now() + Duration::from_secs(60)),
+            wall_deadline: Some(SystemTime::now() + Duration::from_secs(60)),
             failed: Arc::new(AtomicBool::new(false)),
         };
         let result = finish_job(

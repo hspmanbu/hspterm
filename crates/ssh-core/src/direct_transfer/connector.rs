@@ -16,6 +16,7 @@ pub struct DirectConnector {
     agent: AgentConnector,
     standard_agent: Option<bool>,
     slot: Arc<Semaphore>,
+    authentication: Option<Arc<super::auth::Lease>>,
 }
 impl DirectConnector {
     pub(crate) fn new(
@@ -30,6 +31,7 @@ impl DirectConnector {
             agent,
             standard_agent,
             slot: Arc::new(Semaphore::new(1)),
+            authentication: None,
         }
     }
     pub(crate) async fn wait_closed(&self) {
@@ -38,7 +40,27 @@ impl DirectConnector {
         }
     }
     pub(super) fn agent_status(&self) -> AgentStatus {
-        self.agent.status()
+        self.authentication
+            .as_ref()
+            .map_or_else(|| self.agent.status(), |a| a.status())
+    }
+    /// The caller has checked the source socket opt-in and captured the
+    /// original destination credential. No general Agent grant is changed.
+    pub async fn with_authentication(
+        &self,
+        authentication: crate::Authentication,
+    ) -> Result<Self, SshError> {
+        if self.standard_agent.is_none() || self.root.is_cancelled() {
+            return Err(DirectPreparationError::AgentUnavailable.into());
+        }
+        let capability = self.agent.direct_authentication(authentication).await?;
+        Ok(Self {
+            authentication: Some(Arc::new(super::auth::Lease(capability))),
+            ..self.clone()
+        })
+    }
+    pub fn authentication_epoch(&self) -> u64 {
+        self.agent_status().epoch
     }
     /// Only a fixed read-only probe; cannot accept arbitrary exec or paths.
     /// The target must be an actual peer identity captured by the calling task.
@@ -50,7 +72,7 @@ impl DirectConnector {
         cancel: CancellationToken,
     ) -> Result<ProbeStatus, SshError> {
         let probe =
-            DirectProbe::prepare(target, username, &self.agent.status(), expected_agent_epoch)?;
+            DirectProbe::prepare(target, username, &self.agent_status(), expected_agent_epoch)?;
         let raw = self
             .execute(
                 probe.command,
@@ -116,7 +138,7 @@ impl DirectConnector {
         let write = DirectWrite::prepare_attempt(
             target,
             username,
-            &self.agent.status(),
+            &self.agent_status(),
             epoch,
             source,
             staged,
@@ -145,7 +167,7 @@ impl DirectConnector {
         let query = DirectQuery::prepare(
             target,
             username,
-            &self.agent.status(),
+            &self.agent_status(),
             epoch,
             staged,
             bytes,
@@ -199,6 +221,7 @@ impl DirectConnector {
         let root = self.root.clone();
         let handle = self.handle.clone();
         let agent = self.agent.clone();
+        let authentication = self.authentication.clone();
         let worker_cancel = local.clone();
         let (send, receive) = oneshot::channel();
         tokio::spawn(async move {
@@ -214,7 +237,7 @@ impl DirectConnector {
                 };
                 let mut peer_closed = false;
                 let operation = async {
-                    let grant = agent.status();
+                    let grant = authentication.as_ref().map_or_else(|| agent.status(), |a| a.status());
                     if grant.epoch != expected_agent_epoch || grant.phase != AgentPhase::Active {
                         return Err(DirectPreparationError::AgentUnavailable.into());
                     }
@@ -227,8 +250,8 @@ impl DirectConnector {
                         Some(ChannelMsg::Success | ChannelMsg::Failure) => {},
                         _ => return Err(DirectPreparationError::InvalidReply.into()),
                     }
-                    let raw = collect(&mut channel, &command, &mut peer_closed).await?;
-                    let grant = agent.status();
+                    let raw = collect(&mut channel, &command, &mut peer_closed, authentication.as_ref().map(|lease| lease.0.as_ref())).await?;
+                    let grant = authentication.as_ref().map_or_else(|| agent.status(), |a| a.status());
                     if read_only && (grant.epoch != expected_agent_epoch || grant.phase != AgentPhase::Active) {
                         return Err(DirectPreparationError::AgentUnavailable.into());
                     }
@@ -301,8 +324,15 @@ async fn collect(
     channel: &mut Channel<client::Msg>,
     command: &str,
     closed: &mut bool,
+    authentication: Option<&super::auth::Capability>,
 ) -> Result<Vec<u8>, SshError> {
     channel.exec(true, command.as_bytes()).await?;
+    if let Some(auth) = authentication {
+        if !auth.active() {
+            return Err(DirectPreparationError::AgentUnavailable.into());
+        }
+        channel.data(auth.input().as_slice()).await?;
+    }
     channel.eof().await?;
     let mut output = Vec::new();
     let mut consumed = 0usize;

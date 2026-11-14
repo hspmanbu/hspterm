@@ -13,7 +13,7 @@ def query(request):
         socket = os.environ.get('SSH_AUTH_SOCK', '')
         if not ssh or not python or not socket or not stat.S_ISSOCK(os.stat(socket).st_mode):
             raise ValueError('unavailable')
-        environment = {'PATH': os.defpath, 'LC_ALL': 'C', 'SSH_AUTH_SOCK': socket, 'SSH_ASKPASS_REQUIRE': 'never'}
+        environment = authentication_environment(socket, python)
         metadata = base64.b64encode(json.dumps({key: request[key] for key in ('staged', 'bytes', 'nonce')}).encode()).decode()
         argv = ssh_arguments(endpoint, ssh, python)
         argv[-1] = '/usr/bin/python3 -I -S -c ' + shlex.quote(request['inspect']) + ' ' + shlex.quote(metadata)

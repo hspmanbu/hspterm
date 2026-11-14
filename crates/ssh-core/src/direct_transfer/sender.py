@@ -22,8 +22,7 @@ def transfer(request):
     python = shutil.which('python3', path=os.defpath)
     if not ssh or not rsync or not python:
         return 'unconfirmed'
-    environment = {'PATH': os.defpath, 'LC_ALL': 'C', 'SSH_AUTH_SOCK': socket,
-                   'SSH_ASKPASS_REQUIRE': 'never'}
+    environment = authentication_environment(socket, python)
     # Reuse all pinned SSH options; rsync supplies the single fixed host alias
     # and generated receiver command instead of the probe's final two arguments.
     ssh_argv = ssh_arguments(endpoint, ssh, python)[:-3]

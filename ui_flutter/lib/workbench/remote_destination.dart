@@ -262,7 +262,7 @@ class _RemoteDestinationDialogState extends State<RemoteDestinationDialog> {
                 contentPadding: EdgeInsets.zero,
                 title: const Text('服务器直传（SSH 与 SFTP 使用相同路径）'),
                 subtitle: const Text(
-                  '来源需能访问目标 SSH 地址，两端需 Python 3 和 rsync，来源需 ssh。使用已授权的目标密钥，不上传私钥；自定义 SFTP 虚拟根可能不适用。',
+                  '来源需能访问目标 SSH 地址，两端需 Python 3 和 rsync，来源需 ssh。自动使用目标已保存的密码或密钥，私钥不离开本机；自定义 SFTP 虚拟根可能不适用。',
                 ),
                 onChanged: _busy
                     ? null
@@ -271,7 +271,7 @@ class _RemoteDestinationDialogState extends State<RemoteDestinationDialog> {
               const Padding(
                 padding: EdgeInsets.only(top: 4, bottom: 2),
                 child: Text(
-                  '首次使用：在来源主机配置中开启 Agent 转发并重新连接，再授权目标主机的密钥。目标需接受该公钥。',
+                  '在来源主机开启“申请应用内 Agent socket”并重新连接即可，无需额外手动授权直传密钥。',
                   style: TextStyle(fontSize: 11),
                 ),
               ),
@@ -297,7 +297,7 @@ class _RemoteDestinationDialogState extends State<RemoteDestinationDialog> {
                           }
                         },
                   icon: const Icon(Icons.key, size: 16),
-                  label: const Text('配置来源会话的直传认证'),
+                  label: const Text('查看来源 Agent 状态'),
                 ),
               ),
               CheckboxListTile(

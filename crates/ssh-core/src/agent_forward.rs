@@ -56,6 +56,7 @@ pub(crate) struct AgentRouter {
     streams: Arc<Semaphore>,
     tasks: Mutex<Tasks>,
     changed: watch::Sender<AgentStatus>,
+    direct: Mutex<Vec<std::sync::Weak<crate::direct_transfer::auth::Capability>>>,
 }
 #[derive(Clone)]
 pub struct AgentConnector {
@@ -72,6 +73,7 @@ impl AgentRouter {
         };
         let (changed, _) = watch::channel(status.clone());
         Arc::new(Self {
+            direct: Mutex::new(Vec::new()),
             root: root.child_token(),
             state: Mutex::new(State {
                 endpoint_accepted: false,
@@ -126,46 +128,62 @@ impl AgentRouter {
         channel: Channel<client::Msg>,
         reply: client::ChannelOpenHandle,
     ) {
-        // No network waits or asynchronous ownership lock while routing. A slow
-        // crypto operation/consumer must not block the shared SSH dispatcher.
-        let (epoch, signer) = {
+        let (epoch, signer, accepted) = {
             let state = self.state.lock();
             (
                 state.status.epoch,
                 state.signer.as_ref().filter(|s| s.active()).cloned(),
+                state.endpoint_accepted,
             )
         };
+        let direct = self
+            .direct
+            .lock()
+            .iter()
+            .filter_map(std::sync::Weak::upgrade)
+            .any(|c| c.active());
         let slot = self.streams.clone().try_acquire_owned();
-        let (Some(signer), Ok(slot)) = (signer, slot) else {
+        let Ok(slot) = slot else {
             reply
                 .reject(ChannelOpenFailure::AdministrativelyProhibited)
                 .await;
             return;
         };
-        if self.root.is_cancelled() {
+        if self.root.is_cancelled() || !accepted || (signer.is_none() && !direct) {
             reply
                 .reject(ChannelOpenFailure::AdministrativelyProhibited)
                 .await;
             return;
         }
-        let permission = signer.stop_token();
         let router = Arc::downgrade(self);
+        let root = self.root.clone();
         self.spawn(async move {
+            use tokio::io::AsyncWriteExt;
             let _slot = slot;
-            if !signer.active() {
-                reply
-                    .reject(ChannelOpenFailure::AdministrativelyProhibited)
-                    .await;
-                return;
-            }
             reply.accept().await;
-            // Bad/truncated frames close only this Agent stream. The codec is
-            // bounded and fails requests it cannot safely perform.
-            if agent_protocol::serve(channel.into_stream(), &signer, permission)
-                .await
-                .is_err()
-                && let Some(router) = router.upgrade()
-            {
+            let mut stream = channel.into_stream();
+            let result = async {
+                let first = tokio::select! { biased;
+                    _ = root.cancelled() => return Ok(()),
+                    r = tokio::time::timeout(Duration::from_secs(5), crate::direct_transfer::auth::first(&mut stream)) =>
+                        r.map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))??,
+                };
+                let capability = router.upgrade().and_then(|r| r.direct.lock().iter()
+                    .filter_map(std::sync::Weak::upgrade).find(|c| c.matches(&first)));
+                if let Some(capability) = capability {
+                    capability.serve(stream).await
+                } else if let Some(signer) = signer {
+                    agent_protocol::serve_first(stream, &signer, signer.stop_token(), Some(first)).await
+                } else {
+                    tokio::select! { biased;
+                        _ = root.cancelled() => Ok(()),
+                        result = tokio::time::timeout(Duration::from_secs(5), async {
+                            stream.write_u32(1).await?; stream.write_all(&[5]).await?; stream.shutdown().await
+                        }) => result.map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))?,
+                    }
+                }
+            }.await;
+            if result.is_err() && let Some(router) = router.upgrade() {
                 let mut state = router.state.lock();
                 if state.status.epoch == epoch {
                     state.status.failed_streams = state.status.failed_streams.saturating_add(1);
@@ -175,6 +193,9 @@ impl AgentRouter {
         });
     }
     fn invalidated(&self, state: &mut State, phase: AgentPhase) -> Result<u64, SshError> {
+        for cap in self.direct.lock().drain(..).filter_map(|c| c.upgrade()) {
+            cap.cancel();
+        }
         let Some(epoch) = state.status.epoch.checked_add(1) else {
             if let Some(signer) = state.signer.take() {
                 signer.revoke();
@@ -300,6 +321,66 @@ impl AgentConnector {
     pub(crate) fn new(router: Arc<AgentRouter>) -> Self {
         Self { router }
     }
+    /// Explicit socket opt-in + a requested copy authorizes only that task's
+    /// destination credential. It never changes the general interactive grant.
+    pub(crate) async fn direct_authentication(
+        &self,
+        auth: crate::Authentication,
+    ) -> Result<Arc<crate::direct_transfer::auth::Capability>, SshError> {
+        let expected_epoch = self.router.state.lock().status.epoch;
+        if !self.router.state.lock().endpoint_accepted || self.router.root.is_cancelled() {
+            return Err(SshError::AgentUnavailable);
+        }
+        {
+            let mut entries = self.router.direct.lock();
+            entries.retain(|c| c.upgrade().is_some_and(|c| c.active()));
+            if entries.len() >= 64 {
+                return Err(SshError::Busy);
+            }
+        }
+        let (cap, mut authority) =
+            crate::direct_transfer::auth::Capability::prepare(auth, &self.router.root).await?;
+        let installed = {
+            let state = self.router.state.lock();
+            let mut entries = self.router.direct.lock();
+            if state.endpoint_accepted
+                && state.status.epoch == expected_epoch
+                && !self.router.root.is_cancelled()
+                && entries.len() < 64
+            {
+                entries.push(Arc::downgrade(&cap));
+                true
+            } else {
+                false
+            }
+        };
+        if !installed {
+            cap.cancel();
+            if let Some(ref mut authority) = authority {
+                authority
+                    .shutdown()
+                    .await
+                    .map_err(|_| SshError::AgentWorker)?;
+            }
+            return Err(SshError::AgentUnavailable);
+        }
+        let weak = Arc::downgrade(&cap);
+        let stop = cap.stopped();
+        let router = Arc::downgrade(&self.router);
+        self.router.spawn(async move {
+            stop.cancelled().await;
+            if let Some(cap) = weak.upgrade() {
+                cap.cancel();
+            }
+            if let Some(ref mut authority) = authority
+                && authority.shutdown().await.is_err()
+                && let Some(router) = router.upgrade()
+            {
+                router.tasks.lock().failed = true;
+            }
+        });
+        Ok(cap)
+    }
     pub fn status(&self) -> AgentStatus {
         let state = self.router.state.lock();
         let mut status = state.status.clone();
@@ -366,8 +447,7 @@ impl AgentConnector {
         let stop = signer.stop_token();
         let expiry = signer
             .expires_at()
-            .duration_since(UNIX_EPOCH)
-            .ok()
+            .and_then(|expiry| expiry.duration_since(UNIX_EPOCH).ok())
             .and_then(|n| u64::try_from(n.as_millis()).ok());
         let installed = {
             let mut state = self.router.state.lock();
