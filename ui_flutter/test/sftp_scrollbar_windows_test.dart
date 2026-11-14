@@ -38,7 +38,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       final bars = tester
-          .widgetList<RawScrollbar>(find.byType(RawScrollbar))
+          .widgetList<RawScrollbar>(
+            find.byWidgetPredicate((w) => w is RawScrollbar),
+          )
           .toList();
       // Only the two explicit bars exist; the desktop wrapper added none.
       expect(bars.length, 2);

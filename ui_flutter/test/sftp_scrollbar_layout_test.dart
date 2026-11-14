@@ -41,7 +41,9 @@ void main() {
       // The vertical RawScrollbar wraps the horizontal viewport: its box
       // spans the full list area and its thumb hugs the panel's right edge.
       final bars = tester
-          .widgetList<RawScrollbar>(find.byType(RawScrollbar))
+          .widgetList<RawScrollbar>(
+            find.byWidgetPredicate((w) => w is RawScrollbar),
+          )
           .toList();
       expect(bars.length, 2);
       final verticalBar = bars.firstWhere(
@@ -68,6 +70,23 @@ void main() {
       final horizontalBar = bars.firstWhere(
         (b) => b.scrollbarOrientation == ScrollbarOrientation.bottom,
       );
+      expect(horizontalBar.padding?.resolve(TextDirection.ltr).right, 14);
+      expect(
+        verticalBar.padding!.resolve(TextDirection.ltr).top,
+        greaterThan(25),
+      );
+      vertical.jumpTo(vertical.position.maxScrollExtent);
+      await tester.pump();
+      // The painted track excludes the fixed header and bottom rail; its
+      // length must be exactly the viewport used for vertical scroll metrics.
+      final padding = verticalBar.padding!.resolve(TextDirection.ltr);
+      expect(
+        rect.height - padding.vertical,
+        closeTo(vertical.position.viewportDimension, 1),
+      );
+      expect(vertical.position.extentAfter, 0);
+      final listRect = tester.getRect(find.byType(ListView));
+      expect(listRect.bottom, closeTo(rect.bottom - 14, 1));
       expect(horizontalBar.controller, isNotNull);
       horizontalBar.controller!.jumpTo(400);
       await tester.pump();

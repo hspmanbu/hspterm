@@ -19,6 +19,7 @@ import 'design.dart';
 import '../workbench/file_kinds.dart';
 import '../run_log.dart';
 import 'model.dart';
+import 'file_scrollbar.dart';
 import 'cached_path_field.dart';
 import 'queue.dart';
 import 'bookmarks.dart';
@@ -2522,11 +2523,14 @@ class _FilesPanelState extends State<FilesPanel> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // The vertical scrollbar wraps the viewport so its thumb
-                            // stays pinned to the visible right edge; the horizontal
-                            // bar is a separate row below and never crosses it.
+                            // Both rails remain outside the content. Vertical track
+                            // excludes the header; the reserved corner prevents the
+                            // bottom horizontal rail from crossing the thumb.
                             Expanded(
-                              child: RawScrollbar(
+                              child: FileViewportScrollbar(
+                                axis: Axis.vertical,
+                                viewportChrome:
+                                    (27 * _fontScale).roundToDouble() + 15,
                                 controller: _vertical,
                                 thumbVisibility: true,
                                 scrollbarOrientation:
@@ -2541,347 +2545,370 @@ class _FilesPanelState extends State<FilesPanel> {
                                     n.metrics.axis == Axis.vertical,
                                 // Keep the bottom 14px clear of the horizontal
                                 // thumb so the tracks never cross.
-                                padding: const EdgeInsets.only(bottom: 14),
-                                child: RawScrollbar(
+                                padding: EdgeInsets.only(
+                                  top: (27 * _fontScale).roundToDouble() + 1,
+                                  bottom: 14,
+                                ),
+                                child: FileViewportScrollbar(
+                                  axis: Axis.horizontal,
+                                  viewportChrome: 14,
                                   controller: _horizontal,
                                   thumbVisibility: true,
                                   scrollbarOrientation:
                                       ScrollbarOrientation.bottom,
                                   notificationPredicate: (n) =>
                                       n.metrics.axis == Axis.horizontal,
-                                  child: ScrollConfiguration(
-                                    // Desktop platforms wrap scrollables in
-                                    // their own automatic Scrollbar; that
-                                    // produced the second vertical bar glued
-                                    // to the content. Only the explicit
-                                    // RawScrollbars below may draw.
-                                    behavior: ScrollConfiguration.of(context)
-                                        .copyWith(scrollbars: false),
-                                    child: SingleChildScrollView(
-                                      controller: _horizontal,
-                                      scrollDirection: Axis.horizontal,
-                                      child: SizedBox(
-                                        width: _columns.fold<double>(
-                                          0,
-                                          (sum, i) => sum + (widths[i] ?? 90),
-                                        ),
-                                        child: Column(
-                                          children: [
-                                            SizedBox(
-                                              height: (27 * _fontScale)
-                                                  .roundToDouble(),
-                                              child: Row(
-                                                children: [
-                                                  for (final id in _columns)
-                                                    SizedBox(
-                                                      width:
-                                                          widths[id] ??
-                                                          _columnDefaultWidths[id]!,
-                                                      child: Row(
-                                                        children: [
-                                                          Expanded(
-                                                            child: _headerCell(
-                                                              context,
-                                                              id,
-                                                            ),
-                                                          ),
-                                                          ResizeGrip(
-                                                            key: ValueKey(
-                                                              'file-column-$id',
-                                                            ),
-                                                            horizontal: true,
-                                                            onEnd: () =>
-                                                                _rememberColumns(),
-                                                            onDelta: (d) {
-                                                              setState(
-                                                                () => widths[id] =
-                                                                    ((widths[id] ?? _columnDefaultWidths[id]!).clamp(
-                                                                              70,
-                                                                              500,
-                                                                            ) +
-                                                                            d)
-                                                                        .clamp(
-                                                                          70,
-                                                                          500,
-                                                                        ),
-                                                              );
-                                                              _rememberColumns(
-                                                                debounce: true,
-                                                              );
-                                                            },
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                ],
-                                              ),
-                                            ),
-                                            Divider(
-                                              height: 1,
-                                              color: Theme.of(context)
-                                                  .dividerColor,
-                                            ),
-                                            Expanded(
-                                              child: ScrollConfiguration(
-                                                behavior:
-                                                    ScrollConfiguration.of(
-                                                      context,
-                                                    ).copyWith(
-                                                      scrollbars: false,
-                                                    ),
-                                                child: ListView.builder(
-                                                  controller: _vertical,
-                                                  itemCount: visible.length + 1,
-                                                  itemBuilder: (c, index) {
-                                                    if (index == 0) {
-                                                      return InkWell(
-                                                        key: const ValueKey(
-                                                          'sftp-parent-directory',
-                                                        ),
-                                                        onDoubleTap: () {
-                                                          final slash = p.path
-                                                              .lastIndexOf('/');
-                                                          navigate(
-                                                            slash <= 0
-                                                                ? '/'
-                                                                : p.path
-                                                                      .substring(
-                                                                        0,
-                                                                        slash,
-                                                                      ),
-                                                          );
-                                                        },
-                                                        child: SizedBox(
-                                                          height: _rowHeight,
-                                                          child: const Row(
-                                                            children: [
-                                                              SizedBox(
-                                                                width: 10,
-                                                              ),
-                                                              Icon(
-                                                                Icons
-                                                                    .drive_folder_upload_outlined,
-                                                                size: 16,
-                                                              ),
-                                                              SizedBox(
-                                                                width: 8,
-                                                              ),
-                                                              Text('..'),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                      );
-                                                    }
-                                                    final f =
-                                                        visible[index - 1];
-                                                    if (f.folder) {
-                                                      _folderObjects[f.id] = f;
-                                                    }
-                                                    Widget
-                                                    row = SelectionTarget(
-                                                      behavior: HitTestBehavior
-                                                          .opaque,
-                                                      // Taps land on the inline
-                                                      // rename editor itself while
-                                                      // it is open; taking list focus
-                                                      // there would cancel editing.
-                                                      onTapDown: (_) {
-                                                        if (editing != f.id) {
-                                                          select(f);
-                                                        }
-                                                      },
-                                                      onDoubleTap: () =>
-                                                          open(f),
-                                                      // Complete the pointer sequence before pushing
-                                                      // a modal menu/editor that can steal input.
-                                                      onSecondaryTapUp: (d) =>
-                                                          _openFileMenu(
-                                                            d.globalPosition,
-                                                            f,
-                                                          ),
-                                                      child: Container(
-                                                        key: ValueKey(
-                                                          'file-${f.name}',
-                                                        ),
-                                                        // The editor row
-                                                        // never grows: an
-                                                        // invalid name shows
-                                                        // below the row.
-                                                        height: _rowHeight,
-                                                        color:
-                                                            selected.contains(
-                                                              f.id,
-                                                            )
-                                                            ? Theme.of(c)
-                                                                  .colorScheme
-                                                                  .primary
-                                                                  .withValues(
-                                                                    alpha: .12,
-                                                                  )
-                                                            : null,
-                                                        // Editing keeps the row's column
-                                                        // layout: only the name cell swaps
-                                                        // to the editor so widths and the
-                                                        // horizontal scroll stay put.
-                                                        child: editing == f.id
-                                                            ? Row(
-                                                                children: [
-                                                                  _nameEditorCell(
-                                                                    c,
-                                                                    f,
-                                                                    widths['name'] ??
-                                                                        _columnDefaultWidths['name']!,
+                                  padding: const EdgeInsets.only(right: 14),
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(
+                                      right: 14,
+                                      bottom: 14,
+                                    ),
+                                    child: ScrollConfiguration(
+                                      // Desktop platforms wrap scrollables in
+                                      // their own automatic Scrollbar; that
+                                      // produced the second vertical bar glued
+                                      // to the content. Only the explicit
+                                      // RawScrollbars below may draw.
+                                      behavior: ScrollConfiguration.of(context)
+                                          .copyWith(scrollbars: false),
+                                      child: SingleChildScrollView(
+                                        controller: _horizontal,
+                                        scrollDirection: Axis.horizontal,
+                                        child: SizedBox(
+                                          width: _columns.fold<double>(
+                                            0,
+                                            (sum, i) => sum + (widths[i] ?? 90),
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              SizedBox(
+                                                height: (27 * _fontScale)
+                                                    .roundToDouble(),
+                                                child: Row(
+                                                  children: [
+                                                    for (final id in _columns)
+                                                      SizedBox(
+                                                        width:
+                                                            widths[id] ??
+                                                            _columnDefaultWidths[id]!,
+                                                        child: Row(
+                                                          children: [
+                                                            Expanded(
+                                                              child:
+                                                                  _headerCell(
+                                                                    context,
+                                                                    id,
                                                                   ),
-                                                                  for (final id
-                                                                      in _columns)
-                                                                    if (id !=
-                                                                        'name')
-                                                                      _metaCell(
-                                                                        c,
-                                                                        f,
-                                                                        id,
-                                                                        widths[id] ??
-                                                                            _columnDefaultWidths[id]!,
-                                                                      ),
-                                                                ],
-                                                              )
-                                                            : Row(
-                                                                children: [
-                                                                  for (final id
-                                                                      in _columns)
-                                                                    if (id ==
-                                                                        'name')
-                                                                      _nameCell(
-                                                                        c,
-                                                                        f,
-                                                                        widths[id] ??
-                                                                            _columnDefaultWidths[id]!,
-                                                                      )
-                                                                    else
-                                                                      _metaCell(
-                                                                        c,
-                                                                        f,
-                                                                        id,
-                                                                        widths[id] ??
-                                                                            _columnDefaultWidths[id]!,
-                                                                      ),
-                                                                ],
-                                                              ),
-                                                      ),
-                                                    );
-                                                    row = Draggable<RemoteDrag>(
-                                                      // Secondary clicks belong to the file menu;
-                                                      // never enter a drag arena for that button.
-                                                      allowedButtonsFilter:
-                                                          (buttons) =>
-                                                              buttons ==
-                                                              kPrimaryMouseButton,
-                                                      data: RemoteDrag(
-                                                        p.id,
-                                                        p.path,
-                                                        selected.contains(f.id)
-                                                            ? visible
-                                                                  .where(
-                                                                    (
-                                                                      f,
-                                                                    ) => selected
-                                                                        .contains(
-                                                                          f.id,
-                                                                        ),
-                                                                  )
-                                                                  .toList()
-                                                            : [f],
-                                                        generation: p
-                                                            .connectionGeneration,
-                                                      ),
-                                                      feedback:
-                                                          const SizedBox.shrink(),
-                                                      child: row,
-                                                    );
-                                                    final live = m;
-                                                    if (live
-                                                            is LiveWorkbenchModel &&
-                                                        p is LiveTerminalSession) {
-                                                      row = ExplorerExportDrag(
-                                                        model: live,
-                                                        source:
-                                                            p as LiveTerminalSession,
-                                                        selection: () =>
-                                                            selected.contains(
-                                                              f.id,
-                                                            )
-                                                            ? visible
-                                                                  .where(
-                                                                    (
-                                                                      entry,
-                                                                    ) => selected
-                                                                        .contains(
-                                                                          entry
-                                                                              .id,
-                                                                        ),
-                                                                  )
-                                                                  .toList()
-                                                            : [f],
-                                                        child: row,
-                                                      );
-                                                    }
-                                                    Widget item = f.folder
-                                                        ? KeyedSubtree(
-                                                            key: _folderBounds
-                                                                .putIfAbsent(
-                                                                  f.id,
-                                                                  GlobalKey.new,
-                                                                ),
-                                                            child: dropTarget(
-                                                              folder: f,
-                                                              child: row,
                                                             ),
-                                                          )
-                                                        : row;
-                                                    // Validation errors render
-                                                    // below the row so the
-                                                    // editor box height is
-                                                    // independent of the
-                                                    // error text.
-                                                    if (editing == f.id &&
-                                                        renameError != null) {
-                                                      item = Column(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .stretch,
-                                                        children: [
-                                                          item,
-                                                          Padding(
-                                                            padding:
-                                                                const EdgeInsets.only(
-                                                                  left: 34,
-                                                                  top: 2,
-                                                                ),
-                                                            child: Text(
-                                                              key:
-                                                                  const ValueKey(
-                                                                    'inline-rename-error',
-                                                                  ),
-                                                              renameError!,
-                                                              style: TextStyle(
-                                                                fontSize: 11,
-                                                                color: Theme.of(c)
-                                                                    .colorScheme
-                                                                    .error,
+                                                            ResizeGrip(
+                                                              key: ValueKey(
+                                                                'file-column-$id',
                                                               ),
+                                                              horizontal: true,
+                                                              onEnd: () =>
+                                                                  _rememberColumns(),
+                                                              onDelta: (d) {
+                                                                setState(
+                                                                  () => widths[id] =
+                                                                      ((widths[id] ?? _columnDefaultWidths[id]!).clamp(
+                                                                                70,
+                                                                                500,
+                                                                              ) +
+                                                                              d)
+                                                                          .clamp(
+                                                                            70,
+                                                                            500,
+                                                                          ),
+                                                                );
+                                                                _rememberColumns(
+                                                                  debounce:
+                                                                      true,
+                                                                );
+                                                              },
                                                             ),
-                                                          ),
-                                                        ],
-                                                      );
-                                                    }
-                                                    return item;
-                                                  },
+                                                          ],
+                                                        ),
+                                                      ),
+                                                  ],
                                                 ),
                                               ),
-                                            ),
-                                          ],
+                                              Divider(
+                                                height: 1,
+                                                color: Theme.of(context)
+                                                    .dividerColor,
+                                              ),
+                                              Expanded(
+                                                child: ScrollConfiguration(
+                                                  behavior:
+                                                      ScrollConfiguration.of(
+                                                        context,
+                                                      ).copyWith(
+                                                        scrollbars: false,
+                                                      ),
+                                                  child: ListView.builder(
+                                                    controller: _vertical,
+                                                    padding: EdgeInsets.zero,
+                                                    itemCount:
+                                                        visible.length + 1,
+                                                    itemBuilder: (c, index) {
+                                                      if (index == 0) {
+                                                        return InkWell(
+                                                          key: const ValueKey(
+                                                            'sftp-parent-directory',
+                                                          ),
+                                                          onDoubleTap: () {
+                                                            final slash = p.path
+                                                                .lastIndexOf(
+                                                                  '/',
+                                                                );
+                                                            navigate(
+                                                              slash <= 0
+                                                                  ? '/'
+                                                                  : p.path
+                                                                        .substring(
+                                                                          0,
+                                                                          slash,
+                                                                        ),
+                                                            );
+                                                          },
+                                                          child: SizedBox(
+                                                            height: _rowHeight,
+                                                            child: const Row(
+                                                              children: [
+                                                                SizedBox(
+                                                                  width: 10,
+                                                                ),
+                                                                Icon(
+                                                                  Icons
+                                                                      .drive_folder_upload_outlined,
+                                                                  size: 16,
+                                                                ),
+                                                                SizedBox(
+                                                                  width: 8,
+                                                                ),
+                                                                Text('..'),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        );
+                                                      }
+                                                      final f =
+                                                          visible[index - 1];
+                                                      if (f.folder) {
+                                                        _folderObjects[f.id] =
+                                                            f;
+                                                      }
+                                                      Widget
+                                                      row = SelectionTarget(
+                                                        behavior:
+                                                            HitTestBehavior
+                                                                .opaque,
+                                                        // Taps land on the inline
+                                                        // rename editor itself while
+                                                        // it is open; taking list focus
+                                                        // there would cancel editing.
+                                                        onTapDown: (_) {
+                                                          if (editing != f.id) {
+                                                            select(f);
+                                                          }
+                                                        },
+                                                        onDoubleTap: () =>
+                                                            open(f),
+                                                        // Complete the pointer sequence before pushing
+                                                        // a modal menu/editor that can steal input.
+                                                        onSecondaryTapUp: (d) =>
+                                                            _openFileMenu(
+                                                              d.globalPosition,
+                                                              f,
+                                                            ),
+                                                        child: Container(
+                                                          key: ValueKey(
+                                                            'file-${f.name}',
+                                                          ),
+                                                          // The editor row
+                                                          // never grows: an
+                                                          // invalid name shows
+                                                          // below the row.
+                                                          height: _rowHeight,
+                                                          color:
+                                                              selected.contains(
+                                                                f.id,
+                                                              )
+                                                              ? Theme.of(c)
+                                                                    .colorScheme
+                                                                    .primary
+                                                                    .withValues(
+                                                                      alpha:
+                                                                          .12,
+                                                                    )
+                                                              : null,
+                                                          // Editing keeps the row's column
+                                                          // layout: only the name cell swaps
+                                                          // to the editor so widths and the
+                                                          // horizontal scroll stay put.
+                                                          child: editing == f.id
+                                                              ? Row(
+                                                                  children: [
+                                                                    _nameEditorCell(
+                                                                      c,
+                                                                      f,
+                                                                      widths['name'] ??
+                                                                          _columnDefaultWidths['name']!,
+                                                                    ),
+                                                                    for (final id
+                                                                        in _columns)
+                                                                      if (id !=
+                                                                          'name')
+                                                                        _metaCell(
+                                                                          c,
+                                                                          f,
+                                                                          id,
+                                                                          widths[id] ??
+                                                                              _columnDefaultWidths[id]!,
+                                                                        ),
+                                                                  ],
+                                                                )
+                                                              : Row(
+                                                                  children: [
+                                                                    for (final id
+                                                                        in _columns)
+                                                                      if (id ==
+                                                                          'name')
+                                                                        _nameCell(
+                                                                          c,
+                                                                          f,
+                                                                          widths[id] ??
+                                                                              _columnDefaultWidths[id]!,
+                                                                        )
+                                                                      else
+                                                                        _metaCell(
+                                                                          c,
+                                                                          f,
+                                                                          id,
+                                                                          widths[id] ??
+                                                                              _columnDefaultWidths[id]!,
+                                                                        ),
+                                                                  ],
+                                                                ),
+                                                        ),
+                                                      );
+                                                      row = Draggable<RemoteDrag>(
+                                                        // Secondary clicks belong to the file menu;
+                                                        // never enter a drag arena for that button.
+                                                        allowedButtonsFilter:
+                                                            (buttons) =>
+                                                                buttons ==
+                                                                kPrimaryMouseButton,
+                                                        data: RemoteDrag(
+                                                          p.id,
+                                                          p.path,
+                                                          selected.contains(
+                                                                f.id,
+                                                              )
+                                                              ? visible
+                                                                    .where(
+                                                                      (
+                                                                        f,
+                                                                      ) => selected
+                                                                          .contains(
+                                                                            f.id,
+                                                                          ),
+                                                                    )
+                                                                    .toList()
+                                                              : [f],
+                                                          generation: p
+                                                              .connectionGeneration,
+                                                        ),
+                                                        feedback:
+                                                            const SizedBox.shrink(),
+                                                        child: row,
+                                                      );
+                                                      final live = m;
+                                                      if (live
+                                                              is LiveWorkbenchModel &&
+                                                          p is LiveTerminalSession) {
+                                                        row = ExplorerExportDrag(
+                                                          model: live,
+                                                          source:
+                                                              p as LiveTerminalSession,
+                                                          selection: () =>
+                                                              selected.contains(
+                                                                f.id,
+                                                              )
+                                                              ? visible
+                                                                    .where(
+                                                                      (
+                                                                        entry,
+                                                                      ) => selected
+                                                                          .contains(
+                                                                            entry.id,
+                                                                          ),
+                                                                    )
+                                                                    .toList()
+                                                              : [f],
+                                                          child: row,
+                                                        );
+                                                      }
+                                                      Widget item = f.folder
+                                                          ? KeyedSubtree(
+                                                              key: _folderBounds
+                                                                  .putIfAbsent(
+                                                                    f.id,
+                                                                    GlobalKey
+                                                                        .new,
+                                                                  ),
+                                                              child: dropTarget(
+                                                                folder: f,
+                                                                child: row,
+                                                              ),
+                                                            )
+                                                          : row;
+                                                      // Validation errors render
+                                                      // below the row so the
+                                                      // editor box height is
+                                                      // independent of the
+                                                      // error text.
+                                                      if (editing == f.id &&
+                                                          renameError != null) {
+                                                        item = Column(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .stretch,
+                                                          children: [
+                                                            item,
+                                                            Padding(
+                                                              padding:
+                                                                  const EdgeInsets.only(
+                                                                    left: 34,
+                                                                    top: 2,
+                                                                  ),
+                                                              child: Text(
+                                                                key:
+                                                                    const ValueKey(
+                                                                      'inline-rename-error',
+                                                                    ),
+                                                                renameError!,
+                                                                style: TextStyle(
+                                                                  fontSize: 11,
+                                                                  color: Theme.of(c)
+                                                                      .colorScheme
+                                                                      .error,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        );
+                                                      }
+                                                      return item;
+                                                    },
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ),
