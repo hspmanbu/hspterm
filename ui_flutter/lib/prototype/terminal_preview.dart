@@ -17,6 +17,14 @@ class TerminalPreview extends StatefulWidget {
 
 class _TerminalPreviewState extends State<TerminalPreview> {
   final _controller = TerminalController(const NativeTerminalBackend());
+  final _paintKey = GlobalKey();
+  List<double>? _viewportTransform() {
+    final box = _paintKey.currentContext?.findRenderObject();
+    return box is RenderBox && box.attached
+        ? box.getTransformTo(null).storage
+        : null;
+  }
+
   final _cache = TerminalPaintCache();
   final _blink = ValueNotifier(true), _preedit = ValueNotifier('');
   late final TextEditingController _input;
@@ -122,6 +130,7 @@ class _TerminalPreviewState extends State<TerminalPreview> {
                 );
                 return RepaintBoundary(
                   child: CustomPaint(
+                    key: _paintKey,
                     size: bounds.biggest,
                     painter: TerminalPainter(
                       _controller,
@@ -131,6 +140,8 @@ class _TerminalPreviewState extends State<TerminalPreview> {
                       _blink,
                       false,
                       _preedit,
+                      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+                      viewportTransform: _viewportTransform,
                     ),
                   ),
                 );

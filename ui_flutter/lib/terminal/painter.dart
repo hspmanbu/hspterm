@@ -8,6 +8,43 @@ import 'controller.dart';
 import 'same_word.dart';
 import 'typography.dart';
 
+/// Snap filled grid edges to device pixels, including a fractional viewport
+/// origin. Glyph placement and the actual terminal grid remain unchanged.
+class _PixelGrid {
+  _PixelGrid(Canvas canvas, double ratio, [List<double>? transform]) {
+    final m = transform ?? canvas.getTransform();
+    if (m[1] == 0 &&
+        m[4] == 0 &&
+        m[3] == 0 &&
+        m[7] == 0 &&
+        m[15] == 1 &&
+        m[0].isFinite &&
+        m[5].isFinite &&
+        m[12].isFinite &&
+        m[13].isFinite &&
+        m[0] > 0 &&
+        m[5] > 0 &&
+        ratio.isFinite &&
+        ratio > 0) {
+      enabled = true;
+      sx = m[0] * ratio;
+      sy = m[5] * ratio;
+      tx = m[12] * ratio;
+      ty = m[13] * ratio;
+    }
+  }
+  bool enabled = false;
+  double sx = 1, sy = 1, tx = 0, ty = 0;
+  (bool, double, double, double, double) get key =>
+      (enabled, sx, sy, tx % 1, ty % 1);
+  double x(double v) =>
+      enabled ? ((v * sx + tx + .5).floorToDouble() - tx) / sx : v;
+  double y(double v) =>
+      enabled ? ((v * sy + ty + .5).floorToDouble() - ty) / sy : v;
+  Rect rect(Rect r) =>
+      Rect.fromLTRB(x(r.left), y(r.top), x(r.right), y(r.bottom));
+}
+
 /// Owns bounded native pictures and shaped glyphs; no persistent frame ticker.
 class TerminalPaintCache {
   TerminalPaintCache({this.batchAscii = true});
@@ -26,6 +63,7 @@ class TerminalPaintCache {
   List<int> _backgroundVersions = const [];
   TerminalController? _backgroundOwner;
   Size _backgroundCell = Size.zero;
+  (bool, double, double, double, double)? _backgroundPixels;
   int backgroundBuilds = 0;
   double _fontSize = 0;
   Size _cellSize = Size.zero;
@@ -97,10 +135,18 @@ class TerminalPaintCache {
 
   /// Merge vertically identical color runs before recording any glyph row.
   /// Cell height includes line spacing: there is no separate line-gap color.
-  void backgrounds(Canvas target, TerminalController controller, Size cell) {
+  void backgrounds(
+    Canvas target,
+    TerminalController controller,
+    Size cell, {
+    double devicePixelRatio = 1,
+    List<double>? viewportTransform,
+  }) {
+    final pixels = _PixelGrid(target, devicePixelRatio, viewportTransform);
     if (_backgroundPicture != null &&
         identical(_backgroundOwner, controller) &&
         _backgroundCell == cell &&
+        _backgroundPixels == pixels.key &&
         listEquals(_backgroundVersions, controller.rowVersions)) {
       target.drawPicture(_backgroundPicture!);
       return;
@@ -108,6 +154,7 @@ class TerminalPaintCache {
     _backgroundPicture?.dispose();
     _backgroundOwner = controller;
     _backgroundCell = cell;
+    _backgroundPixels = pixels.key;
     _backgroundVersions = List.of(controller.rowVersions);
     backgroundBuilds++;
     final recorder = ui.PictureRecorder();
@@ -115,7 +162,7 @@ class TerminalPaintCache {
     final active = <(int, int, int), Rect>{};
     final paint = Paint()..isAntiAlias = false;
     void draw((int, int, int) key, Rect rect) {
-      canvas.drawRect(rect, paint..color = Color(key.$3));
+      canvas.drawRect(pixels.rect(rect), paint..color = Color(key.$3));
     }
 
     for (var y = 0; y < controller.rows.length; y++) {
@@ -348,6 +395,8 @@ class TerminalPainter extends CustomPainter {
     this.focused,
     this.preedit, {
     this.typography = const TerminalTypography(),
+    this.devicePixelRatio = 1,
+    this.viewportTransform,
   }) : super(repaint: Listenable.merge([controller, blink, preedit]));
   final TerminalController controller;
   final TerminalPaintCache cache;
@@ -357,6 +406,10 @@ class TerminalPainter extends CustomPainter {
   final bool focused;
   final ValueNotifier<String> preedit;
   final TerminalTypography typography;
+  final double devicePixelRatio;
+  // RepaintBoundary recordings start at (0,0); their Canvas transform omits
+  // ancestor offsets. Obtain the real logical viewport transform at paint.
+  final List<double>? Function()? viewportTransform;
   @override
   void paint(Canvas canvas, Size size) {
     if (!controller.visible) return;
@@ -364,6 +417,7 @@ class TerminalPainter extends CustomPainter {
     cache._prepare(fontSize, cell);
     cache.paints++;
     final frame = controller.metadata;
+    final transform = viewportTransform?.call();
     canvas.drawRect(
       Offset.zero & size,
       Paint()
@@ -372,7 +426,13 @@ class TerminalPainter extends CustomPainter {
     );
     canvas.save();
     canvas.clipRect(Offset.zero & size, doAntiAlias: false);
-    cache.backgrounds(canvas, controller, cell);
+    cache.backgrounds(
+      canvas,
+      controller,
+      cell,
+      devicePixelRatio: devicePixelRatio,
+      viewportTransform: transform,
+    );
     for (var y = 0; y < controller.rows.length; y++) {
       canvas.save();
       canvas.translate(0, y * cell.height);
@@ -435,25 +495,56 @@ class TerminalPainter extends CustomPainter {
     if (a != null && b != null && frame != null) {
       final reversed = a.y > b.y || a.y == b.y && a.x > b.x;
       final start = reversed ? b : a, end = reversed ? a : b;
-      final selected = Path();
-      for (var y = max(0, start.y); y <= min(end.y, frame.rows - 1); y++) {
-        final left = y == start.y ? start.x : 0,
-            right = y == end.y ? end.x : frame.columns - 1;
-        selected.addRect(
-          Rect.fromLTWH(
-            left * cell.width,
-            y * cell.height,
-            (right - left + 1) * cell.width,
-            cell.height,
+      final pixels = _PixelGrid(canvas, devicePixelRatio, transform);
+      Path? united;
+      final first = max(0, start.y), last = min(end.y, frame.rows - 1);
+      final bands = <Rect>[];
+      if (first <= last) {
+        bands.add(
+          Rect.fromLTRB(
+            (first == start.y ? start.x : 0) * cell.width,
+            first * cell.height,
+            (first == end.y ? end.x + 1 : frame.columns) * cell.width,
+            (first + 1) * cell.height,
           ),
         );
+        if (last - first > 1) {
+          bands.add(
+            Rect.fromLTRB(
+              0,
+              (first + 1) * cell.height,
+              frame.columns * cell.width,
+              last * cell.height,
+            ),
+          );
+        }
+        if (last > first) {
+          bands.add(
+            Rect.fromLTRB(
+              0,
+              last * cell.height,
+              (last == end.y ? end.x + 1 : frame.columns) * cell.width,
+              (last + 1) * cell.height,
+            ),
+          );
+        }
       }
-      canvas.drawPath(
-        selected,
-        Paint()
-          ..isAntiAlias = false
-          ..color = const Color(0x665c92cc),
-      );
+      // At most three bands and two unions, independent of selected row count.
+      // Interior row contours never become translucent raster boundaries.
+      for (final band in bands) {
+        final selected = Path()..addRect(pixels.rect(band));
+        united = united == null
+            ? selected
+            : Path.combine(PathOperation.union, united, selected);
+      }
+      if (united != null) {
+        canvas.drawPath(
+          united,
+          Paint()
+            ..isAntiAlias = false
+            ..color = const Color(0x665c92cc),
+        );
+      }
     }
     if (frame != null &&
         frame.cursorVisible &&
@@ -542,5 +633,6 @@ class TerminalPainter extends CustomPainter {
       old.fontSize != fontSize ||
       old.typography != typography ||
       old.focused != focused ||
-      old.cell != cell;
+      old.cell != cell ||
+      old.devicePixelRatio != devicePixelRatio;
 }

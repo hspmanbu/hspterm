@@ -46,6 +46,14 @@ class TerminalView extends StatefulWidget {
 
 class TerminalViewState extends State<TerminalView>
     with WidgetsBindingObserver, TextInputClient {
+  final _paintKey = GlobalKey();
+  List<double>? _viewportTransform() {
+    final box = _paintKey.currentContext?.findRenderObject();
+    return box is RenderBox && box.attached
+        ? box.getTransformTo(null).storage
+        : null;
+  }
+
   final _searchField = TextEditingController();
   final _searchFocus = FocusNode(debugLabel: "terminal search");
   bool _searchOpen = false;
@@ -1036,6 +1044,7 @@ class TerminalViewState extends State<TerminalView>
                     ),
                     child: RepaintBoundary(
                       child: CustomPaint(
+                        key: _paintKey,
                         painter: TerminalPainter(
                           c,
                           _cache,
@@ -1045,6 +1054,10 @@ class TerminalViewState extends State<TerminalView>
                           _focus.hasFocus,
                           _preedit,
                           typography: typography,
+                          devicePixelRatio: MediaQuery.devicePixelRatioOf(
+                            context,
+                          ),
+                          viewportTransform: _viewportTransform,
                         ),
                         child: const SizedBox.expand(),
                       ),

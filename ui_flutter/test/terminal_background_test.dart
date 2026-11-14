@@ -20,19 +20,21 @@ void main() {
           // Deliberately unlike the default viewport color: the previous regression
           // only tested the default color, which could conceal an uncovered seam.
           for (var y = 0; y < c.rows.length; y++) {
-            c.rows[y] = [
-              for (var x = 0; x < c.rows[y].length; x++)
-                rust.RenderCell(
-                  text: x == 0 ? 'M' : ' ',
-                  foreground: inverse && x != 7 ? 0xff607090 : 0xffeeeeee,
-                  background: inverse && x != 7
-                      ? 0xffeeeeee
-                      : x == 7
-                      ? 0xff10151d
-                      : 0xff607090,
-                  flags: inverse && x != 7 ? 1 : 0,
-                ),
-            ];
+            c.rows[y] = List.generate(c.rows[y].length, (x) {
+              // Unequal run boundaries form the T-junction at a selected
+              // line wrap that vertically identical rectangles cannot cover.
+              final colored = x < 7 && (y == 0 || x >= 2);
+              return rust.RenderCell(
+                text: x == 0 ? 'M' : ' ',
+                foreground: inverse && colored ? 0xff607090 : 0xffeeeeee,
+                background: inverse && colored
+                    ? 0xffeeeeee
+                    : colored
+                    ? 0xff607090
+                    : 0xff10151d,
+                flags: inverse && colored ? 1 : 0,
+              );
+            });
           }
           if (selected) {
             c.selectionStart = const Point(0, 0);
@@ -61,8 +63,35 @@ void main() {
                   blink,
                   false,
                   preedit,
+                  devicePixelRatio: scale,
+                  // A repaint-boundary recording omits ancestor transforms;
+                  // production supplies this global logical transform instead.
+                  viewportTransform: () => [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    origin,
+                    origin,
+                    0,
+                    1,
+                  ],
                 );
+                final before = cache.backgroundBuilds;
                 painter.paint(canvas, const Size(96, 26.4));
+                expect(
+                  cache.backgroundBuilds,
+                  before + 1,
+                  reason: 'DPI/origin change invalidates device-aligned backgrounds',
+                );
                 final builds = cache.backgroundBuilds;
                 // Cursor-only repaints must reuse the bounded background picture.
                 painter.paint(canvas, const Size(96, 26.4));
