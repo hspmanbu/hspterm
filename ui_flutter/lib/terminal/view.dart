@@ -568,7 +568,7 @@ class TerminalViewState extends State<TerminalView>
     if (special == null && mods & 14 == 0 && down) {
       _pendingTextKey = rust.KeyboardInput(
         key: label,
-        text: event.character,
+        text: event.character ?? (key == LogicalKeyboardKey.space ? ' ' : null),
         modifiers: mods,
         kind: event is KeyRepeatEvent ? 1 : 0,
         shifted: event.character,
@@ -579,7 +579,9 @@ class TerminalViewState extends State<TerminalView>
       _pendingTextTimer = Timer(pendingFlushDelay, _onPendingTextTimer);
       _traceInput('set', kind: mods);
       _syncSuggestions();
-      return KeyEventResult.ignored;
+      return key == LogicalKeyboardKey.space
+          ? KeyEventResult.skipRemainingHandlers
+          : KeyEventResult.ignored;
     }
     if (_isModifier(key) && event is KeyDownEvent) {
       final target = c, id = c.id, generation = c.generation;

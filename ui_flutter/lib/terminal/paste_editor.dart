@@ -1,9 +1,12 @@
 import 'dart:math' as math;
+
 import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
 
 import 'package:flutter/material.dart';
+
+import 'editor_style.dart';
 
 /// Local-only preview. Line numbers and resize chrome never enter the text.
 class PasteEditor extends StatefulWidget {
@@ -55,10 +58,7 @@ class _PasteEditorState extends State<PasteEditor> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final style = theme.textTheme.bodyMedium!.copyWith(
-      fontSize: 14,
-      height: 1.4,
-    );
+    final style = plainEditorStyle(context);
     final strut = StrutStyle.fromTextStyle(style, forceStrutHeight: true);
     final background = Color.alphaBlend(
       Colors.white.withValues(
@@ -144,6 +144,12 @@ class _PasteEditorState extends State<PasteEditor> {
                                     widget.onChanged(value);
                                   },
                                   style: style,
+                                  keyboardType: TextInputType.multiline,
+                                  textInputAction: TextInputAction.newline,
+                                  autocorrect: false,
+                                  enableSuggestions: false,
+                                  smartDashesType: SmartDashesType.disabled,
+                                  smartQuotesType: SmartQuotesType.disabled,
                                   strutStyle: strut,
                                   selectionHeightStyle: ui.BoxHeightStyle.max,
                                   selectionWidthStyle: ui.BoxWidthStyle.max,

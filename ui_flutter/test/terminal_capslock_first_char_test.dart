@@ -60,6 +60,31 @@ void main() {
       b.keys.where((k) => k.kind != 2 && k.key.length == 1).length;
 
   testWidgets(
+    'Space without WM_CHAR falls back once; late platform echo is stripped',
+    (tester) async {
+      await initSession();
+      await mountTerminal(tester);
+      try {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
+        await tester.pump(TerminalViewState.pendingFlushDelay);
+        expect(delivered(), ' ');
+        expect(deliveries(), 1);
+        tester.testTextInput.updateEditingValue(
+          const TextEditingValue(text: '\u200b '),
+        );
+        await tester.pump();
+        expect(delivered(), ' ');
+        expect(deliveries(), 1);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
+        await tester.pumpAndSettle();
+      } finally {
+        await tester.pumpWidget(const SizedBox());
+        c.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'caps lock on: first character is recovered when the platform never delivers it',
     (tester) async {
       await initSession();

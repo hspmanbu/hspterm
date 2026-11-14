@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'dart:math' as math;
 import 'dart:io';
 
@@ -9,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../prototype/design.dart';
 import '../prototype/model.dart';
+import '../terminal/editor_style.dart';
 import '../src/rust/api.dart' as rust;
 import '../src/rust/editors.dart';
 import 'editor_controller.dart';
@@ -678,11 +680,17 @@ class _RemoteEditorDialogState extends State<RemoteEditorDialog> {
                                         keyboardType: TextInputType.multiline,
                                         autocorrect: false,
                                         enableSuggestions: false,
-                                        style: const TextStyle(
-                                          fontFamily: 'JetBrainsMono',
-                                          fontSize: 13,
-                                          height: 1.4,
+                                        style: plainEditorStyle(context),
+                                        strutStyle: StrutStyle.fromTextStyle(
+                                          plainEditorStyle(context),
+                                          forceStrutHeight: true,
                                         ),
+                                        textInputAction:
+                                            TextInputAction.newline,
+                                        smartDashesType:
+                                            SmartDashesType.disabled,
+                                        smartQuotesType:
+                                            SmartQuotesType.disabled,
                                         decoration: const InputDecoration(
                                           border: InputBorder.none,
                                           contentPadding: EdgeInsets.all(10),

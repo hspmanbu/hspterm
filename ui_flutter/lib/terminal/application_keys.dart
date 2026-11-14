@@ -155,6 +155,19 @@ class _ApplicationKeyScopeState extends State<ApplicationKeyScope> {
     if (event is KeyRepeatEvent && _owned.contains(event.physicalKey)) {
       return KeyEventResult.handled;
     }
+    final keyboard = HardwareKeyboard.instance;
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    final editable =
+        focusContext?.findAncestorStateOfType<EditableTextState>() != null;
+    if (event.logicalKey == LogicalKeyboardKey.space &&
+        !keyboard.isControlPressed &&
+        !keyboard.isAltPressed &&
+        !keyboard.isMetaPressed &&
+        (!terminal && editable)) {
+      // Leave native WM_CHAR/IME delivery enabled, but stop the ancestor's
+      // ActivateIntent. Space on an actual button continues to activate it.
+      return KeyEventResult.skipRemainingHandlers;
+    }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     // A fresh down supersedes ownership left by a lost platform key-up.
     _owned.remove(event.physicalKey);

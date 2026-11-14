@@ -25,6 +25,61 @@ class _ShortcutWorkbenchModel extends LiveWorkbenchModel {
 
 void main() {
   testWidgets(
+    'Space in text fields bypasses ActivateIntent; buttons still activate',
+    (tester) async {
+      final text = TextEditingController(), fieldFocus = FocusNode();
+      final buttonFocus = FocusNode();
+      var activated = 0;
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            builder: (_, child) => ApplicationKeyScope(
+              binding: const PaletteBinding(enabled: false),
+              openPalette: () async {},
+              child: child!,
+            ),
+            home: Scaffold(
+              body: Column(
+                children: [
+                  TextField(controller: text, focusNode: fieldFocus),
+                  TextButton(
+                    focusNode: buttonFocus,
+                    onPressed: () => activated++,
+                    child: const Text('Action'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        fieldFocus.requestFocus();
+        await tester.pump();
+        final claimed = await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
+        // Native IME/WM_CHAR remains eligible, unlike KeyEventResult.handled.
+        expect(claimed, false);
+        tester.testTextInput.updateEditingValue(
+          const TextEditingValue(
+            text: 'a b',
+            selection: TextSelection.collapsed(offset: 3),
+          ),
+        );
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
+        expect(text.text, 'a b');
+        expect(activated, 0);
+        buttonFocus.requestFocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await tester.pump();
+        expect(activated, 1);
+      } finally {
+        await tester.pumpWidget(const SizedBox());
+        text.dispose();
+        fieldFocus.dispose();
+        buttonFocus.dispose();
+      }
+    },
+  );
+  testWidgets(
     'formal saved shortcuts update the existing key router and preserve its navigator',
     (tester) async {
       final model = _ShortcutWorkbenchModel();

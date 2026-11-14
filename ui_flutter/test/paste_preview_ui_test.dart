@@ -31,10 +31,12 @@ void main() {
       final field = tester.widget<TextField>(input);
       expect(field.style!.fontSize, 14);
       final inputContext = tester.element(input);
-      expect(
-        field.style!.fontFamily,
-        Theme.of(inputContext).textTheme.bodyMedium!.fontFamily,
-      );
+      expect(field.style!.fontFamily, 'JetBrainsMono');
+      expect(field.style!.letterSpacing, 0);
+      expect(field.style!.wordSpacing, 0);
+      expect(field.autocorrect, false);
+      expect(field.enableSuggestions, false);
+      expect(field.textInputAction, TextInputAction.newline);
       expect(TextSelectionTheme.of(inputContext).selectionColor!.a, 1);
 
       expect(field.selectionHeightStyle, ui.BoxHeightStyle.max);
