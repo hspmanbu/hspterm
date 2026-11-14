@@ -235,6 +235,7 @@ class TerminalSession {
   int directoryCacheGeneration = 0;
   bool sftpEnabled = true, loadingDirectory = false;
   String? sftpError;
+  String? get sftpActivity => null;
   RemoteFileLocation? pendingFileLocation;
   String path = '/home/ubuntu/project';
   String draft = '';

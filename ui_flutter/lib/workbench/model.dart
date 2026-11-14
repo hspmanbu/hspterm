@@ -155,6 +155,14 @@ class LiveTerminalSession extends TerminalSession {
   VoidCallback? changedListener;
   int directoryEpoch = 0, sftpGeneration = 0;
   int pathLocationEpoch = 0;
+  final sftpActivities = <Object, (int, String)>{};
+  @override
+  String? get sftpActivity => controller.connected
+      ? sftpActivities.values
+            .where((v) => v.$1 == controller.generation)
+            .lastOrNull
+            ?.$2
+      : null;
   // Bumped every time a directory listing is actually published for the user
   // (fresh read OR cache hit). Unlike [directoryEpoch] (a network request
   // sequence) this counts published navigations, so cache-hit navigation can
@@ -970,7 +978,44 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     );
   }
 
+  VoidCallback _beginSftpActivity(LiveTerminalSession source, String label) {
+    final token = Object();
+    source.sftpActivities[token] = (source.controller.generation, label);
+    changed();
+    return () {
+      source.sftpActivities.remove(token);
+      if (!_disposed && _shutdown == null && sessions.contains(source)) {
+        changed();
+      }
+    };
+  }
+
   Future<List<String>> enqueueRemoteFileSelection(
+    RemoteFileSelection clip,
+    TerminalSession target,
+    String directory,
+    int expectedGeneration, {
+    required bool allowMemoryRelay,
+    bool allowDirect = false,
+    bool Function()? shouldStop,
+  }) async {
+    final done = _beginSftpActivity(_connected(clip.source), '正在准备传输…');
+    try {
+      return await _enqueueRemoteFileSelection(
+        clip,
+        target,
+        directory,
+        expectedGeneration,
+        allowMemoryRelay: allowMemoryRelay,
+        allowDirect: allowDirect,
+        shouldStop: shouldStop,
+      );
+    } finally {
+      done();
+    }
+  }
+
+  Future<List<String>> _enqueueRemoteFileSelection(
     RemoteFileSelection clip,
     TerminalSession target,
     String directory,
@@ -2517,45 +2562,67 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       }
     }
 
+    if (identical(focus, s)) sidebar = true;
+    if (text.startsWith('/') &&
+        s.sftpEnabled &&
+        !s.loadingDirectory &&
+        s.directoryCacheGeneration == s.connectionGeneration &&
+        s.files.any(
+          (file) => !file.folder && remotePath(s.path, file.name) == text,
+        )) {
+      s.pendingFileLocation = RemoteFileLocation(s.path, text, generation);
+      changed();
+      return Future.value();
+    }
+    final navigationAtStart = s.directoryEpoch;
+    final done = _beginSftpActivity(s, '正在定位文件…');
     final operation = () async {
-      check();
-      // Only an explicit local menu action reaches this metadata request.
-      final entry = await rust.sftpLocateTerminalPath(
-        id: id,
-        generation: generation,
-        text: text,
-      );
-      check();
-      final folder = entry.directory && !entry.symlink;
-      final parent = entry.path.substring(0, entry.path.lastIndexOf('/'));
-      final directory = folder
-          ? entry.path
-          : parent.isEmpty
-          ? '/'
-          : parent;
-      // Navigation is tracked by directoryPublishVersion, which increments on
-      // every published listing — cache hits included. directoryEpoch only
-      // sequences network requests, so a cache-hit navigation previously left
-      // the +1 expectation below unsatisfied and failed the locate.
-      final publishBefore = s.directoryPublishVersion;
-      await loadDirectory(s, directory);
-      check();
-      final published = s.directoryPublishVersion - publishBefore;
-      if (s.path == directory && published == 1) {
-        s.pendingFileLocation = RemoteFileLocation(
-          directory,
-          folder ? null : entry.path,
-          generation,
+      try {
+        check();
+        // Only an explicit local menu action reaches this metadata request.
+        final entry = await rust.sftpLocateTerminalPath(
+          id: id,
+          generation: generation,
+          text: text,
         );
-        if (identical(focus, s)) sidebar = true;
-        changed();
-        return;
+        check();
+        if (s.directoryEpoch != navigationAtStart) {
+          // Explicit navigation superseded this metadata request.
+          return;
+        }
+        final folder = entry.directory && !entry.symlink;
+        final parent = entry.path.substring(0, entry.path.lastIndexOf('/'));
+        final directory = folder
+            ? entry.path
+            : parent.isEmpty
+            ? '/'
+            : parent;
+        // Navigation is tracked by directoryPublishVersion, which increments on
+        // every published listing — cache hits included. directoryEpoch only
+        // sequences network requests, so a cache-hit navigation previously left
+        // the +1 expectation below unsatisfied and failed the locate.
+        final publishBefore = s.directoryPublishVersion;
+        await loadDirectory(s, directory);
+        check();
+        final published = s.directoryPublishVersion - publishBefore;
+        if (s.path == directory && published == 1) {
+          s.pendingFileLocation = RemoteFileLocation(
+            directory,
+            folder ? null : entry.path,
+            generation,
+          );
+          if (identical(focus, s)) sidebar = true;
+          changed();
+          return;
+        }
+        if (published == 0) {
+          throw StateError('目录尚未成功读取；未发布文件选择');
+        }
+        // A newer navigation raced this locate; keep its state and do not
+        // publish a stale file selection over it.
+      } finally {
+        done();
       }
-      if (published == 0) {
-        throw StateError('目录尚未成功读取；未发布文件选择');
-      }
-      // A newer navigation raced this locate; keep its state and do not
-      // publish a stale file selection over it.
     }();
     _track(operation);
     return operation;

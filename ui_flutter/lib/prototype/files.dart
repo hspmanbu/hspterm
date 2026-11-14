@@ -2086,11 +2086,13 @@ class _FilesPanelState extends State<FilesPanel> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (p.loadingDirectory)
+              if (p.loadingDirectory || p.sftpActivity != null)
                 const Padding(
                   padding: EdgeInsets.all(12),
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
+              if (p.sftpActivity case final activity?)
+                Text(activity, key: const ValueKey('sftp-activity')),
               if (p.sftpError != null)
                 Text(
                   p.sftpError!,
@@ -2200,7 +2202,23 @@ class _FilesPanelState extends State<FilesPanel> {
                 ],
               ),
             ),
-            if (p.loadingDirectory) const LinearProgressIndicator(minHeight: 2),
+            if (p.loadingDirectory || p.sftpActivity != null)
+              const LinearProgressIndicator(minHeight: 2),
+            if (p.sftpActivity case final activity?)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                child: Text(
+                  activity,
+                  key: const ValueKey('sftp-activity'),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Theme.of(context).hintColor,
+                  ),
+                ),
+              ),
 
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 5),

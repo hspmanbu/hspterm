@@ -159,13 +159,29 @@ void main() {
             .writeAsString('body');
 
         // First locate: fresh read publishes the directory.
-        await m.locateTerminalPath(a, file.path);
+        final initialLocate = m.locateTerminalPath(a, file.path);
+        expect(
+          a.sftpActivity,
+          '正在定位文件…',
+          reason: 'feedback precedes native resolution',
+        );
+        await initialLocate;
+        expect(a.sftpActivity, isNull);
         expect(a.path, directory.path);
         expect(a.pendingFileLocation?.file, file.path);
 
         // Repeat locate on the now-cached directory must succeed too.
         a.pendingFileLocation = null;
-        await m.locateTerminalPath(a, file.path);
+        final beforeCached = a.directoryPublishVersion;
+        final cachedLocate = m.locateTerminalPath(a, file.path);
+        expect(
+          a.pendingFileLocation?.file,
+          file.path,
+          reason: 'a known current file is selected synchronously without remote IO',
+        );
+        await cachedLocate;
+        expect(a.directoryPublishVersion, beforeCached);
+        expect(a.sftpActivity, isNull);
         expect(
           a.path,
           directory.path,
