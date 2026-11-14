@@ -2562,6 +2562,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
       }
     }
 
+    check(); // Cached UI-only selection obeys the same connection/shutdown guard.
     if (identical(focus, s)) sidebar = true;
     if (text.startsWith('/') &&
         s.sftpEnabled &&
