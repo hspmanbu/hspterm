@@ -50,8 +50,11 @@ impl DirectConnector {
         &self,
         authentication: crate::Authentication,
     ) -> Result<Self, SshError> {
-        if self.standard_agent.is_none() || self.root.is_cancelled() {
-            return Err(DirectPreparationError::AgentUnavailable.into());
+        if self.root.is_cancelled() {
+            return Err(SshError::Disconnected);
+        }
+        if self.standard_agent.is_none() {
+            return Err(DirectPreparationError::SocketUnavailable.into());
         }
         let capability = self.agent.direct_authentication(authentication).await?;
         Ok(Self {
@@ -196,7 +199,7 @@ impl DirectConnector {
     ) -> Result<Vec<u8>, SshError> {
         let standard = self
             .standard_agent
-            .ok_or(DirectPreparationError::AgentUnavailable)?;
+            .ok_or(DirectPreparationError::SocketUnavailable)?;
         if self.root.is_cancelled() || self.handle.is_closed() {
             return Err(SshError::Disconnected);
         }

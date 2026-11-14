@@ -32,6 +32,10 @@ pub enum DirectPreparationError {
     InvalidTarget,
     #[error("直传认证通道不可用或已失效；请检查应用内Agent socket与目标凭据")]
     AgentUnavailable,
+    #[error(
+        "来源连接未建立Agent socket；请保存主机设置后断开重连，若仍失败请检查服务器是否允许Agent转发"
+    )]
+    SocketUnavailable,
     #[error("安全直传响应无效；不能据此确认写入")]
     InvalidReply,
 }

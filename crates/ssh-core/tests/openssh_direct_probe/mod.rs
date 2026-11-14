@@ -4,6 +4,72 @@ mod late;
 use hspterm_ssh_core::{AgentPhase, direct_transfer::ProbeStatus};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_authentication_survives_bash_integration_channel_replacement() {
+    let first = Server::start().await;
+    let second = Server::start().await;
+    for integration in [false, true] {
+        let mut config = first.config.clone();
+        config.agent_forwarding = true;
+        config.integration = integration.then(hspterm_ssh_core::integration::Launch::fresh);
+        let marker = config
+            .integration
+            .as_ref()
+            .map(|launch| format!("\x1b]777;hspterm;HSP1;{};", launch.nonce()).into_bytes());
+        let mut source = SshConnection::connect(
+            config,
+            first.auth(),
+            first.pinned(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        if let Some(marker) = marker {
+            timeout(Duration::from_secs(8), async {
+                let mut bytes = Vec::new();
+                loop {
+                    match source.read().await.unwrap() {
+                        PtyEvent::Data(data) => bytes.extend_from_slice(&data),
+                        _ => panic!("integration ended before actual Bash startup"),
+                    }
+                    assert!(bytes.len() <= 1024 * 1024);
+                    if bytes
+                        .windows(marker.len())
+                        .any(|part| part == marker.as_slice())
+                    {
+                        break;
+                    }
+                }
+            })
+            .await
+            .expect("must exercise actual Bash integration channel replacement");
+        }
+        let mut target = second.connect().await;
+        let connector = source
+            .direct_connector()
+            .with_authentication(second.auth())
+            .await
+            .unwrap();
+        assert_eq!(source.agent_connector().status().phase, AgentPhase::Ready);
+        assert_eq!(
+            connector
+                .probe(
+                    target.verified_host_key(),
+                    &second.config.username,
+                    connector.authentication_epoch(),
+                    CancellationToken::new()
+                )
+                .await
+                .unwrap(),
+            ProbeStatus::Available,
+            "integration={integration}"
+        );
+        drop(connector);
+        source.close().await.unwrap();
+        target.close().await.unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn direct_probe_uses_only_explicit_original_agent_and_pinned_target_without_pty_input() {
     // Unified validation prerequisite: system ssh, rsync and python3. This is
     // not skipped/mapped to success if the environment lacks those tools.

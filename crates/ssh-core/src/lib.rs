@@ -662,7 +662,12 @@ impl SshConnection {
                     config.agent_forwarding.then(|| (agent.as_ref(), false)),
                 )
                 .await?;
-                creation_agent = forwarded;
+                // OpenSSH keeps agent forwarding at connection scope. It may
+                // reject the new channel's duplicate request while continuing
+                // to expose the already-accepted socket to exec sessions.
+                // Preserve its negotiated request dialect for direct copies;
+                // the fixed remote helper still verifies its actual socket.
+                creation_agent = forwarded.or(creation_agent);
                 pty = next;
                 let command = integration
                     .as_ref()

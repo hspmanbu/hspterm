@@ -348,6 +348,13 @@ class _AgentDialogState extends State<AgentDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            const Padding(
+              padding: EdgeInsets.only(bottom: 12),
+              child: Text(
+                '此处管理通用 Agent 私钥授权。跨主机直传无需在此选择密钥，任务会使用目标主机已保存的密码或密钥。',
+                key: ValueKey('agent-direct-copy-help'),
+              ),
+            ),
             Text(
               labels[phase] ?? '正在读取状态…',
               key: const ValueKey('agent-state'),
@@ -379,7 +386,7 @@ class _AgentDialogState extends State<AgentDialog> {
             const SizedBox(height: 12),
             const Text('显式选择已保存在应用加密库中的私钥；仅预览所选项的公钥指纹。'),
             if (_keys.isEmpty && !_fetching)
-              const Text('没有可用私钥。请先在主机管理中导入或生成并正式保存。'),
+              const Text('没有可用于通用 Agent 授权的私钥。此状态不影响使用已保存密码直传。'),
             if (_keys.isNotEmpty)
               SizedBox(
                 height: 180,

@@ -25,7 +25,7 @@ const key = AgentKeyOption(
 
 class Gateway implements AgentGateway {
   AgentView value = fixtureState('Ready');
-  bool keysFail = false;
+  bool keysFail = false, keysEmpty = false;
   int reads = 0, prepared = 0, approvals = 0, cancelled = 0, revoked = 0;
   List<String>? selected;
   AgentSession? original;
@@ -39,7 +39,7 @@ class Gateway implements AgentGateway {
   @override
   Future<List<AgentKeyOption>> keys() async {
     if (keysFail) throw StateError('synthetic metadata failure');
-    return [key];
+    return keysEmpty ? [] : [key];
   }
 
   AgentPreview preview() => const AgentPreview(
@@ -110,6 +110,25 @@ Future<void> preview(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets(
+    'empty general Agent key list does not require keys for password direct copy',
+    (tester) async {
+      final gateway = Gateway()..keysEmpty = true;
+      await open(
+        tester,
+        gateway,
+        AgentSession(7, 9, '密码会话', current: () => true),
+      );
+      expect(
+        find.byKey(const ValueKey('agent-direct-copy-help')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('此状态不影响使用已保存密码直传'), findsOneWidget);
+      expect(gateway.prepared, 0);
+      expect(gateway.approvals, 0);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets(
     'explicit selection, risk confirmation and original target are required; closing does not revoke',
     (tester) async {
