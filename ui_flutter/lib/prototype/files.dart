@@ -17,6 +17,7 @@ import 'dart:io';
 
 import 'design.dart';
 import '../workbench/file_kinds.dart';
+import '../src/rust/api.dart' as rust;
 import '../run_log.dart';
 import 'model.dart';
 import 'file_scrollbar.dart';
@@ -674,7 +675,40 @@ class _FilesPanelState extends State<FilesPanel> {
     setState(() {});
   }
 
+  Future<void> _openSymlink(DemoFile file) async {
+    final source = p as LiveTerminalSession;
+    final generation = source.controller.generation,
+        epoch = source.directoryEpoch;
+    final id = source.controller.id;
+    if (id == null || !source.controller.connected) {
+      throw StateError('关联SSH已断开');
+    }
+    final target = await rust.sftpResolveEntry(
+      id: id,
+      generation: generation,
+      path: file.id,
+    );
+    if (!mounted ||
+        !identical(p, source) ||
+        source.controller.id != id ||
+        source.controller.generation != generation ||
+        !source.controller.connected ||
+        source.directoryEpoch != epoch) {
+      return;
+    }
+    if (target.directory) {
+      await _navigateDirectory(target.path);
+    } else {
+      final opener = widget.onOpenFile;
+      if (opener != null) await opener(context, source, file);
+    }
+  }
+
   void open(DemoFile f) {
+    if (f.symlink && p is LiveTerminalSession) {
+      run(_openSymlink(f));
+      return;
+    }
     if (f.folder) {
       navigate('${p.path == '/' ? '' : p.path}/${f.name}');
     } else {
@@ -894,10 +928,31 @@ class _FilesPanelState extends State<FilesPanel> {
   }
 
   IconData _kindIcon(String kind) => switch (kind) {
-    'JSON' || 'YAML' => Icons.data_object,
+    'JSON' || 'YAML' || 'XML' || 'CSV' => Icons.data_object,
     'Markdown' => Icons.article_outlined,
     '日志' || '文本' => Icons.description_outlined,
-    'Python' => Icons.code,
+    'Python' ||
+    'JavaScript' ||
+    'TypeScript' ||
+    'Rust' ||
+    'Go' ||
+    'Java' ||
+    'C' ||
+    'C++' ||
+    '.NET' ||
+    'Kotlin' ||
+    'Swift/Objective-C' ||
+    '源代码' ||
+    'CSS' ||
+    'HTML' => Icons.code,
+    'SQL' || '数据库' => Icons.storage_outlined,
+    '配置文件' => Icons.tune,
+    'Word' || 'Excel' || 'PowerPoint' || 'Notebook' => Icons.article_outlined,
+    '安装包' => Icons.inventory_2_outlined,
+    '字体' => Icons.font_download_outlined,
+    '磁盘映像' => Icons.disc_full_outlined,
+    '密钥' => Icons.key_outlined,
+    '二进制' => Icons.memory_outlined,
     'Shell' => Icons.terminal,
     '图片' => Icons.image_outlined,
     '视频' => Icons.movie_outlined,
@@ -910,10 +965,34 @@ class _FilesPanelState extends State<FilesPanel> {
 
   /// Static-file icon shared by the name cell so the edit swap keeps the
   /// glyph position identical (folder/kind precedence follows metadata).
-  Widget _fileIcon(BuildContext context, DemoFile f) => Icon(
-    f.folder ? Icons.folder_outlined : _kindIcon(f.kind),
-    size: 16,
-    color: f.folder ? Desk.warning : Theme.of(context).hintColor,
+  Widget _fileIcon(BuildContext context, DemoFile f) => SizedBox(
+    width: 18,
+    height: 18,
+    child: Stack(
+      children: [
+        Icon(
+          f.folder ? Icons.folder_outlined : _kindIcon(f.kind),
+          size: 16,
+          color: f.folder ? Desk.warning : Theme.of(context).hintColor,
+        ),
+        if (f.symlink)
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.subdirectory_arrow_right,
+                size: 10,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ),
+      ],
+    ),
   );
 
   /// Non-editing name cell: gutter, icon, ellipsized name.

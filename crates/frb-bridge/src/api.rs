@@ -7450,6 +7450,23 @@ pub async fn sftp_directory_size_step(
                         complete: true,
                     });
                 }
+                Err(hspterm_ssh_core::SshError::Inspection(
+                    hspterm_ssh_core::inspection::InspectionError::Busy,
+                )) => {
+                    // tmux history/resource sampling can temporarily own the
+                    // shared slot. Preserve the fast-path opportunity, not a
+                    // permanent slow-walk downgrade. No totals were added.
+                    let page = DirectorySizePage {
+                        size: job.size,
+                        files: job.files,
+                        directories: job.directories,
+                        complete: false,
+                    };
+                    check_file_generation(id, generation)?;
+                    job.last_used = std::time::Instant::now();
+                    e.dir_size_jobs.lock().insert(ticket, job);
+                    return Ok(page);
+                }
                 Err(_) => {
                     diagnostics::record(
                         diagnostics::DiagnosticCode::DirectorySizeFallback,

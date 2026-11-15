@@ -59,6 +59,47 @@ void main() {
       await link.create('../outside.txt');
       final outside = File('${server.directory.path}/outside.txt');
       await outside.writeAsString('outside');
+      // Listing follows links only for their UI target type; the link
+      // itself remains marked and traversal/copy policies remain independent.
+      final linkKinds = await Directory('${server.directory.path}/link-kinds')
+          .create();
+      await Link('${linkKinds.path}/folder-link').create(nested.path);
+      await Link('${linkKinds.path}/file-link').create(file.path);
+      await Link('${linkKinds.path}/dangling')
+          .create('${linkKinds.path}/absent');
+      await rust.sftpOpenDirectory(
+        id: id,
+        generation: generation,
+        request: 1000,
+        path: linkKinds.path,
+      );
+      try {
+        final entries = <rust.RemoteFile>[];
+        var done = false;
+        while (!done) {
+          final page = await rust.sftpDirectoryPage(
+            id: id,
+            generation: generation,
+            request: 1000,
+            limit: 256,
+          );
+          entries.addAll(page.files);
+          done = page.done;
+        }
+        final folderLink = entries.singleWhere((f) => f.name == 'folder-link');
+        expect(folderLink.symlink, true);
+        expect(folderLink.directory, true);
+        final fileLink = entries.singleWhere((f) => f.name == 'file-link');
+        expect(fileLink.symlink, true);
+        expect(fileLink.directory, false);
+        expect(entries.singleWhere((f) => f.name == 'dangling').symlink, true);
+      } finally {
+        await rust.sftpCloseDirectory(
+          id: id,
+          generation: generation,
+          request: 1000,
+        );
+      }
       final linkSize = (await rust.sftpProperties(
         id: id,
         generation: generation,

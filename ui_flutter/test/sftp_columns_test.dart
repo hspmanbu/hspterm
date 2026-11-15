@@ -36,6 +36,22 @@ void main() {
     expect(sftpFileKind('noext', folder: false, symlink: false), '文件');
     expect(sftpFileKind('link', folder: false, symlink: true), '符号链接');
     expect(sftpFileKind('dir', folder: true, symlink: false), '文件夹');
+    expect(sftpFileKind('dir-link', folder: true, symlink: true), '目录链接');
+    for (final pair in [
+      ('Dockerfile', '配置文件'),
+      ('.env.prod', '配置文件'),
+      ('app.APK', '安装包'),
+      ('server.deb', '安装包'),
+      ('font.woff2', '字体'),
+      ('Component.vue', '源代码'),
+      ('query.sql', 'SQL'),
+      ('sample.avif', '图片'),
+      ('video.m4v', '视频'),
+      ('data.sqlite3', '数据库'),
+      ('main.ts', 'TypeScript'),
+    ]) {
+      expect(sftpFileKind(pair.$1, folder: false, symlink: false), pair.$2);
+    }
     // A folder named like an archive stays a folder.
     expect(sftpFileKind('backup.zip', folder: true, symlink: false), '文件夹');
   });

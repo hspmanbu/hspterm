@@ -10,14 +10,48 @@ String sftpFileKind(
   required bool folder,
   required bool symlink,
 }) {
-  if (symlink) return '符号链接';
+  if (symlink) return folder ? '目录链接' : '符号链接';
   if (folder) return '文件夹';
+  final base = name.toLowerCase();
+  if (const {
+        'dockerfile',
+        'containerfile',
+        'makefile',
+        'gnumakefile',
+        'cmakelists.txt',
+        'justfile',
+        'vagrantfile',
+        'procfile',
+        '.gitignore',
+        '.gitattributes',
+        '.dockerignore',
+        '.editorconfig',
+        '.bashrc',
+        '.zshrc',
+        '.profile',
+        '.env',
+        'cargo.lock',
+        'go.mod',
+        'go.sum',
+        'package-lock.json',
+        'yarn.lock',
+        'pnpm-lock.yaml',
+      }.contains(base) ||
+      base.startsWith('.env.')) {
+    return '配置文件';
+  }
+  if (base == 'license' ||
+      base == 'copying' ||
+      base == 'authors' ||
+      base == 'changelog') {
+    return '文本';
+  }
   final dot = name.lastIndexOf('.');
   final ext = dot > 0 ? name.substring(dot + 1).toLowerCase() : '';
   return switch (ext) {
     'md' || 'markdown' => 'Markdown',
     'log' => '日志',
-    'txt' => '文本',
+    'txt' || 'rst' || 'rtf' || 'adoc' || 'tex' => '文本',
     'json' => 'JSON',
     'yaml' || 'yml' => 'YAML',
     'xml' => 'XML',
@@ -25,14 +59,28 @@ String sftpFileKind(
     'ini' || 'conf' || 'cfg' || 'toml' || 'env' || 'properties' => '配置文件',
     'py' || 'pyw' => 'Python',
     'sh' || 'bash' || 'zsh' => 'Shell',
-    'js' || 'mjs' || 'cjs' => 'JavaScript',
+    'js' || 'mjs' || 'cjs' || 'jsx' => 'JavaScript',
     'ts' || 'tsx' => 'TypeScript',
     'rs' => 'Rust',
     'go' => 'Go',
-    'java' => 'Java',
+    'java' || 'class' || 'jar' => 'Java',
+    'kt' || 'kts' => 'Kotlin',
+    'cs' || 'fs' || 'vb' => '.NET',
+    'swift' || 'm' || 'mm' => 'Swift/Objective-C',
+    'php' ||
+    'rb' ||
+    'lua' ||
+    'pl' ||
+    'r' ||
+    'dart' ||
+    'scala' ||
+    'vue' ||
+    'svelte' => '源代码',
+    'ipynb' => 'Notebook',
+    'sql' => 'SQL',
     'c' || 'h' => 'C',
-    'cpp' || 'cc' || 'hpp' => 'C++',
-    'css' => 'CSS',
+    'cpp' || 'cc' || 'cxx' || 'hpp' || 'hxx' => 'C++',
+    'css' || 'scss' || 'sass' || 'less' => 'CSS',
     'html' || 'htm' => 'HTML',
     'png' ||
     'jpg' ||
@@ -41,19 +89,59 @@ String sftpFileKind(
     'bmp' ||
     'webp' ||
     'svg' ||
-    'ico' => '图片',
-    'mp3' || 'wav' || 'flac' || 'ogg' || 'm4a' => '音频',
-    'mp4' || 'mkv' || 'avi' || 'mov' || 'webm' => '视频',
+    'ico' ||
+    'avif' ||
+    'heic' ||
+    'tif' ||
+    'tiff' ||
+    'psd' => '图片',
+    'mp3' ||
+    'wav' ||
+    'flac' ||
+    'ogg' ||
+    'm4a' ||
+    'aac' ||
+    'opus' ||
+    'wma' => '音频',
+    'mp4' ||
+    'mkv' ||
+    'avi' ||
+    'mov' ||
+    'webm' ||
+    'm4v' ||
+    'mpeg' ||
+    'mpg' ||
+    'flv' => '视频',
     'pdf' => 'PDF',
     'doc' || 'docx' => 'Word',
     'xls' || 'xlsx' => 'Excel',
     'ppt' || 'pptx' => 'PowerPoint',
-    'zip' || '7z' || 'tar' || 'gz' || 'bz2' || 'xz' || 'zst' || 'tgz' => '压缩包',
+    'zip' ||
+    '7z' ||
+    'rar' ||
+    'tar' ||
+    'gz' ||
+    'bz2' ||
+    'xz' ||
+    'zst' ||
+    'tgz' ||
+    'tbz2' ||
+    'txz' => '压缩包',
+    'apk' || 'aab' || 'deb' || 'rpm' || 'appimage' || 'msix' => '安装包',
+    'ttf' || 'otf' || 'woff' || 'woff2' => '字体',
+    'bin' || 'dat' || 'wasm' => '二进制',
     'exe' || 'msi' || 'bat' || 'cmd' || 'ps1' => '可执行',
     'so' || 'dll' || 'dylib' || 'a' => '动态库',
     'iso' || 'img' => '磁盘映像',
-    'db' || 'sqlite' => '数据库',
-    'pem' || 'key' || 'crt' || 'pub' => '密钥',
+    'db' || 'sqlite' || 'sqlite3' || 'mdb' => '数据库',
+    'pem' ||
+    'key' ||
+    'crt' ||
+    'pub' ||
+    'cer' ||
+    'p12' ||
+    'pfx' ||
+    'der' => '密钥',
     _ => '文件',
   };
 }

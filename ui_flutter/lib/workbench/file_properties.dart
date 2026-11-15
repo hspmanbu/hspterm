@@ -236,6 +236,9 @@ class _FilePropertiesState extends State<FilePropertiesDialog> {
           sizeComplete = page.complete;
         });
         if (page.complete) break;
+        // Yield between progressive pages, including a temporarily busy
+        // shared inspector. Never spin FRB calls while tmux owns the slot.
+        await Future<void>.delayed(const Duration(milliseconds: 80));
       }
     } catch (failure) {
       if (mounted) {

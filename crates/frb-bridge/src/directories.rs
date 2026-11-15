@@ -330,7 +330,39 @@ impl DirectoryListings {
             let opened = opened.as_mut().context("目录仍在打开")?;
             match &mut opened.reader {
                 ListingReader::Directory(reader) => {
-                    Ok(ListingPage::Directory(reader.next_page(limit).await?))
+                    let mut page = reader.next_page(limit).await?;
+                    // Listing attributes describe the link, not its target.
+                    // Resolve type only for UI navigation/icons, never recurse
+                    // into it or replace link permissions/size with the target.
+                    use futures_util::{StreamExt, stream};
+                    let links = page
+                        .entries
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, f)| f.symlink)
+                        .map(|(i, f)| (i, f.path.clone()))
+                        .collect::<Vec<_>>();
+                    let sftp = &opened.lease.sftp;
+                    let probes = stream::iter(links)
+                        .map(|(index, path)| async move { (index, sftp.metadata(path).await) })
+                        .buffer_unordered(8);
+                    tokio::pin!(probes);
+                    // Best-effort classification must not let a broken link
+                    // block a directory page. Explicit open resolves again.
+                    let deadline = tokio::time::sleep(std::time::Duration::from_secs(2));
+                    tokio::pin!(deadline);
+                    loop {
+                        tokio::select! { biased;
+                            _ = cursor.stop.cancelled() => break,
+                            _ = &mut deadline => break,
+                            next = probes.next() => match next {
+                                Some((index, Ok(attrs))) => page.entries[index].directory = attrs.is_dir(),
+                                Some((_, Err(_))) => {}, // dangling/inaccessible: retain link metadata
+                                None => break,
+                            }
+                        }
+                    }
+                    Ok(ListingPage::Directory(page))
                 }
                 ListingReader::Search(reader) => Ok(ListingPage::Search(
                     reader

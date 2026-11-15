@@ -244,7 +244,7 @@ impl Inspector {
         let permit = acquire_slot(
             &self.slot,
             &self.sample_waiter,
-            matches!(action, Action::Sample),
+            matches!(action, Action::Sample | Action::DirSize(_)),
             &cancel,
             &self.transport,
         )
