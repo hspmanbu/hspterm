@@ -89,7 +89,8 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
       ? 2
       : 1;
   late String? session = widget.prompt.sessions.firstOrNull?.id;
-  bool readonly = true, takeover = false, lockSize = false, restore = false;
+  late bool readonly = widget.prompt.readonlyDefault ?? true;
+  bool lockSize = false, restore = false;
   @override
   void dispose() {
     name.dispose();
@@ -142,7 +143,6 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
                   if (value != null) {
                     setState(() {
                       kind = value;
-                      takeover = false;
                       restore = false;
                     });
                   }
@@ -167,7 +167,6 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
                   ],
                   onChanged: (value) => setState(() {
                     session = value;
-                    takeover = false;
                     restore = false;
                   }),
                 ),
@@ -176,26 +175,17 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                   title: const Text('只读观看'),
-                  subtitle: const Text('观看端不参与远端尺寸计算；远端tmux限制输入。'),
+                  subtitle: Text(
+                    readonly
+                        ? '观看端不参与远端尺寸计算；远端tmux限制输入。'
+                        : '直接接管所选会话，并分离其他客户端。',
+                  ),
                   value: readonly,
                   onChanged: (value) => setState(() {
                     readonly = value;
-                    takeover = false;
                     restore = false;
                   }),
                 ),
-                if (!readonly)
-                  CheckboxListTile(
-                    key: const ValueKey('tmux-takeover'),
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text(
-                      '我了解接管会分离其他客户端（含只读观看端）；其SSH终端可能断开、传输可能暂停，对方需要重新连接。',
-                    ),
-                    value: takeover,
-                    onChanged: (value) =>
-                        setState(() => takeover = value == true),
-                  ),
               ],
               if (kind == 2)
                 Padding(
@@ -220,7 +210,7 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
                   subtitle: Text(
                     kind == 3 && readonly
                         ? '仅保留到终端关闭；每次重新验证 SSH 指纹及会话身份，沿用只读和尺寸锁。仍需手动点击重新连接。'
-                        : '仅保留到终端关闭；手动重连恢复控制端会再次分离其他客户端（含观看端）。勾选表示同时同意这一后续接管行为。',
+                        : '仅保留到终端关闭；手动重连将接管原会话，分离其他客户端。',
                   ),
                   value: restore,
                   onChanged: (value) => setState(() => restore = value == true),
@@ -252,7 +242,7 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
         ),
         FilledButton(
           key: const ValueKey('tmux-confirm'),
-          onPressed: (kind == 3 && (!readonly && !takeover || session == null))
+          onPressed: (kind == 3 && session == null)
               ? null
               : () {
                   if (!form.currentState!.validate()) return;
@@ -264,7 +254,7 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
                       name: kind == 2 ? name.text : null,
                       sessionId: kind == 3 ? session : null,
                       readonly: kind == 3 && readonly,
-                      takeoverConfirmed: kind == 3 && takeover,
+                      takeoverConfirmed: kind == 3 && !readonly,
                       lockSize: kind != 1 && lockSize,
                     ),
                   );

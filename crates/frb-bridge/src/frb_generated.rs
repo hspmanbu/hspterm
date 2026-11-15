@@ -12670,6 +12670,7 @@ impl SseDecode for crate::api::TerminalSuggestions {
 impl SseDecode for crate::tmux::TmuxPrompt {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_readonlyDefault = <Option<bool>>::sse_decode(deserializer);
         let mut var_restoreAvailable = <Option<bool>>::sse_decode(deserializer);
         let mut var_requestId = <u32>::sse_decode(deserializer);
         let mut var_generation = <u64>::sse_decode(deserializer);
@@ -12679,6 +12680,7 @@ impl SseDecode for crate::tmux::TmuxPrompt {
         let mut var_issue = <Option<String>>::sse_decode(deserializer);
         let mut var_sessions = <Vec<crate::tmux::TmuxSessionInfo>>::sse_decode(deserializer);
         return crate::tmux::TmuxPrompt {
+            readonly_default: var_readonlyDefault,
             restore_available: var_restoreAvailable,
             request_id: var_requestId,
             generation: var_generation,
@@ -15024,6 +15026,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::TerminalSuggestions>
 impl flutter_rust_bridge::IntoDart for crate::tmux::TmuxPrompt {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.readonly_default.into_into_dart().into_dart(),
             self.restore_available.into_into_dart().into_dart(),
             self.request_id.into_into_dart().into_dart(),
             self.generation.into_into_dart().into_dart(),
@@ -16671,6 +16674,7 @@ impl SseEncode for crate::api::TerminalSuggestions {
 impl SseEncode for crate::tmux::TmuxPrompt {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<bool>>::sse_encode(self.readonly_default, serializer);
         <Option<bool>>::sse_encode(self.restore_available, serializer);
         <u32>::sse_encode(self.request_id, serializer);
         <u64>::sse_encode(self.generation, serializer);

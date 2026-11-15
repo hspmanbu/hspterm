@@ -17,6 +17,7 @@ pub struct TmuxSessionInfo {
 }
 #[derive(Clone)]
 pub struct TmuxPrompt {
+    pub readonly_default: Option<bool>,
     pub restore_available: Option<bool>,
     pub request_id: u32,
     pub generation: u64,
@@ -237,6 +238,11 @@ impl TmuxRegistry {
                 "原tmux显示所有者已退役"
             );
             Ok(TmuxPrompt {
+                readonly_default: Some(if p.allow_restore {
+                    hspterm_storage_sync::tmux_preferences::load(v, &p.profile_id)?
+                } else {
+                    true
+                }),
                 restore_available: Some(p.allow_restore),
                 request_id: p.token,
                 generation: p.generation,
@@ -275,6 +281,7 @@ impl TmuxRegistry {
         })
     }
     pub fn answer(&self, token: u32, generation: u64, selection: TmuxSelection) -> Result<()> {
+        let readonly = (selection.kind == 3).then_some(selection.readonly);
         let restore = selection.restore_on_reconnect.unwrap_or(false);
         let choice = selection.choice()?;
         with_vault(|v| {
@@ -336,6 +343,11 @@ impl TmuxRegistry {
             } else {
                 None
             };
+            if let Some(readonly) = readonly
+                && p.allow_restore
+            {
+                hspterm_storage_sync::tmux_preferences::save(v, &p.profile_id, readonly)?;
+            }
             let p = guard.take().context("原tmux选择已结束")?;
             drop(guard);
             self.changed();
@@ -574,6 +586,23 @@ mod tests {
         let (keys, _) = mpsc::channel(1);
         with_vault(|v| {
             scope.policy(v, "127.0.0.1", 22, "trust-tmux-test".into(), false, keys)?;
+            let mut repo = hspterm_storage_sync::Repository::new(v);
+            for id in [
+                "host-00000000000000000000000000000001",
+                "host-00000000000000000000000000000002",
+                "host-00000000000000000000000000000003",
+            ] {
+                if repo.host(id)?.is_none() {
+                    let mut host = hspterm_storage_sync::HostRecord::new(
+                        id.into(),
+                        "127.0.0.1".into(),
+                        "fixture".into(),
+                        hspterm_storage_sync::AuthMethod::Password,
+                    );
+                    host.id = id.into();
+                    repo.save(host, None)?;
+                }
+            }
             Ok(())
         })
         .unwrap();
@@ -609,7 +638,7 @@ mod tests {
         bind_policy(&attempt.scope());
         let owner = registry
             .owner(attempt.scope())
-            .for_target("host-created".into(), true);
+            .for_target("host-00000000000000000000000000000001".into(), true);
         let (req, reply) = request();
         owner.install(20, 1, req).unwrap();
         registry
@@ -647,7 +676,7 @@ mod tests {
         bind_policy(&attempt.scope());
         let next = registry
             .owner(attempt.scope())
-            .for_target("host-created".into(), true);
+            .for_target("host-00000000000000000000000000000001".into(), true);
         let (req, reply) = listed_request(123, 456);
         next.install(21, 2, req).unwrap();
         assert!(matches!(
@@ -685,7 +714,7 @@ mod tests {
         bind_policy(&attempt.scope());
         let first = registry
             .owner(attempt.scope())
-            .for_target("host-fixture".into(), true);
+            .for_target("host-00000000000000000000000000000002".into(), true);
         let (req, reply) = listed_request(123, 456);
         first.install(10, 1, req).unwrap();
         registry.answer(10, 1, remembered_selection()).unwrap();
@@ -710,7 +739,7 @@ mod tests {
         bind_policy(&attempt.scope());
         let second = registry
             .owner(attempt.scope())
-            .for_target("host-fixture".into(), true);
+            .for_target("host-00000000000000000000000000000002".into(), true);
         let (req, reply) = listed_request(123, 456);
         second.install(11, 2, req).unwrap();
         assert!(registry.token().is_none());
@@ -738,9 +767,9 @@ mod tests {
             bind_policy(&attempt.scope());
             let owner = registry.owner(attempt.scope()).for_target(
                 if variant == 4 {
-                    "host-other"
+                    "host-00000000000000000000000000000003"
                 } else {
-                    "host-fixture"
+                    "host-00000000000000000000000000000002"
                 }
                 .into(),
                 variant != 5,
@@ -765,7 +794,7 @@ mod tests {
         bind_policy(&attempt.scope());
         let current = registry
             .owner(attempt.scope())
-            .for_target("host-fixture".into(), true);
+            .for_target("host-00000000000000000000000000000002".into(), true);
         let (req, reply) = listed_request(123, 456);
         current.install(13, 4, req).unwrap();
         reply.await.unwrap();
@@ -787,7 +816,7 @@ mod tests {
         bind_policy(&attempt.scope());
         let unbound = registry
             .owner(attempt.scope())
-            .for_target("host-fixture".into(), true);
+            .for_target("host-00000000000000000000000000000002".into(), true);
         let (req, reply) = listed_request(123, 456);
         unbound.install(14, 5, req).unwrap();
         registry.answer(14, 5, remembered_selection()).unwrap();

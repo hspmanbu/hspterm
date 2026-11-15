@@ -11,19 +11,84 @@ import 'package:hspterm/workbench/tmux_choice.dart';
 
 import 'support/fake_backend.dart';
 
-tmx.TmuxPrompt prompt({int generation = 7, bool restoreAvailable = false}) =>
-    tmx.TmuxPrompt(
-      restoreAvailable: restoreAvailable,
-      requestId: 12,
-      generation: generation,
-      columns: 80,
-      rows: 24,
-      version: 'tmux 3.4',
-      sessions: [
-        const tmx.TmuxSessionInfo(id: r'$0', name: 'fixture 中文', attached: 2),
-      ],
-    );
+tmx.TmuxPrompt prompt({
+  int generation = 7,
+  bool restoreAvailable = false,
+  bool? readonlyDefault,
+}) => tmx.TmuxPrompt(
+  restoreAvailable: restoreAvailable,
+  readonlyDefault: readonlyDefault,
+  requestId: 12,
+  generation: generation,
+  columns: 80,
+  rows: 24,
+  version: 'tmux 3.4',
+  sessions: [
+    const tmx.TmuxSessionInfo(id: r'$0', name: 'fixture 中文', attached: 2),
+  ],
+);
 void main() {
+  for (final readonly in [false, true]) {
+    testWidgets(
+      'host readonly default=$readonly is shown without takeover consent',
+      (tester) async {
+        final s = LiveTerminalSession(
+          'source',
+          DemoHost('h', 'Fixture', 'example.invalid', 'g'),
+          FakeBackend(),
+        );
+        s.controller
+          ..id = 1
+          ..generation = 7
+          ..phase = 'Connecting';
+        tmx.TmuxSelection? selected;
+        try {
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () async => selected = await showTmuxChoice(
+                    context,
+                    s.controller,
+                    prompt(readonlyDefault: readonly),
+                  ),
+                  child: const Text('choose'),
+                ),
+              ),
+            ),
+          );
+          await tester.tap(find.text('choose'));
+          await tester.pumpAndSettle();
+          expect(
+            tester
+                .widget<SwitchListTile>(
+                  find.byKey(const ValueKey('tmux-readonly')),
+                )
+                .value,
+            readonly,
+          );
+          expect(find.byKey(const ValueKey('tmux-takeover')), findsNothing);
+          expect(
+            tester
+                .widget<FilledButton>(
+                  find.byKey(const ValueKey('tmux-confirm')),
+                )
+                .onPressed,
+            isNotNull,
+          );
+          await tester.tap(find.byKey(const ValueKey('tmux-confirm')));
+          await tester.pumpAndSettle();
+          expect(selected!.readonly, readonly);
+          expect(selected!.takeoverConfirmed, !readonly);
+        } finally {
+          await tester.pumpWidget(const SizedBox());
+          await s.controller.shutdown();
+          s.controller.dispose();
+        }
+      },
+    );
+  }
+
   test('default tmux names use the first free positive suffix', () {
     expect(nextTmuxSessionName([]), 'hspterm1');
     expect(
@@ -33,7 +98,7 @@ void main() {
     expect(nextTmuxSessionName(['hspterm2', 'fixture']), 'hspterm1');
   });
   testWidgets(
-    'new-session restore consent explains retained creation and future control takeover',
+    'new-session restore explains retained creation and future takeover',
     (tester) async {
       tester.view.physicalSize = const Size(900, 1100);
       tester.view.devicePixelRatio = 1;
@@ -80,7 +145,7 @@ void main() {
       await tester.ensureVisible(restore);
       await tester.tap(restore);
       await tester.pump();
-      expect(find.textContaining('后续接管行为'), findsOneWidget);
+      expect(find.textContaining('接管原会话'), findsOneWidget);
       expect(find.textContaining('已创建的会话保留'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('tmux-confirm')));
       await tester.pumpAndSettle();
@@ -203,7 +268,7 @@ void main() {
     },
   );
   testWidgets(
-    'control attachment needs explicit takeover consent and size lock is per selection',
+    'control attachment needs no takeover checkbox and size lock is per selection',
     (tester) async {
       tester.view.physicalSize = const Size(900, 800);
       tester.view.devicePixelRatio = 1;
@@ -245,10 +310,9 @@ void main() {
         tester
             .widget<FilledButton>(find.byKey(const ValueKey('tmux-confirm')))
             .onPressed,
-        isNull,
+        isNotNull,
       );
-      await tester.tap(find.byKey(const ValueKey('tmux-takeover')));
-      await tester.pump();
+      expect(find.byKey(const ValueKey('tmux-takeover')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('tmux-lock-size')));
       await tester.pump();
       await tester.tap(find.byKey(const ValueKey('tmux-confirm')));

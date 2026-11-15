@@ -28,6 +28,7 @@ pub mod sftp_host_prefs;
 pub mod sftp_last_dirs;
 pub mod ssh_proxy;
 pub mod terminal_preferences;
+pub mod tmux_preferences;
 pub mod transfer_settings;
 pub mod typography;
 pub use repository::bulk as host_bulk;

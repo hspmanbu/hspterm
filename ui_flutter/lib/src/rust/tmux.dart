@@ -8,6 +8,7 @@ import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 class TmuxPrompt {
+  final bool? readonlyDefault;
   final bool? restoreAvailable;
   final int requestId;
   final int generation;
@@ -18,6 +19,7 @@ class TmuxPrompt {
   final List<TmuxSessionInfo> sessions;
 
   const TmuxPrompt({
+    this.readonlyDefault,
     this.restoreAvailable,
     required this.requestId,
     required this.generation,
@@ -30,6 +32,7 @@ class TmuxPrompt {
 
   @override
   int get hashCode =>
+      readonlyDefault.hashCode ^
       restoreAvailable.hashCode ^
       requestId.hashCode ^
       generation.hashCode ^
@@ -44,6 +47,7 @@ class TmuxPrompt {
       identical(this, other) ||
       other is TmuxPrompt &&
           runtimeType == other.runtimeType &&
+          readonlyDefault == other.readonlyDefault &&
           restoreAvailable == other.restoreAvailable &&
           requestId == other.requestId &&
           generation == other.generation &&

@@ -12241,17 +12241,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TmuxPrompt dco_decode_tmux_prompt(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return TmuxPrompt(
-      restoreAvailable: dco_decode_opt_box_autoadd_bool(arr[0]),
-      requestId: dco_decode_u_32(arr[1]),
-      generation: dco_decode_CastedPrimitive_u_64(arr[2]),
-      columns: dco_decode_u_16(arr[3]),
-      rows: dco_decode_u_16(arr[4]),
-      version: dco_decode_opt_String(arr[5]),
-      issue: dco_decode_opt_String(arr[6]),
-      sessions: dco_decode_list_tmux_session_info(arr[7]),
+      readonlyDefault: dco_decode_opt_box_autoadd_bool(arr[0]),
+      restoreAvailable: dco_decode_opt_box_autoadd_bool(arr[1]),
+      requestId: dco_decode_u_32(arr[2]),
+      generation: dco_decode_CastedPrimitive_u_64(arr[3]),
+      columns: dco_decode_u_16(arr[4]),
+      rows: dco_decode_u_16(arr[5]),
+      version: dco_decode_opt_String(arr[6]),
+      issue: dco_decode_opt_String(arr[7]),
+      sessions: dco_decode_list_tmux_session_info(arr[8]),
     );
   }
 
@@ -14660,6 +14661,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   TmuxPrompt sse_decode_tmux_prompt(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_readonlyDefault = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_restoreAvailable = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_requestId = sse_decode_u_32(deserializer);
     var var_generation = sse_decode_CastedPrimitive_u_64(deserializer);
@@ -14669,6 +14671,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_issue = sse_decode_opt_String(deserializer);
     var var_sessions = sse_decode_list_tmux_session_info(deserializer);
     return TmuxPrompt(
+      readonlyDefault: var_readonlyDefault,
       restoreAvailable: var_restoreAvailable,
       requestId: var_requestId,
       generation: var_generation,
@@ -16712,6 +16715,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_tmux_prompt(TmuxPrompt self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_bool(self.readonlyDefault, serializer);
     sse_encode_opt_box_autoadd_bool(self.restoreAvailable, serializer);
     sse_encode_u_32(self.requestId, serializer);
     sse_encode_CastedPrimitive_u_64(self.generation, serializer);
