@@ -9,6 +9,7 @@ import 'package:hspterm/src/rust/api.dart' as rust;
 import 'package:hspterm/terminal/backend.dart';
 import 'package:hspterm/terminal/controller.dart';
 import 'package:hspterm/terminal/suggestions.dart';
+import 'package:hspterm/terminal/suggestions_overlay.dart';
 import 'package:hspterm/terminal/view.dart';
 
 import 'support/fake_backend.dart';
@@ -65,6 +66,67 @@ Future<TerminalController> controller(SuggestionsBackend backend) async {
 }
 
 void main() {
+  testWidgets(
+    'suggestions follow live cursor and remain wholly above or below input',
+    (tester) async {
+      final backend = SuggestionsBackend();
+      final current = await controller(backend);
+      final suggestions = TerminalSuggestionsController(current)
+        ..setWanted(true);
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 600,
+                  height: 360,
+                  child: Stack(
+                    children: [
+                      TerminalSuggestionsOverlay(
+                        controller: suggestions,
+                        viewport: const Size(600, 360),
+                        cell: const Size(10, 160),
+                        cursorColumn: 0,
+                        cursorRow: 0,
+                        choose: (_, _) {},
+                        delete: (_, _) {},
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 30));
+        await tester.pump();
+        final popup = find.byKey(const ValueKey('terminal-suggestions-popup'));
+        final origin = tester.getTopLeft(find.byType(Stack).first);
+        expect(
+          tester.getRect(popup).bottom,
+          lessThanOrEqualTo(origin.dy + 160),
+        );
+        // No TerminalView setState or candidate refresh: metadata alone moves it.
+        current.applyFrame(fixture(revision: 2, cursorRow: 0));
+        await tester.pump();
+        expect(
+          tester.getRect(popup).top,
+          greaterThanOrEqualTo(origin.dy + 160),
+        );
+        expect(
+          tester.getRect(popup).bottom,
+          lessThanOrEqualTo(origin.dy + 360),
+        );
+      } finally {
+        await tester.pumpWidget(const SizedBox());
+        suggestions.dispose();
+        await closeTerminal(tester, current);
+      }
+    },
+  );
+
   testWidgets(
     'candidate delete keeps its slot but reveals only on row hover or keyboard selection',
     (tester) async {

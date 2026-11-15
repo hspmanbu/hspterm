@@ -111,7 +111,10 @@ class _TerminalSuggestionsOverlayState
   @override
   Widget build(BuildContext context) => Positioned.fill(
     child: ListenableBuilder(
-      listenable: widget.controller,
+      listenable: Listenable.merge([
+        widget.controller,
+        widget.controller.terminal,
+      ]),
       builder: (context, _) {
         final state = widget.controller, size = widget.viewport;
         if (!state.showing || size.width < 120 || size.height < 70) {
@@ -120,20 +123,37 @@ class _TerminalSuggestionsOverlayState
         final choices = state.view!.choices;
         final ticket = state.view!.ticket;
         final width = min(480.0, size.width - 18);
-        final height = min(
-          200.0,
-          min(choices.length * 30.0 + 24, size.height * .5),
-        );
-        final left = (widget.cursorColumn * widget.cell.width).clamp(
+        final frame = state.terminal.metadata;
+        final row = frame?.cursorRow ?? widget.cursorRow;
+        final column = frame?.cursorColumn ?? widget.cursorColumn;
+        if (row < 0 ||
+            row * widget.cell.height >= size.height ||
+            (frame != null &&
+                (frame.displayOffset > 0 ||
+                    !frame.cursorVisible ||
+                    row >= frame.rows))) {
+          return const IgnorePointer(child: SizedBox.expand());
+        }
+        final desired = min(200.0, choices.length * 30.0 + 24);
+        final cursorTop = row * widget.cell.height;
+        final below = cursorTop + widget.cell.height;
+        var useBelow = size.height - below >= desired;
+        // If the input is near the very top, even one candidate cannot fit
+        // above. A shorter scrollable panel below is preferable to covering
+        // the input or disappearing despite usable space.
+        if (!useBelow && cursorTop < 54 && size.height - below >= 54) {
+          useBelow = true;
+        }
+        final available = useBelow ? size.height - below : cursorTop;
+        final height = min(desired, available);
+        // Never clamp an oversized popup across the active input row. Keep
+        // the chosen side and scroll candidates, or hide in a tiny viewport.
+        if (height < 54) return const IgnorePointer(child: SizedBox.expand());
+        final left = (column * widget.cell.width).clamp(
           0.0,
           max(0.0, size.width - width - 12),
         );
-        final below = (widget.cursorRow + 1) * widget.cell.height;
-        final top =
-            (below + height <= size.height
-                    ? below
-                    : below - widget.cell.height - height)
-                .clamp(0.0, max(0.0, size.height - height));
+        final top = useBelow ? below : cursorTop - height;
         return Stack(
           children: [
             Positioned(
@@ -142,6 +162,7 @@ class _TerminalSuggestionsOverlayState
               width: width,
               height: height,
               child: Material(
+                key: const ValueKey('terminal-suggestions-popup'),
                 elevation: 5,
                 borderRadius: BorderRadius.circular(4),
                 clipBehavior: Clip.antiAlias,

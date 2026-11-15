@@ -158,7 +158,7 @@ fn paste_requires_preview_and_wraps_confirmed_content_exactly_once() {
         }
     ));
     match t.prepare_paste(text, true).unwrap() {
-        PastePlan::Ready(bytes) => assert_eq!(bytes, text.as_bytes()),
+        PastePlan::Ready(bytes) => assert_eq!(bytes, b"first\rsecond\r"),
         _ => panic!("confirmed paste must be ready"),
     }
     t.feed(b"\x1b[?2004h").unwrap();
@@ -170,7 +170,7 @@ fn paste_requires_preview_and_wraps_confirmed_content_exactly_once() {
         }
     ));
     match t.prepare_paste(text, true).unwrap() {
-        PastePlan::Ready(bytes) => assert_eq!(bytes, b"\x1b[200~first\r\nsecond\n\x1b[201~"),
+        PastePlan::Ready(bytes) => assert_eq!(bytes, b"\x1b[200~first\nsecond\n\x1b[201~"),
         _ => panic!("confirmed paste must be ready"),
     }
     assert!(matches!(
@@ -260,4 +260,29 @@ fn modify_other_keys_levels_queries_reset_and_kitty_priority() {
         encoded(&t, Key::Character('c'), false, true, false),
         b"\x03"
     );
+}
+
+#[test]
+fn paste_preserves_empty_lines_without_doubling_windows_line_endings() {
+    let mut t = term();
+    for bracketed in [false, true] {
+        if bracketed {
+            t.feed(b"\x1b[?2004h").unwrap();
+        }
+        for source in [
+            "one\r\ntwo\r\n\r\nthree",
+            "one\ntwo\n\nthree",
+            "one\rtwo\r\rthree",
+        ] {
+            let PastePlan::Ready(bytes) = t.prepare_paste(source, true).unwrap() else {
+                panic!("ready")
+            };
+            let expected = if bracketed {
+                b"\x1b[200~one\ntwo\n\nthree\x1b[201~".as_slice()
+            } else {
+                b"one\rtwo\r\rthree".as_slice()
+            };
+            assert_eq!(bytes, expected);
+        }
+    }
 }

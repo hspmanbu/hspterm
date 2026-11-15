@@ -467,7 +467,15 @@ pub(crate) fn paste(bracketed: bool, text: &str, confirmed: bool) -> Result<Past
     if bracketed {
         out.extend_from_slice(b"\x1b[200~");
     }
-    out.extend_from_slice(text.as_bytes());
+    // Windows clipboard uses CRLF. Sending both bytes to an ICRNL PTY can
+    // produce two newlines; canonicalize each logical line ending exactly
+    // once. Preserve real blank lines and do not append a trailing newline.
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    if bracketed {
+        out.extend_from_slice(text.as_bytes());
+    } else {
+        out.extend_from_slice(text.replace('\n', "\r").as_bytes());
+    }
     if bracketed {
         out.extend_from_slice(b"\x1b[201~");
     }

@@ -8,6 +8,7 @@ import 'package:hspterm/terminal/controller.dart';
 import 'package:hspterm/terminal/view.dart';
 
 import 'support/fake_backend.dart';
+import 'support/terminal_cleanup.dart';
 
 Future<Map<String, Object?>> captureClipboard(
   WidgetTester tester,
@@ -32,6 +33,47 @@ Future<Map<String, Object?>> captureClipboard(
 }
 
 void main() {
+  testWidgets(
+    'Escape blocks unsolicited hover until the next intentional action',
+    (tester) async {
+      final backend = FakeBackend();
+      final c = TerminalController(backend);
+      await c.start();
+      c.phase = 'Connected';
+      c.applyFrame(fixture(mouse: true));
+      final key = GlobalKey<TerminalViewState>();
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: TerminalView(key: key, controller: c),
+            ),
+          ),
+        );
+        key.currentState!.focusTerminal();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        final mouse = await tester.createGesture(
+          kind: ui.PointerDeviceKind.mouse,
+        );
+        await mouse.addPointer(location: const Offset(3, 4));
+        await mouse.moveTo(const Offset(12, 5));
+        await tester.pump();
+        expect(backend.mouseActions, isEmpty);
+        await mouse.down(const Offset(12, 5));
+        await mouse.up();
+        await tester.pump();
+        expect(backend.mouseActions, [0, 1]);
+        await mouse.moveTo(const Offset(20, 6));
+        await tester.pump();
+        expect(backend.mouseActions.last, 2);
+        await mouse.removePointer();
+      } finally {
+        await tester.pumpWidget(const SizedBox());
+        await closeTerminal(tester, c);
+      }
+    },
+  );
   testWidgets(
     'mouse selection copies real text but never an all-whitespace selection',
     (tester) async {

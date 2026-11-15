@@ -57,6 +57,7 @@ class TerminalViewState extends State<TerminalView>
   final _searchField = TextEditingController();
   final _searchFocus = FocusNode(debugLabel: "terminal search");
   bool _searchOpen = false;
+  bool _suppressPassiveMouse = false;
   late TerminalSuggestionsController _suggestions;
   final _suggestionOwned = <PhysicalKeyboardKey>{};
   final _focus = FocusNode(debugLabel: 'SSH terminal');
@@ -461,6 +462,9 @@ class TerminalViewState extends State<TerminalView>
   }.contains(key);
   KeyEventResult _key(FocusNode node, KeyEvent event) {
     final mods = _mods, down = event is! KeyUpEvent, key = event.logicalKey;
+    if (down && !_isModifier(key) && key != LogicalKeyboardKey.escape) {
+      _suppressPassiveMouse = false;
+    }
     // Any fresh press first recovers a character the platform dropped, so a
     // following Enter/Backspace cannot overtake it.
     if (event is KeyDownEvent) _flushStalePendingTextKey();
@@ -569,6 +573,12 @@ class TerminalViewState extends State<TerminalView>
       _connection?.setEditingState(_empty);
     }
     final special = _keys[key];
+    if (down && key == LogicalKeyboardKey.escape) {
+      // Interrupts can leave the remote app briefly accepting plain input
+      // before its mouse modes are reset. Do not interleave unsolicited SGR
+      // hover reports with Escape; a fresh intentional action restores them.
+      _suppressPassiveMouse = true;
+    }
     final label = key.keyLabel.toLowerCase();
     if (special == null && label.runes.length != 1) {
       return KeyEventResult.ignored;
@@ -677,6 +687,10 @@ class TerminalViewState extends State<TerminalView>
   bool get _capture =>
       c.metadata?.mouseReporting == true && _mods & 1 == 0 && c.connected;
   void _mouse(Offset position, int action, int button) {
+    if (action == 0 || action == 3 || action == 4) {
+      _suppressPassiveMouse = false;
+    }
+    if (_suppressPassiveMouse && action == 2 && button == 3) return;
     final id = c.id;
     final p = _point(position);
     if (id != null && c.connected) {
@@ -697,6 +711,7 @@ class TerminalViewState extends State<TerminalView>
   bool get _forwardRemoteMouse => _capture && !c.shellInputReady;
 
   void down(PointerDownEvent event) {
+    _suppressPassiveMouse = false;
     _suggestions.dismiss();
     _focus.requestFocus();
     _button = event.buttons & kPrimaryMouseButton != 0
@@ -1201,6 +1216,7 @@ class TerminalViewState extends State<TerminalView>
     _suggestions.inputChanged();
     _preedit.value = change.preedit;
     var text = change.text;
+    if (text.isNotEmpty) _suppressPassiveMouse = false;
     final flushed = _flushedDirectText;
     _flushedDirectText = null;
     if (flushed != null &&
