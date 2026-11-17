@@ -29,7 +29,7 @@ import 'transfers/export_cleanup.dart';
 
 // These functions are ignored because they are not marked as `pub`: `agent_connected`, `agent_scope`, `allowed_integration`, `apply_entry_preferences`, `bind_display`, `check_directory_session`, `check_file_generation`, `close_terminal_owned`, `configuration_restored`, `configuration_synchronized`, `connect_terminal_inner`, `connect_terminal_run`, `credential`, `display_sources`, `ensure_command_source`, `entry`, `event`, `history_version`, `integrated_result`, `integration_guard`, `integration_status`, `invalidate_backup_agents`, `invalidate_synchronized_agents`, `key_credential`, `migrate_legacy_profiles`, `modifiers`, `next_id`, `parse_account_lines`, `persist_key_file`, `property_children`, `publish_terminal_preferences`, `record_integration_commands`, `record`, `remember_host_key`, `remote_sftp`, `replace_display`, `retire_suggestions_for`, `retire_suggestions`, `sessions`, `suggestion_context`, `terminal_path_context_revision`, `terminal_path_context`, `tmux_event`, `transfer_agent_registry`, `transfer_connection`, `trust_id`, `unlock_vault_inner`, `validate_remote_path`, `vault`, `with_vault`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DirSizeJob`, `Entry`, `SavedProfile`, `SuggestionProposal`, `SuggestionsCache`, `TerminalCloseState`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `from`, `from`, `from`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`, `default`
 
 Future<void> unlockVault({required String path, required String password}) =>
@@ -1267,6 +1267,18 @@ Future<void> sftpRemove({
   id: id,
   path: path,
   recursive: recursive,
+  expectedGeneration: expectedGeneration,
+);
+
+/// One batched multi-select delete: admission validates every path before any
+/// deletion, then per-entry errors accumulate instead of aborting siblings.
+Future<SftpRemoveBatchOutcome> sftpRemoveBatch({
+  required int id,
+  required List<String> paths,
+  int? expectedGeneration,
+}) => RustLib.instance.api.crateApiSftpRemoveBatch(
+  id: id,
+  paths: paths,
   expectedGeneration: expectedGeneration,
 );
 
@@ -3166,6 +3178,53 @@ class SftpLastDir {
           runtimeType == other.runtimeType &&
           hostId == other.hostId &&
           path == other.path;
+}
+
+/// One batched delete result: every entry actually removed (including tree
+/// children and already-absent paths) and every refusal, so a partial
+/// completion is explicit data instead of an all-or-nothing error.
+class SftpRemoveBatchOutcome {
+  final List<String> succeeded;
+  final List<SftpRemoveFailure> failed;
+
+  const SftpRemoveBatchOutcome({required this.succeeded, required this.failed});
+
+  @override
+  int get hashCode => succeeded.hashCode ^ failed.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SftpRemoveBatchOutcome &&
+          runtimeType == other.runtimeType &&
+          succeeded == other.succeeded &&
+          failed == other.failed;
+}
+
+/// One path the server refused to delete, with its restricted reason code and
+/// fixed public phrase. Raw server payloads never cross FFI.
+class SftpRemoveFailure {
+  final String path;
+  final String reasonCode;
+  final String reasonText;
+
+  const SftpRemoveFailure({
+    required this.path,
+    required this.reasonCode,
+    required this.reasonText,
+  });
+
+  @override
+  int get hashCode => path.hashCode ^ reasonCode.hashCode ^ reasonText.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SftpRemoveFailure &&
+          runtimeType == other.runtimeType &&
+          path == other.path &&
+          reasonCode == other.reasonCode &&
+          reasonText == other.reasonText;
 }
 
 class SftpSortPref {

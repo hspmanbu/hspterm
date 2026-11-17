@@ -23,6 +23,7 @@ mod openssh_import;
 mod previews;
 mod public_errors;
 mod remote_transfers;
+mod remove_tree;
 mod run_log;
 mod tmux;
 mod transfer_channels;

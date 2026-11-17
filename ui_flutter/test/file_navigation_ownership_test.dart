@@ -29,11 +29,15 @@ class _NavigationModel extends WorkbenchModel {
   }
 
   @override
-  Future<void> deleteRemoteFiles(
+  Future<RemoteDeleteResult> deleteRemoteFiles(
     TerminalSession source,
     List<DemoFile> files,
   ) async {
     deleted++;
+    return RemoteDeleteResult(
+      succeeded: files.map((f) => f.id).toList(),
+      failed: const [],
+    );
   }
 
   @override

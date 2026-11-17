@@ -358,6 +358,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<SftpLastDir> dco_decode_list_sftp_last_dir(dynamic raw);
 
   @protected
+  List<SftpRemoveFailure> dco_decode_list_sftp_remove_failure(dynamic raw);
+
+  @protected
   List<SftpSortPref> dco_decode_list_sftp_sort_pref(dynamic raw);
 
   @protected
@@ -529,6 +532,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SftpLastDir dco_decode_sftp_last_dir(dynamic raw);
+
+  @protected
+  SftpRemoveBatchOutcome dco_decode_sftp_remove_batch_outcome(dynamic raw);
+
+  @protected
+  SftpRemoveFailure dco_decode_sftp_remove_failure(dynamic raw);
 
   @protected
   SftpSortPref dco_decode_sftp_sort_pref(dynamic raw);
@@ -989,6 +998,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<SftpLastDir> sse_decode_list_sftp_last_dir(SseDeserializer deserializer);
 
   @protected
+  List<SftpRemoveFailure> sse_decode_list_sftp_remove_failure(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<SftpSortPref> sse_decode_list_sftp_sort_pref(
     SseDeserializer deserializer,
   );
@@ -1212,6 +1226,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SftpLastDir sse_decode_sftp_last_dir(SseDeserializer deserializer);
+
+  @protected
+  SftpRemoveBatchOutcome sse_decode_sftp_remove_batch_outcome(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SftpRemoveFailure sse_decode_sftp_remove_failure(
+    SseDeserializer deserializer,
+  );
 
   @protected
   SftpSortPref sse_decode_sftp_sort_pref(SseDeserializer deserializer);
@@ -1812,6 +1836,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_sftp_remove_failure(
+    List<SftpRemoveFailure> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_sftp_sort_pref(
     List<SftpSortPref> self,
     SseSerializer serializer,
@@ -2083,6 +2113,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_sftp_last_dir(SftpLastDir self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_sftp_remove_batch_outcome(
+    SftpRemoveBatchOutcome self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_sftp_remove_failure(
+    SftpRemoveFailure self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_sftp_sort_pref(SftpSortPref self, SseSerializer serializer);

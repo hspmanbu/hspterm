@@ -5097,6 +5097,23 @@ pub async fn sftp_edit_replace_confirmed(
     crate::public_errors::finish(outcome)
 }
 
+/// One path the server refused to delete, with its restricted reason code and
+/// fixed public phrase. Raw server payloads never cross FFI.
+#[derive(Clone)]
+pub struct SftpRemoveFailure {
+    pub path: String,
+    pub reason_code: String,
+    pub reason_text: String,
+}
+/// One batched delete result: every entry actually removed (including tree
+/// children and already-absent paths) and every refusal, so a partial
+/// completion is explicit data instead of an all-or-nothing error.
+#[derive(Clone)]
+pub struct SftpRemoveBatchOutcome {
+    pub succeeded: Vec<String>,
+    pub failed: Vec<SftpRemoveFailure>,
+}
+
 pub async fn sftp_remove(
     id: u32,
     path: String,
@@ -5110,34 +5127,65 @@ pub async fn sftp_remove(
             bail!("不能删除根目录或当前目录入口");
         }
         let remote = remote_sftp(id, expected_generation).await?;
-        let path = path.trim_end_matches('/').to_owned();
-        if path.is_empty() {
+        let root = path.trim_end_matches('/').to_owned();
+        if root.is_empty() {
             bail!("不能删除根目录");
         }
-        let mut pending = vec![(path, false)];
-        while let Some((path, expanded)) = pending.pop() {
-            let attributes = remote.symlink_metadata(path.clone()).await?;
-            if attributes.is_dir() && !attributes.is_symlink() {
-                if remote.canonicalize(path.clone()).await? == "/" {
-                    bail!("不能删除根目录");
-                }
-                if recursive && !expanded {
-                    pending.push((path.clone(), true));
-                    for child in remote.read_dir(path).await? {
-                        let name = child.file_name();
-                        if name.contains('/') || name.contains('\0') {
-                            bail!("服务器返回无效文件名");
-                        }
-                        pending.push((child.path(), false));
-                    }
-                } else {
-                    remote.remove_dir(path).await?;
-                }
-            } else {
-                remote.remove_file(path).await?;
-            }
+        let mut outcome = crate::remove_tree::RemoveOutcome::default();
+        let mut budget = crate::remove_tree::REMOVE_MAX_ENTRIES;
+        if crate::remove_tree::remove_lossy(&root) {
+            // A lossy U+FFFD path can never address the original bytes;
+            // classify it without a doomed request.
+            outcome.failed.push(crate::remove_tree::RemoveFailure::new(
+                root.clone(),
+                crate::remove_tree::RemoveFailureCode::NameInvalid,
+            ));
+        } else {
+            crate::remove_tree::remove_remote_tree(
+                &remote,
+                root.clone(),
+                recursive,
+                &mut budget,
+                &mut outcome,
+            )
+            .await?;
+        }
+        // The first recorded row is the root cause: children run (and fail)
+        // before their parent's RMDIR, so a busy or permission-denied child
+        // surfaces instead of the non-empty symptom on the parent.
+        if let Some(failure) = outcome.failed.first() {
+            bail!(failure.text);
         }
         Ok(())
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
+/// One batched multi-select delete: admission validates every path before any
+/// deletion, then per-entry errors accumulate instead of aborting siblings.
+pub async fn sftp_remove_batch(
+    id: u32,
+    paths: Vec<String>,
+    expected_generation: Option<u64>,
+) -> Result<SftpRemoveBatchOutcome> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        if paths.len() > crate::remove_tree::REMOVE_MAX_ROOTS {
+            bail!("删除清单超过安全容量");
+        }
+        let mut roots = Vec::with_capacity(paths.len());
+        for path in paths {
+            validate_remote_path(&path)?;
+            let root = path.trim_end_matches('/').to_owned();
+            ensure!(
+                !root.is_empty() && ![".", ".."].contains(&root.as_str()),
+                "不能删除根目录或当前目录入口"
+            );
+            roots.push(root);
+        }
+        let remote = remote_sftp(id, expected_generation).await?;
+        crate::remove_tree::remove_remote_paths(&remote, roots, true).await
     })
     .await;
     crate::public_errors::finish(outcome)

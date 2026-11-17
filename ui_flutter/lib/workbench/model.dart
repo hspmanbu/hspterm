@@ -2811,27 +2811,48 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   }
 
   @override
-  Future<void> deleteRemoteFiles(
+  Future<RemoteDeleteResult> deleteRemoteFiles(
     TerminalSession session,
     List<DemoFile> files,
-  ) {
+  ) => deleteRemotePaths(session, files.map((file) => file.id).toList());
+
+  /// One batched [rust.sftpRemoveBatch] call for exactly these paths. The
+  /// server classifies each entry (symlink unlink only, directories
+  /// recursively), collects per-entry refusals and keeps deleting siblings;
+  /// the returned outcome drives the UI's partial-completion flow.
+  @override
+  Future<RemoteDeleteResult> deleteRemotePaths(
+    TerminalSession session,
+    List<String> paths,
+  ) async {
     final s = _connected(session);
-    final frozen = List<DemoFile>.unmodifiable(files);
-    final affected = frozen.map((file) {
-      final index = file.id.lastIndexOf('/');
-      return index <= 0 ? '/' : file.id.substring(0, index);
+    final frozen = List<String>.unmodifiable(paths);
+    final affected = frozen.map((path) {
+      final index = path.lastIndexOf('/');
+      return index <= 0 ? '/' : path.substring(0, index);
     }).toSet();
-    return _mutateAndRefresh(s, (id, generation) async {
-      for (final file in frozen) {
-        _checkSftpMutation(s, id, generation);
-        await rust.sftpRemove(
-          id: id,
-          path: file.id,
-          recursive: file.folder && !file.symlink,
-          expectedGeneration: generation,
-        );
-      }
+    RemoteDeleteResult? outcome;
+    await _mutateAndRefresh(s, (id, generation) async {
+      final batch = await rust.sftpRemoveBatch(
+        id: id,
+        paths: frozen,
+        expectedGeneration: generation,
+      );
+      outcome = RemoteDeleteResult(
+        succeeded: List<String>.unmodifiable(batch.succeeded),
+        failed: List<RemoteDeleteFailure>.unmodifiable([
+          for (final failure in batch.failed)
+            RemoteDeleteFailure(
+              failure.path,
+              failure.reasonCode,
+              failure.reasonText,
+            ),
+        ]),
+      );
     }, affectedDirectories: affected);
+    // _mutateAndRefresh only completes without throwing when the mutation
+    // above ran, which always assigns the outcome.
+    return outcome!;
   }
 
   void _checkSftpMutation(LiveTerminalSession s, int id, int generation) {

@@ -195,6 +195,14 @@ class _FilesPanelState extends State<FilesPanel> {
   String? editing, renameError, anchor, hoverTarget, _newEntryTail;
   bool _renameBusy = false, _pathEditing = false;
 
+  /// Set while a batched remote delete is in flight; the delete entry points
+  /// (toolbar, menu, Delete key) refuse re-entry and the retry button waits.
+  bool _deleteBusy = false;
+
+  /// Failures of the latest delete cycle, backing the 查看明细 dialog and its
+  /// retry button; cleared when the list is consumed or the view is gone.
+  List<RemoteDeleteFailure> _deleteFailures = const [];
+
   /// Ctrl+wheel list font scale, session-only like the terminal zoom.
   static const _fontScaleMin = 0.8, _fontScaleMax = 1.6;
   double _fontScale = 1.0;
@@ -1245,10 +1253,7 @@ class _FilesPanelState extends State<FilesPanel> {
   }
 
   Future<void> delete() async {
-    final model = m, source = p;
-    final generation = source.connectionGeneration;
-    final native = source is LiveTerminalSession ? source.controller.id : null;
-    final directory = source.path;
+    if (_deleteBusy) return;
     final files = p.files.where((f) => selected.contains(f.id)).toList();
     if (files.isEmpty) return;
     final recursive = files.any((f) => f.folder);
@@ -1259,27 +1264,129 @@ class _FilesPanelState extends State<FilesPanel> {
               : '删除“${files.first.name}”？',
           m.isMock
               ? '模拟目录：${p.path}\n${files.map((f) => f.name).join('、')}\n${recursive ? '包含文件夹及内部内容；正式操作不会移入回收站。' : '正式操作不会移入回收站。'}\n本次只删除模拟数据。'
-              : '远端目录：${p.path}\n${files.map((f) => f.name).join('、')}\n${recursive ? '将递归删除所选目录内的内容，不跟随符号链接。' : ''}此操作不可撤销，不会移入回收站。',
+              : '远端目录：${p.path}\n${files.map((f) => f.name).join('、')}\n${recursive ? '将递归删除所选目录内的内容，不跟随符号链接。' : ''}此操作不可撤销，不会移入回收站。部分文件可能因权限或名称无法删除，完成后会列出明细。',
           accept: '删除',
           danger: true,
         ) &&
         mounted) {
+      setState(() => _deleteBusy = true);
       try {
-        if (!_sameSource(model, source, generation, native) ||
-            source.path != directory) {
-          throw StateError('原删除会话或目录已改变，请重新选择并确认');
-        }
-        await model.deleteRemoteFiles(source, files);
-        if (_sameSource(model, source, generation, native) &&
-            source.path == directory) {
-          setState(() => selected.clear());
-        }
+        await _deleteCycle(files.map((f) => f.id).toList());
       } catch (error) {
-        if (mounted) {
-          notice(context, '删除未全部完成：$error', level: AppNoticeLevel.warning);
-        }
+        _reportDeleteFailure(error);
+      } finally {
+        if (mounted) setState(() => _deleteBusy = false);
       }
     }
+  }
+
+  /// One delete cycle: one batched attempt, selection cleanup, outcome
+  /// notices and the on-demand failure dialog. Retry re-enters with exactly
+  /// the failed paths. A session/directory change before the first attempt is
+  /// the "nothing executed" state; after that, outcomes still surface.
+  Future<void> _deleteCycle(List<String> paths) async {
+    final model = m, source = p;
+    final generation = source.connectionGeneration;
+    final native = source is LiveTerminalSession ? source.controller.id : null;
+    final directory = source.path;
+    if (!_sameSource(model, source, generation, native) ||
+        source.path != directory) {
+      _reportDeleteNotice('会话已变化，未删除任何文件', AppNoticeLevel.info);
+      return;
+    }
+    RemoteDeleteResult result;
+    try {
+      result = await model.deleteRemotePaths(source, paths);
+    } catch (error) {
+      _reportDeleteFailure(error);
+      return;
+    }
+    if (!_sameSource(model, source, generation, native) ||
+        source.path != directory) {
+      // The batch ran but this view moved on; the new view owns the outcome.
+      return;
+    }
+    if (mounted) {
+      setState(() => selected.removeAll(result.succeeded.toSet()));
+    }
+    if (result.fullySucceeded) {
+      _reportDeleteNotice('已删除 ${result.succeeded.length} 项', AppNoticeLevel.success);
+      return;
+    }
+    _reportPartialDelete(result.succeeded.length, result.failed);
+  }
+
+  /// Outcome feedback must survive the panel being unmounted mid-delete; the
+  /// process-wide quiet channel is the only sink that needs no context.
+  void _reportDeleteNotice(String message, AppNoticeLevel level) {
+    if (mounted) {
+      notice(context, message, level: level);
+    } else {
+      quietNoticeNotifier.value = QuietNotice(message, level, DateTime.now(), null);
+    }
+  }
+
+  void _reportDeleteFailure(Object error) {
+    final text = appMessage(error);
+    if (text.contains('未执行')) {
+      _reportDeleteNotice('会话已变化，未删除任何文件', AppNoticeLevel.info);
+    } else {
+      _reportDeleteNotice('删除未全部完成：$text', AppNoticeLevel.warning);
+    }
+  }
+
+  /// Partial completion: one warning notice plus a 查看明细 action opening the
+  /// per-path failure dialog with its retry button.
+  void _reportPartialDelete(int succeeded, List<RemoteDeleteFailure> failures) {
+    _deleteFailures = List.unmodifiable(failures);
+    final message = '删除了 $succeeded 项，${failures.length} 项失败';
+    if (mounted) {
+      showAppNotice(
+        context,
+        message,
+        level: AppNoticeLevel.warning,
+        action: SnackBarAction(label: '查看明细', onPressed: _openDeleteFailuresDialog),
+      );
+    } else {
+      quietNoticeNotifier.value = QuietNotice(
+        message,
+        AppNoticeLevel.warning,
+        DateTime.now(),
+        null,
+      );
+    }
+  }
+
+  Future<void> _retryDeleteFailures() async {
+    if (_deleteBusy) return;
+    final paths = _deleteFailures.map((failure) => failure.path).toList();
+    _deleteFailures = const [];
+    if (paths.isEmpty) return;
+    setState(() => _deleteBusy = true);
+    try {
+      await _deleteCycle(paths);
+    } finally {
+      if (mounted) setState(() => _deleteBusy = false);
+    }
+  }
+
+  /// Opens the per-path failure list; 重试失败项 reruns the batch for exactly
+  /// the listed paths (they keep their selection highlight in the meantime).
+  Future<void> _openDeleteFailuresDialog() async {
+    if (_deleteBusy) return;
+    final failures = _deleteFailures;
+    if (failures.isEmpty) return;
+    await showAppDialog<void>(
+      context: context,
+      builder: (dialogContext) => RemoteDeleteFailuresDialog(
+        failures: failures,
+        onRetry: () {
+          Navigator.of(dialogContext).pop();
+          unawaited(_retryDeleteFailures());
+        },
+      ),
+    );
+    if (!mounted) _deleteFailures = const [];
   }
 
   void _openFileMenuAt(Offset globalPosition, DemoFile file) {
@@ -1306,7 +1413,11 @@ class _FilesPanelState extends State<FilesPanel> {
             '重命名',
             () => _dispatchFileAction('rename'),
           ),
-          Tool(Icons.delete_outline, '删除', () => _dispatchFileAction('delete')),
+          Tool(
+            Icons.delete_outline,
+            '删除',
+            _deleteBusy ? null : () => _dispatchFileAction('delete'),
+          ),
         ],
       ),
     ),
@@ -2226,7 +2337,7 @@ class _FilesPanelState extends State<FilesPanel> {
             return KeyEventResult.handled;
           }
           if (e.logicalKey == LogicalKeyboardKey.delete) {
-            delete();
+            unawaited(delete());
             return KeyEventResult.handled;
           }
           if (e.logicalKey == LogicalKeyboardKey.enter && selected.isNotEmpty) {
@@ -3143,6 +3254,60 @@ Widget _terminalLinkActions(BuildContext context, WorkbenchModel m) {
         Icons.my_location_outlined,
         '跳转至终端路径',
         () => runAction(m.jumpToTerminalDirectory(source)),
+      ),
+    ],
+  );
+}
+
+/// Per-path review of one partial remote delete: each refused path with its
+/// Chinese category phrase, plus one retry button rerunning the batch for
+/// exactly these paths.
+class RemoteDeleteFailuresDialog extends StatelessWidget {
+  const RemoteDeleteFailuresDialog({
+    super.key,
+    required this.failures,
+    required this.onRetry,
+  });
+  final List<RemoteDeleteFailure> failures;
+  final VoidCallback onRetry;
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
+    title: const Text('删除失败明细'),
+    content: SizedBox(
+      width: 460,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 340),
+        child: ListView.separated(
+          shrinkWrap: true,
+          itemCount: failures.length,
+          separatorBuilder: (_, _) => const Divider(height: 8),
+          itemBuilder: (context, index) {
+            final failure = failures[index];
+            return ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: Text(failure.path, style: const TextStyle(fontSize: 12)),
+              subtitle: Text(
+                failure.phrase,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('关闭'),
+      ),
+      FilledButton(
+        onPressed: onRetry,
+        child: Text('重试失败项 (${failures.length})'),
       ),
     ],
   );

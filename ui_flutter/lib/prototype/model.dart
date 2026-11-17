@@ -118,6 +118,36 @@ class KeyDetails {
   final String publicKey, fingerprint, algorithm;
 }
 
+/// One path the server refused to delete, with the restricted reason code and
+/// fixed public phrase reported by the Rust bridge.
+class RemoteDeleteFailure {
+  const RemoteDeleteFailure(this.path, this.reasonCode, this.reasonText);
+  final String path;
+  final String reasonCode;
+  final String reasonText;
+
+  /// Chinese category phrase shown in the failure list; the bridge text is
+  /// the fallback for codes this UI does not know.
+  String get phrase => switch (reasonCode) {
+    'PermissionDenied' => '权限不足',
+    'Failure' => '被占用或目录非空',
+    'NoSuchFile' => '文件已不存在（建议刷新）',
+    'NameInvalid' => '名称含非UTF-8字节，建议终端处理',
+    'Timeout' => '服务器响应超时，可重试',
+    _ => reasonText.isEmpty ? '服务器拒绝' : reasonText,
+  };
+}
+
+/// One batched remote delete: every entry actually removed (rm -f style — an
+/// already-absent path counts as achieved) and every refusal, replacing the
+/// old all-or-nothing error with an explicit partial result.
+class RemoteDeleteResult {
+  const RemoteDeleteResult({required this.succeeded, required this.failed});
+  final List<String> succeeded;
+  final List<RemoteDeleteFailure> failed;
+  bool get fullySucceeded => failed.isEmpty;
+}
+
 class DemoFile {
   DemoFile(
     this.id,
@@ -916,12 +946,20 @@ class WorkbenchModel extends ChangeNotifier {
     changed();
   }
 
-  Future<void> deleteRemoteFiles(
+  Future<RemoteDeleteResult> deleteRemoteFiles(
     TerminalSession session,
     List<DemoFile> files,
+  ) => deleteRemotePaths(session, files.map((f) => f.id).toList());
+
+  /// Path-only variant the failure dialog's retry uses; the live model sends
+  /// exactly these paths in one batched call.
+  Future<RemoteDeleteResult> deleteRemotePaths(
+    TerminalSession session,
+    List<String> paths,
   ) async {
-    session.files.removeWhere((f) => files.contains(f));
+    session.files.removeWhere((f) => paths.contains(f.id));
     changed();
+    return RemoteDeleteResult(succeeded: List.of(paths), failed: const []);
   }
 
   Future<void> moveRemoteFiles(
