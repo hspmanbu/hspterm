@@ -12831,6 +12831,7 @@ impl SseDecode for crate::tmux::TmuxPrompt {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_readonlyDefault = <Option<bool>>::sse_decode(deserializer);
         let mut var_restoreAvailable = <Option<bool>>::sse_decode(deserializer);
+        let mut var_ensureLocale = <Option<bool>>::sse_decode(deserializer);
         let mut var_requestId = <u32>::sse_decode(deserializer);
         let mut var_generation = <u64>::sse_decode(deserializer);
         let mut var_columns = <u16>::sse_decode(deserializer);
@@ -12841,6 +12842,7 @@ impl SseDecode for crate::tmux::TmuxPrompt {
         return crate::tmux::TmuxPrompt {
             readonly_default: var_readonlyDefault,
             restore_available: var_restoreAvailable,
+            ensure_locale: var_ensureLocale,
             request_id: var_requestId,
             generation: var_generation,
             columns: var_columns,
@@ -12862,6 +12864,7 @@ impl SseDecode for crate::tmux::TmuxSelection {
         let mut var_readonly = <bool>::sse_decode(deserializer);
         let mut var_takeoverConfirmed = <bool>::sse_decode(deserializer);
         let mut var_lockSize = <bool>::sse_decode(deserializer);
+        let mut var_ensureLocale = <Option<bool>>::sse_decode(deserializer);
         return crate::tmux::TmuxSelection {
             restore_on_reconnect: var_restoreOnReconnect,
             kind: var_kind,
@@ -12870,6 +12873,7 @@ impl SseDecode for crate::tmux::TmuxSelection {
             readonly: var_readonly,
             takeover_confirmed: var_takeoverConfirmed,
             lock_size: var_lockSize,
+            ensure_locale: var_ensureLocale,
         };
     }
 }
@@ -15250,6 +15254,7 @@ impl flutter_rust_bridge::IntoDart for crate::tmux::TmuxPrompt {
         [
             self.readonly_default.into_into_dart().into_dart(),
             self.restore_available.into_into_dart().into_dart(),
+            self.ensure_locale.into_into_dart().into_dart(),
             self.request_id.into_into_dart().into_dart(),
             self.generation.into_into_dart().into_dart(),
             self.columns.into_into_dart().into_dart(),
@@ -15278,6 +15283,7 @@ impl flutter_rust_bridge::IntoDart for crate::tmux::TmuxSelection {
             self.readonly.into_into_dart().into_dart(),
             self.takeover_confirmed.into_into_dart().into_dart(),
             self.lock_size.into_into_dart().into_dart(),
+            self.ensure_locale.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -16943,6 +16949,7 @@ impl SseEncode for crate::tmux::TmuxPrompt {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Option<bool>>::sse_encode(self.readonly_default, serializer);
         <Option<bool>>::sse_encode(self.restore_available, serializer);
+        <Option<bool>>::sse_encode(self.ensure_locale, serializer);
         <u32>::sse_encode(self.request_id, serializer);
         <u64>::sse_encode(self.generation, serializer);
         <u16>::sse_encode(self.columns, serializer);
@@ -16963,6 +16970,7 @@ impl SseEncode for crate::tmux::TmuxSelection {
         <bool>::sse_encode(self.readonly, serializer);
         <bool>::sse_encode(self.takeover_confirmed, serializer);
         <bool>::sse_encode(self.lock_size, serializer);
+        <Option<bool>>::sse_encode(self.ensure_locale, serializer);
     }
 }
 

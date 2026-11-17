@@ -129,6 +129,7 @@ class TerminalViewState extends State<TerminalView>
     _flushedDirectText = input.text;
     _flushedDirectMs = debugNowMs();
     _traceInput('direct-$reason');
+    _snapToBottomForInput();
     _run(c.key(input));
   }
 
@@ -174,6 +175,25 @@ class TerminalViewState extends State<TerminalView>
     "row_pictures": _cache.rowCount,
   };
   void _run(Future<void> future) => unawaited(future.catchError(c.report));
+
+  /// Every input path assumes the user is typing at the live prompt, so a
+  /// view scrolled back into history snaps to the bottom with exactly the
+  /// semantics of the回底 button. Scrollback navigation, wheel paging, page
+  /// keys and suggestion navigation never call this. A tmux read-only viewer
+  /// never snaps: the controller interceptor may swallow the input, and a
+  /// read-only attach ignores it remotely anyway.
+  void _snapToBottomForInput() {
+    final f = c.metadata;
+    if (f == null ||
+        f.displayOffset == 0 ||
+        f.alternateScreen ||
+        !c.connected) {
+      return;
+    }
+    if (c.tmuxReadonly == true) return;
+    _run(c.seek(f.historyLines));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -616,6 +636,9 @@ class TerminalViewState extends State<TerminalView>
         );
       });
     }
+    // The main key path snaps for real input only: no key-up (kind 2) and
+    // no bare modifier press/release.
+    if (event is! KeyUpEvent && !_isModifier(key)) _snapToBottomForInput();
     _run(
       c.key(
         rust.KeyboardInput(
@@ -664,6 +687,7 @@ class TerminalViewState extends State<TerminalView>
       return;
     }
     final result = await source.paste(text, false);
+    if (!result.needsConfirmation && current()) _snapToBottomForInput();
     if (!mounted || !result.needsConfirmation || !current()) return;
     final confirmed = await showAppDialog<String>(
       context: context,
@@ -674,7 +698,10 @@ class TerminalViewState extends State<TerminalView>
         bytes: result.bytes,
       ),
     );
-    if (confirmed != null && current()) await source.paste(confirmed, true);
+    if (confirmed != null && current()) {
+      await source.paste(confirmed, true);
+      _snapToBottomForInput();
+    }
   }
 
   Point<int> _point(Offset position) => Point(
@@ -1231,6 +1258,9 @@ class TerminalViewState extends State<TerminalView>
     _pendingTextKey = null;
     _pendingTextTimer?.cancel();
     _pendingTextTimer = null;
+    // A deletion or committed edit is real input at the prompt: snap a
+    // scrolled-back view down before the bytes go out.
+    if (change.erase > 0 || text.isNotEmpty) _snapToBottomForInput();
     for (var i = 0; i < change.erase; i++) {
       _run(c.key(rust.KeyboardInput(key: 'Backspace', modifiers: 0, kind: 0)));
     }
@@ -1252,6 +1282,7 @@ class TerminalViewState extends State<TerminalView>
   @override
   void performAction(TextInputAction action) {
     if (!_focus.hasFocus || _ime.composing) return;
+    _snapToBottomForInput();
     _run(c.key(rust.KeyboardInput(key: 'Enter', modifiers: 0, kind: 0)));
     _ime.reset();
     _connection?.setEditingState(_empty);

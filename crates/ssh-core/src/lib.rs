@@ -550,8 +550,16 @@ impl SshConnection {
                 readonly: false,
                 session: None,
                 deferred_create: None,
+                ensure_locale: false,
             }
         };
+        // Explicit tmux-dialog consent only: complete the locale exports
+        // before complete_creation or the PTY exec can start any pane, so a
+        // newly created pane's shell reads the updated ~/.bashrc by itself.
+        // Dedicated bounded exec channel; the live PTY never sees a `source`.
+        if startup.ensure_locale {
+            tmux::ensure_locale(&handle, &mut budget).await?;
+        }
         // Verified against a real Ubuntu sshd (2026-11-06): only a
         // `request_shell` session prints the PAM/MOTD banner and last-login
         // line; exec sessions never do, PTY or not. The main channel therefore

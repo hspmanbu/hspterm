@@ -27,7 +27,12 @@ class ExplorerDragHandoff<T> extends StatefulWidget {
     required this.child,
   });
   final bool enabled;
-  final T Function(ExplorerDragLease) capture;
+
+  /// Returns the gesture source, or null to decline the capture. A declined
+  /// capture (e.g. the row's inline rename editor owns the pointer) owns no
+  /// lease, so a later move to the window edge can never cancel the pointer
+  /// into a native drag.
+  final T? Function(ExplorerDragLease) capture;
   final Future<void> Function(T, Offset) onLeave;
   final Widget child;
   @override
@@ -56,7 +61,11 @@ class _ExplorerDragHandoffState<T> extends State<ExplorerDragHandoff<T>> {
             if (event.buttons != kPrimaryMouseButton) return;
             _active?.lease.release();
             final lease = ExplorerDragLease(event.pointer, event.position);
-            _active = (lease: lease, source: widget.capture(lease));
+            final source = widget.capture(lease);
+            // An editing guard (or any declined capture) leaves no lease
+            // ownership: this pointer can never reach the native handoff.
+            if (source == null) return;
+            _active = (lease: lease, source: source);
           },
           onPointerMove: (event) {
             final active = _active;

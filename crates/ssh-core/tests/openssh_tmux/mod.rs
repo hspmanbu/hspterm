@@ -39,6 +39,7 @@ async fn remembered_creation_receipts_prove_the_new_session_and_name_collision_n
             .send(Choice::CreateRemembered {
                 name: name.into(),
                 lock_size: true,
+                ensure_locale: false,
             })
             .ok()
             .unwrap();
@@ -98,6 +99,7 @@ async fn remembered_creation_receipts_prove_the_new_session_and_name_collision_n
             readonly: false,
             takeover_confirmed: true,
             lock_size: false,
+            ensure_locale: false,
         })
         .ok()
         .unwrap();
@@ -143,6 +145,7 @@ async fn clean_tmux_exit_restores_shell_on_original_transport_and_keeps_sftp() {
             .send(Choice::Create {
                 name: "hspterm1".into(),
                 lock_size: true,
+                ensure_locale: false,
             })
             .ok()
             .unwrap();
@@ -323,6 +326,7 @@ impl Fixture {
                 readonly,
                 takeover_confirmed: !readonly,
                 lock_size: false,
+                ensure_locale: false,
             })
             .ok()
             .unwrap();
@@ -429,6 +433,7 @@ async fn cancel_and_unconfirmed_takeover_never_fall_back_to_shell_and_user_wait_
                     readonly: false,
                     takeover_confirmed: false,
                     lock_size: false,
+                    ensure_locale: false,
                 })
                 .ok()
                 .unwrap();

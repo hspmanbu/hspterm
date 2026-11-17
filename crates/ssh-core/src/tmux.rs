@@ -35,6 +35,10 @@ pub enum TmuxError {
         "服务器未向tmux新建通道提供已启用的Agent环境；未新建会话，可改用现有会话或关闭本次新建恢复"
     )]
     AgentEnvironment,
+    #[error(
+        "远端locale自动补齐未成功（未向已运行的Shell注入内容）；可重试连接，或在tmux选择中取消勾选locale补齐"
+    )]
+    EnsureLocale,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ListingIssue {
@@ -90,18 +94,21 @@ pub enum Choice {
     Create {
         name: String,
         lock_size: bool,
+        ensure_locale: bool,
     },
     /// Explicitly create with a dedicated ACK carrying the new identity before
     /// PTY attachment. Cancellation after that ACK leaves the new session.
     CreateRemembered {
         name: String,
         lock_size: bool,
+        ensure_locale: bool,
     },
     Attach {
         id: String,
         readonly: bool,
         takeover_confirmed: bool,
         lock_size: bool,
+        ensure_locale: bool,
     },
 }
 pub struct Request {
@@ -128,6 +135,10 @@ pub(crate) struct Startup {
     pub readonly: bool,
     pub session: Option<Identity>,
     pub deferred_create: Option<String>,
+    /// Explicit dialog consent to append the UTF-8 locale exports to the
+    /// remote ~/.bashrc before any pane starts (and, on attach, to publish
+    /// them into the tmux server-global environment via the command queue).
+    pub ensure_locale: bool,
 }
 struct Reply {
     output: Vec<u8>,
@@ -218,6 +229,51 @@ async fn exec_routed(
         .await
 }
 
+/// Idempotent remote locale completion. Checks ~/.bashrc with grep -qF for
+/// both UTF-8 exports, appends only the missing ones (printf >>) under the
+/// marker comment, then re-verifies. The marker doubles as a concurrent-run
+/// guard: when it is already present, appends are skipped so two racing
+/// connections cannot double-write. Output is a strict summary token; the
+/// exit status is nonzero unless both exports verify at the end.
+const ENSURE_LOCALE: &str = r#"f="$HOME/.bashrc"; m='# added by hspterm (LANG/LC_ALL)'
+[ -f "$f" ] || : > "$f"
+lang=0; lc=0
+grep -qF 'export LANG=en_US.UTF-8' "$f" 2>/dev/null && lang=1
+grep -qF 'export LC_ALL=en_US.UTF-8' "$f" 2>/dev/null && lc=1
+if [ "$lang" = 0 ] || [ "$lc" = 0 ]; then
+  if ! grep -qF "$m" "$f" 2>/dev/null; then
+    {
+      printf '\n%s\n' "$m"
+      [ "$lang" = 0 ] && printf 'export LANG=en_US.UTF-8\n'
+      [ "$lc" = 0 ] && printf 'export LC_ALL=en_US.UTF-8\n'
+      :
+    } >> "$f"
+  fi
+fi
+lang=0; lc=0
+grep -qF 'export LANG=en_US.UTF-8' "$f" 2>/dev/null && lang=1
+grep -qF 'export LC_ALL=en_US.UTF-8' "$f" 2>/dev/null && lc=1
+printf 'HSPTERM_LOCALE %s %s\n' "$lang" "$lc"
+[ "$lang" = 1 ] && [ "$lc" = 1 ]"#;
+
+/// Append missing UTF-8 locale exports to the remote ~/.bashrc on a dedicated
+/// bounded exec channel, before any tmux server/pane starts. Never touches a
+/// live PTY: a newly created pane's shell reads the updated file by itself;
+/// attached sessions receive the server-global environment through the tmux
+/// command queue instead (see guarded_attach_options). The user explicitly
+/// consented in the tmux dialog, so any failure here is a hard, explicit
+/// startup error — never a silent fallback.
+pub(crate) async fn ensure_locale(
+    handle: &client::Handle<Client>,
+    budget: &mut Budget,
+) -> Result<(), SshError> {
+    let reply = exec(handle, budget, ENSURE_LOCALE).await?;
+    if reply.status != 0 || reply.output != b"HSPTERM_LOCALE 1 1\n" {
+        return Err(TmuxError::EnsureLocale.into());
+    }
+    Ok(())
+}
+
 fn version(bytes: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(bytes).ok()?.trim();
     if text.len() > 64 || text.chars().any(char::is_control) {
@@ -305,10 +361,19 @@ fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 fn select(listing: &Listing, choice: Choice) -> Result<Startup, SshError> {
-    let (command, lock_size, readonly, session) = match choice {
+    let (command, lock_size, readonly, session, ensure_locale) = match choice {
         Choice::Cancel => return Err(SshError::Cancelled),
-        Choice::Shell => (None, false, false, None),
-        Choice::Create { name, lock_size } | Choice::CreateRemembered { name, lock_size } => {
+        Choice::Shell => (None, false, false, None, false),
+        Choice::Create {
+            name,
+            lock_size,
+            ensure_locale,
+        }
+        | Choice::CreateRemembered {
+            name,
+            lock_size,
+            ensure_locale,
+        } => {
             if listing.version.is_none()
                 || name.is_empty()
                 || name.len() > 64
@@ -326,6 +391,7 @@ fn select(listing: &Listing, choice: Choice) -> Result<Startup, SshError> {
                 lock_size,
                 false,
                 None,
+                ensure_locale,
             )
         }
         Choice::Attach {
@@ -333,6 +399,7 @@ fn select(listing: &Listing, choice: Choice) -> Result<Startup, SshError> {
             readonly,
             takeover_confirmed,
             lock_size,
+            ensure_locale,
         } => {
             let session = listing
                 .sessions
@@ -354,8 +421,14 @@ fn select(listing: &Listing, choice: Choice) -> Result<Startup, SshError> {
             // command queue before attach; do not check then blindly attach via
             // a second independent shell command. IDs/numbers are validated.
             let identity = session.identity();
-            let command = guarded_attach_options(&identity, &action, readonly);
-            (Some(command), lock_size, readonly, Some(identity))
+            let command = guarded_attach_options(&identity, &action, readonly, ensure_locale);
+            (
+                Some(command),
+                lock_size,
+                readonly,
+                Some(identity),
+                ensure_locale,
+            )
         }
     };
     Ok(Startup {
@@ -364,21 +437,35 @@ fn select(listing: &Listing, choice: Choice) -> Result<Startup, SshError> {
         readonly,
         session,
         deferred_create: None,
+        ensure_locale,
     })
 }
-fn guarded_attach(identity: &Identity, action: &str) -> String {
-    guarded_attach_options(identity, action, false)
+fn guarded_attach(identity: &Identity, action: &str, ensure_locale: bool) -> String {
+    guarded_attach_options(identity, action, false, ensure_locale)
 }
-fn guarded_attach_options(identity: &Identity, action: &str, readonly: bool) -> String {
+fn guarded_attach_options(
+    identity: &Identity,
+    action: &str,
+    readonly: bool,
+    ensure_locale: bool,
+) -> String {
     let target = quote(&format!("{}:", identity.id));
+    // Explicit dialog consent: publish the UTF-8 locale into the tmux
+    // server-global environment inside the SAME command queue that validates
+    // the identity and attaches — a live PTY never receives a `source`.
+    let locale = if ensure_locale {
+        "set-environment -g LANG en_US.UTF-8 ; set-environment -g LC_ALL en_US.UTF-8 ; "
+    } else {
+        ""
+    };
     // Capability probe, not a version guess. Unknown options leave the original
     // attach untouched. Never change server defaults or a read-only session.
     let compatible = if readonly {
-        action.to_owned()
+        format!("{locale}{action}")
     } else {
         let probe = format!("tmux show-window-options -t {target} pane-scrollbars >/dev/null 2>&1");
         let enabled = format!(
-            "set-window-option -t {target} pane-scrollbars on ; set-window-option -t {target} pane-scrollbars-position right ; set-option -t {} mouse on ; {action}",
+            "{locale}set-window-option -t {target} pane-scrollbars on ; set-window-option -t {target} pane-scrollbars-position right ; set-option -t {} mouse on ; {action}",
             quote(&identity.id)
         );
         format!(
@@ -532,6 +619,7 @@ pub(crate) async fn complete_creation(
         startup.command = Some(guarded_attach(
             &identity,
             &format!("attach-session -t {}", quote(&identity.id)),
+            startup.ensure_locale,
         ));
         startup.session = Some(identity);
     }
@@ -561,13 +649,30 @@ mod tests {
             server_pid: 123,
             created: 456,
         };
-        let command = guarded_attach_options(&id, "attach-session -t '$12'", false);
+        let command = guarded_attach_options(&id, "attach-session -t '$12'", false, false);
         assert!(command.contains("show-window-options"));
         assert!(command.contains("pane-scrollbars on"));
         assert!(!command.contains("set-option -g"));
-        let readonly = guarded_attach_options(&id, "attach-session -r -t '$12'", true);
+        assert!(!command.contains("set-environment"));
+        let readonly = guarded_attach_options(&id, "attach-session -r -t '$12'", true, false);
         assert!(!readonly.contains("pane-scrollbars"));
         assert!(readonly.contains("attach-session -r"));
+        // Explicit consent puts the server-global locale publish into the
+        // SAME identity-guarded command queue, ahead of the attach action —
+        // for both the capability-gated and the read-only branch.
+        let with_locale = guarded_attach_options(&id, "attach-session -t '$12'", false, true);
+        assert!(with_locale.contains("set-environment -g LANG en_US.UTF-8"));
+        assert!(with_locale.contains("set-environment -g LC_ALL en_US.UTF-8"));
+        assert!(
+            with_locale.find("set-environment").unwrap()
+                < with_locale.find("attach-session").unwrap()
+        );
+        let readonly_locale = guarded_attach_options(&id, "attach-session -r -t '$12'", true, true);
+        assert!(readonly_locale.contains("set-environment -g LC_ALL en_US.UTF-8"));
+        assert!(
+            readonly_locale.find("set-environment").unwrap()
+                < readonly_locale.find("attach-session -r").unwrap()
+        );
     }
     #[test]
     fn remembered_identity_ignores_rename_but_rejects_reused_session_id_or_restarted_server() {
@@ -608,7 +713,7 @@ mod tests {
         let with_agent = create_command("fixture", (80, 24), true);
         assert!(with_agent.contains("[ ! -S \"$SSH_AUTH_SOCK\" ]"));
         assert!(with_agent.find("exit 73").unwrap() < with_agent.find("new-session").unwrap());
-        let attach = guarded_attach(&identity, "attach-session -t '$12'");
+        let attach = guarded_attach(&identity, "attach-session -t '$12'", false);
         assert!(attach.contains("#{pid},123"));
         assert!(attach.contains("#{session_created},456"));
         assert!(!attach.contains(" -d"));
@@ -642,7 +747,8 @@ mod tests {
                     id: "$12".into(),
                     readonly: false,
                     takeover_confirmed: false,
-                    lock_size: false
+                    lock_size: false,
+                    ensure_locale: false,
                 }
             )
             .is_err()
@@ -654,7 +760,8 @@ mod tests {
                     id: "$13".into(),
                     readonly: true,
                     takeover_confirmed: false,
-                    lock_size: false
+                    lock_size: false,
+                    ensure_locale: false,
                 }
             )
             .is_err()
@@ -666,6 +773,7 @@ mod tests {
                 readonly: true,
                 takeover_confirmed: false,
                 lock_size: true,
+                ensure_locale: false,
             },
         )
         .unwrap();
@@ -678,13 +786,15 @@ mod tests {
                 .contains("attach-session -r")
         );
         assert!(viewer.command.as_ref().unwrap().contains("session_created"));
+        assert!(!viewer.ensure_locale);
         for name in ["", ";x", "a:b", "$(bad)", "quote'", "line\nnext"] {
             assert!(
                 select(
                     &l,
                     Choice::Create {
                         name: name.into(),
-                        lock_size: false
+                        lock_size: false,
+                        ensure_locale: false,
                     }
                 )
                 .is_err()
@@ -695,10 +805,44 @@ mod tests {
             Choice::Create {
                 name: "hspterm_test-1".into(),
                 lock_size: false,
+                ensure_locale: false,
             },
         )
         .unwrap();
         assert!(!new.command.unwrap().contains(" -A"));
+        // The consent flag survives selection on both paths: the exec runs
+        // before any pane starts (create), and the attach command carries the
+        // server-global publish inside the identity-guarded queue.
+        let localized = select(
+            &l,
+            Choice::Create {
+                name: "hspterm_test-2".into(),
+                lock_size: false,
+                ensure_locale: true,
+            },
+        )
+        .unwrap();
+        assert!(localized.ensure_locale);
+        assert!(localized.command.as_ref().unwrap().contains("new-session"));
+        let attached = select(
+            &l,
+            Choice::Attach {
+                id: "$12".into(),
+                readonly: true,
+                takeover_confirmed: false,
+                lock_size: false,
+                ensure_locale: true,
+            },
+        )
+        .unwrap();
+        assert!(attached.ensure_locale);
+        assert!(
+            attached
+                .command
+                .as_ref()
+                .unwrap()
+                .contains("set-environment -g LC_ALL en_US.UTF-8")
+        );
         assert!(select(&l, Choice::Cancel).is_err());
         assert!(select(&l, Choice::Shell).unwrap().command.is_none());
     }

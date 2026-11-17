@@ -359,7 +359,11 @@ class LocalEditSession extends ChangeNotifier {
   }
 
   final int _native;
-  final int _originGeneration;
+
+  /// Generation frozen when the download started. Mutable: a reconnect moves
+  /// the terminal generation, and a retry rebases onto the live one after the
+  /// fresh remote stat still matches the download baseline (below).
+  int _originGeneration;
   int _originSize;
   int? _originMtime;
   final LocalEditGateway _gateway;
@@ -402,6 +406,11 @@ class LocalEditSession extends ChangeNotifier {
   Future<void> _inFlightUpload = Future.value();
   Future<void> _initialization = Future.value();
   Future<void>? _inFlightCheck;
+
+  /// Remote sibling temp (.hspterm-edit-*) left behind when an upload failed
+  /// and its cleanup failed too. A later attempt removes it best-effort with
+  /// the then-current generation; failure notices keep disclosing the name.
+  String? _pendingTemp;
 
   Directory get _home => _file.parent;
   bool get conflicted => _conflicted;
@@ -606,15 +615,25 @@ class LocalEditSession extends ChangeNotifier {
       final current = _session.controller.id == _native
           ? _session.controller.generation
           : null;
-      if (current == null ||
-          !_session.controller.connected ||
-          current != _originGeneration) {
+      if (current == null || !_session.controller.connected) {
         _setStatus(LocalEditStatus.failed);
         _noticeAndLog(
           '本地编辑上传暂停：原 SSH 会话已断开；修改已保留，可稍后重试',
           AppLogEvent.editUploadFailed,
         );
         return;
+      }
+      // A previous attempt may have left a remote sibling temp behind. A
+      // reconnect moved the generation; clean it best-effort with whichever
+      // generation is live now, and keep disclosing it on failure.
+      final staleTemp = _pendingTemp;
+      if (staleTemp != null) {
+        try {
+          await _gateway.removeFile(_native, current, staleTemp);
+          _pendingTemp = null;
+        } catch (_) {
+          // Cleanup failed again; the notice below keeps disclosing it.
+        }
       }
       final remote = await _gateway.stat(_native, current, _remotePath);
       if (remote.size != _originSize ||
@@ -625,6 +644,18 @@ class LocalEditSession extends ChangeNotifier {
         _setStatus(LocalEditStatus.conflicted);
         _noticeAndLog('远端文件已被修改，本地编辑未覆盖；请手动处理后重试', AppLogEvent.editConflict);
         return;
+      }
+      if (current != _originGeneration) {
+        // Same terminal reconnected: the fresh stat still matches the frozen
+        // baseline, so the frozen generation is rebased onto the live one.
+        // The per-connection overwrite consent was keyed on the old
+        // generation and expires with this rebase (it is asked again).
+        _originGeneration = current;
+        AppRunLog.instance.event(
+          AppLogEvent.editBaselineRebase,
+          terminal: _native,
+          generation: current,
+        );
       }
       // Upload to a sibling temp name, then replace the original so a
       // mid-upload failure never destroys the remote file. The local file
@@ -637,14 +668,15 @@ class LocalEditSession extends ChangeNotifier {
       final uploadedDigest = await digestOf(snapshot);
       final uploadedSize = await snapshot.length();
       _setStatus(LocalEditStatus.uploading);
-      await _gateway.uploadFrom(
-        _native,
-        current,
-        tempName,
-        snapshot,
-        onProgress: _setProgress,
-      );
+      var replaced = false;
       try {
+        await _gateway.uploadFrom(
+          _native,
+          current,
+          tempName,
+          snapshot,
+          onProgress: _setProgress,
+        );
         final outcome = await _gateway.replaceAtomic(
           _native,
           current,
@@ -711,16 +743,21 @@ class LocalEditSession extends ChangeNotifier {
             _remotePath,
           );
         }
-      } catch (error) {
-        // The original remote file is untouched, but the temp sibling would
-        // otherwise linger forever; remove it best-effort before rethrowing.
-        try {
-          await _gateway.removeFile(_native, current, tempName);
-        } catch (_) {
-          // Cleanup itself failed; the upload error below still reports the
-          // original failure so the user can retry.
+        replaced = true;
+      } finally {
+        if (!replaced) {
+          // The original remote file is untouched, but the temp sibling
+          // would otherwise linger forever; remove it best-effort before
+          // the error surfaces (this also covers cancelled and conflicted
+          // returns). When even the cleanup fails, record the name: a later
+          // attempt cleans it with its then-current generation and the
+          // failure notice keeps disclosing it.
+          try {
+            await _gateway.removeFile(_native, current, tempName);
+          } catch (_) {
+            _pendingTemp = tempName;
+          }
         }
-        rethrow;
       }
       _originSize = uploadedSize;
       final after = await _gateway.stat(_native, current, _remotePath);
@@ -738,8 +775,10 @@ class LocalEditSession extends ChangeNotifier {
       );
     } catch (error) {
       _setStatus(LocalEditStatus.failed);
+      final leftover = _pendingTemp;
       _noticeAndLog(
-        '本地编辑上传失败：修改已保留，可稍后重试',
+        '本地编辑上传失败：修改已保留，可稍后重试'
+        '${leftover == null ? '' : '；远端遗留临时文件 $leftover 未清理，可手动删除'}',
         AppLogEvent.editUploadFailed,
         error: error,
       );

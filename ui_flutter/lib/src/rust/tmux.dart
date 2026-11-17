@@ -10,6 +10,10 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 class TmuxPrompt {
   final bool? readonlyDefault;
   final bool? restoreAvailable;
+
+  /// Remembered per-host locale consent for the dialog checkbox; None is
+  /// never sent (false when the target cannot remember preferences).
+  final bool? ensureLocale;
   final int requestId;
   final int generation;
   final int columns;
@@ -21,6 +25,7 @@ class TmuxPrompt {
   const TmuxPrompt({
     this.readonlyDefault,
     this.restoreAvailable,
+    this.ensureLocale,
     required this.requestId,
     required this.generation,
     required this.columns,
@@ -34,6 +39,7 @@ class TmuxPrompt {
   int get hashCode =>
       readonlyDefault.hashCode ^
       restoreAvailable.hashCode ^
+      ensureLocale.hashCode ^
       requestId.hashCode ^
       generation.hashCode ^
       columns.hashCode ^
@@ -49,6 +55,7 @@ class TmuxPrompt {
           runtimeType == other.runtimeType &&
           readonlyDefault == other.readonlyDefault &&
           restoreAvailable == other.restoreAvailable &&
+          ensureLocale == other.ensureLocale &&
           requestId == other.requestId &&
           generation == other.generation &&
           columns == other.columns &&
@@ -69,6 +76,10 @@ class TmuxSelection {
   final bool takeoverConfirmed;
   final bool lockSize;
 
+  /// Explicit dialog consent to append the UTF-8 locale exports to the
+  /// remote ~/.bashrc (and, on attach, the tmux server-global environment).
+  final bool? ensureLocale;
+
   const TmuxSelection({
     this.restoreOnReconnect,
     required this.kind,
@@ -77,6 +88,7 @@ class TmuxSelection {
     required this.readonly,
     required this.takeoverConfirmed,
     required this.lockSize,
+    this.ensureLocale,
   });
 
   @override
@@ -87,7 +99,8 @@ class TmuxSelection {
       sessionId.hashCode ^
       readonly.hashCode ^
       takeoverConfirmed.hashCode ^
-      lockSize.hashCode;
+      lockSize.hashCode ^
+      ensureLocale.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -100,7 +113,8 @@ class TmuxSelection {
           sessionId == other.sessionId &&
           readonly == other.readonly &&
           takeoverConfirmed == other.takeoverConfirmed &&
-          lockSize == other.lockSize;
+          lockSize == other.lockSize &&
+          ensureLocale == other.ensureLocale;
 }
 
 class TmuxSessionInfo {

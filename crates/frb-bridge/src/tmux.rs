@@ -19,6 +19,9 @@ pub struct TmuxSessionInfo {
 pub struct TmuxPrompt {
     pub readonly_default: Option<bool>,
     pub restore_available: Option<bool>,
+    /// Remembered per-host locale consent for the dialog checkbox; None is
+    /// never sent (false when the target cannot remember preferences).
+    pub ensure_locale: Option<bool>,
     pub request_id: u32,
     pub generation: u64,
     pub columns: u16,
@@ -36,9 +39,13 @@ pub struct TmuxSelection {
     pub readonly: bool,
     pub takeover_confirmed: bool,
     pub lock_size: bool,
+    /// Explicit dialog consent to append the UTF-8 locale exports to the
+    /// remote ~/.bashrc (and, on attach, the tmux server-global environment).
+    pub ensure_locale: Option<bool>,
 }
 impl TmuxSelection {
     fn choice(self) -> Result<Choice> {
+        let ensure_locale = self.ensure_locale == Some(true);
         Ok(match self.kind {
             0 => Choice::Cancel,
             1 => {
@@ -58,11 +65,13 @@ impl TmuxSelection {
                     Choice::CreateRemembered {
                         name,
                         lock_size: self.lock_size,
+                        ensure_locale,
                     }
                 } else {
                     Choice::Create {
                         name,
                         lock_size: self.lock_size,
+                        ensure_locale,
                     }
                 }
             }
@@ -73,6 +82,7 @@ impl TmuxSelection {
                     readonly: self.readonly,
                     takeover_confirmed: self.takeover_confirmed,
                     lock_size: self.lock_size,
+                    ensure_locale,
                 }
             }
             _ => anyhow::bail!("tmux操作类型无效"),
@@ -244,6 +254,11 @@ impl TmuxRegistry {
                     true
                 }),
                 restore_available: Some(p.allow_restore),
+                ensure_locale: Some(if p.allow_restore {
+                    hspterm_storage_sync::tmux_locale_preferences::load(v, &p.profile_id)?
+                } else {
+                    false
+                }),
                 request_id: p.token,
                 generation: p.generation,
                 columns: p.request.columns,
@@ -282,6 +297,7 @@ impl TmuxRegistry {
     }
     pub fn answer(&self, token: u32, generation: u64, selection: TmuxSelection) -> Result<()> {
         let readonly = (selection.kind == 3).then_some(selection.readonly);
+        let ensure_locale = selection.ensure_locale == Some(true);
         let restore = selection.restore_on_reconnect.unwrap_or(false);
         let choice = selection.choice()?;
         with_vault(|v| {
@@ -314,6 +330,7 @@ impl TmuxRegistry {
                         readonly,
                         takeover_confirmed,
                         lock_size,
+                        ..
                     } = &choice
                     else {
                         anyhow::bail!("该操作不能记忆tmux恢复目标");
@@ -347,6 +364,15 @@ impl TmuxRegistry {
                 && p.allow_restore
             {
                 hspterm_storage_sync::tmux_preferences::save(v, &p.profile_id, readonly)?;
+            }
+            // The locale checkbox is remembered per host on every answer of a
+            // savable target, so the next dialog starts from the last consent.
+            if p.allow_restore {
+                hspterm_storage_sync::tmux_locale_preferences::save(
+                    v,
+                    &p.profile_id,
+                    ensure_locale,
+                )?;
             }
             let p = guard.take().context("原tmux选择已结束")?;
             drop(guard);
@@ -474,6 +500,10 @@ impl TmuxOwner {
                             readonly: remembered.readonly,
                             takeover_confirmed: remembered.takeover_confirmed,
                             lock_size: remembered.lock_size,
+                            // Auto-restore replays a previously confirmed
+                            // identity only; remote locale changes always
+                            // need the dialog's explicit checkbox consent.
+                            ensure_locale: false,
                         })
                         .map_err(|_| anyhow::anyhow!("原tmux恢复请求已取消"))?;
                     self.registry.memory.lock().selected = Some(Selected {
@@ -572,6 +602,7 @@ mod tests {
             readonly: false,
             takeover_confirmed: false,
             lock_size: false,
+            ensure_locale: None,
         }
     }
     fn listed_request(pid: u32, created: u64) -> (Request, oneshot::Receiver<Choice>) {
@@ -616,6 +647,7 @@ mod tests {
             readonly: true,
             takeover_confirmed: false,
             lock_size: true,
+            ensure_locale: None,
         }
     }
     #[tokio::test]
@@ -653,6 +685,7 @@ mod tests {
                     readonly: false,
                     takeover_confirmed: false,
                     lock_size: false,
+                    ensure_locale: None,
                 },
             )
             .unwrap();

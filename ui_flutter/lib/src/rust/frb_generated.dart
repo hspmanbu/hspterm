@@ -12413,18 +12413,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TmuxPrompt dco_decode_tmux_prompt(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return TmuxPrompt(
       readonlyDefault: dco_decode_opt_box_autoadd_bool(arr[0]),
       restoreAvailable: dco_decode_opt_box_autoadd_bool(arr[1]),
-      requestId: dco_decode_u_32(arr[2]),
-      generation: dco_decode_CastedPrimitive_u_64(arr[3]),
-      columns: dco_decode_u_16(arr[4]),
-      rows: dco_decode_u_16(arr[5]),
-      version: dco_decode_opt_String(arr[6]),
-      issue: dco_decode_opt_String(arr[7]),
-      sessions: dco_decode_list_tmux_session_info(arr[8]),
+      ensureLocale: dco_decode_opt_box_autoadd_bool(arr[2]),
+      requestId: dco_decode_u_32(arr[3]),
+      generation: dco_decode_CastedPrimitive_u_64(arr[4]),
+      columns: dco_decode_u_16(arr[5]),
+      rows: dco_decode_u_16(arr[6]),
+      version: dco_decode_opt_String(arr[7]),
+      issue: dco_decode_opt_String(arr[8]),
+      sessions: dco_decode_list_tmux_session_info(arr[9]),
     );
   }
 
@@ -12432,8 +12433,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TmuxSelection dco_decode_tmux_selection(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return TmuxSelection(
       restoreOnReconnect: dco_decode_opt_box_autoadd_bool(arr[0]),
       kind: dco_decode_u_8(arr[1]),
@@ -12442,6 +12443,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       readonly: dco_decode_bool(arr[4]),
       takeoverConfirmed: dco_decode_bool(arr[5]),
       lockSize: dco_decode_bool(arr[6]),
+      ensureLocale: dco_decode_opt_box_autoadd_bool(arr[7]),
     );
   }
 
@@ -14901,6 +14903,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_readonlyDefault = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_restoreAvailable = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_ensureLocale = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_requestId = sse_decode_u_32(deserializer);
     var var_generation = sse_decode_CastedPrimitive_u_64(deserializer);
     var var_columns = sse_decode_u_16(deserializer);
@@ -14911,6 +14914,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return TmuxPrompt(
       readonlyDefault: var_readonlyDefault,
       restoreAvailable: var_restoreAvailable,
+      ensureLocale: var_ensureLocale,
       requestId: var_requestId,
       generation: var_generation,
       columns: var_columns,
@@ -14931,6 +14935,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_readonly = sse_decode_bool(deserializer);
     var var_takeoverConfirmed = sse_decode_bool(deserializer);
     var var_lockSize = sse_decode_bool(deserializer);
+    var var_ensureLocale = sse_decode_opt_box_autoadd_bool(deserializer);
     return TmuxSelection(
       restoreOnReconnect: var_restoreOnReconnect,
       kind: var_kind,
@@ -14939,6 +14944,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       readonly: var_readonly,
       takeoverConfirmed: var_takeoverConfirmed,
       lockSize: var_lockSize,
+      ensureLocale: var_ensureLocale,
     );
   }
 
@@ -17010,6 +17016,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_opt_box_autoadd_bool(self.readonlyDefault, serializer);
     sse_encode_opt_box_autoadd_bool(self.restoreAvailable, serializer);
+    sse_encode_opt_box_autoadd_bool(self.ensureLocale, serializer);
     sse_encode_u_32(self.requestId, serializer);
     sse_encode_CastedPrimitive_u_64(self.generation, serializer);
     sse_encode_u_16(self.columns, serializer);
@@ -17029,6 +17036,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.readonly, serializer);
     sse_encode_bool(self.takeoverConfirmed, serializer);
     sse_encode_bool(self.lockSize, serializer);
+    sse_encode_opt_box_autoadd_bool(self.ensureLocale, serializer);
   }
 
   @protected

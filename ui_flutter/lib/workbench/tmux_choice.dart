@@ -90,6 +90,8 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
       : 1;
   late String? session = widget.prompt.sessions.firstOrNull?.id;
   late bool readonly = widget.prompt.readonlyDefault ?? true;
+  // Per-host remembered consent (device-local); unchecked on first use.
+  late bool ensureLocale = widget.prompt.ensureLocale ?? false;
   bool lockSize = false, restore = false;
   @override
   void dispose() {
@@ -228,6 +230,21 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
                   onChanged: (value) =>
                       setState(() => lockSize = value == true),
                 ),
+              if (kind != 1)
+                CheckboxListTile(
+                  key: const ValueKey('tmux-ensure-locale'),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('自动补齐远端 locale（默认关闭）'),
+                  subtitle: const Text(
+                    '将修改远端 ~/.bashrc：缺哪条补哪条地追加备注行'
+                    '“# added by hspterm (LANG/LC_ALL)”及 export LANG/LC_ALL=en_US.UTF-8；'
+                    '附着时在 tmux 全局环境同步设置。不向已运行的Shell注入内容。勾选后按主机记住。',
+                  ),
+                  value: ensureLocale,
+                  onChanged: (value) =>
+                      setState(() => ensureLocale = value == true),
+                ),
               const SizedBox(height: 8),
               const Text('取消不会启动普通Shell或新建其他连接。断线后始终需要手动重连；未启用恢复或身份发生变化时重新选择。'),
             ],
@@ -256,6 +273,7 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
                       readonly: kind == 3 && readonly,
                       takeoverConfirmed: kind == 3 && !readonly,
                       lockSize: kind != 1 && lockSize,
+                      ensureLocale: kind != 1 && ensureLocale,
                     ),
                   );
                 },

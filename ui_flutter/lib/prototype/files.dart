@@ -1310,7 +1310,10 @@ class _FilesPanelState extends State<FilesPanel> {
       setState(() => selected.removeAll(result.succeeded.toSet()));
     }
     if (result.fullySucceeded) {
-      _reportDeleteNotice('已删除 ${result.succeeded.length} 项', AppNoticeLevel.success);
+      _reportDeleteNotice(
+        '已删除 ${result.succeeded.length} 项',
+        AppNoticeLevel.success,
+      );
       return;
     }
     _reportPartialDelete(result.succeeded.length, result.failed);
@@ -1322,7 +1325,12 @@ class _FilesPanelState extends State<FilesPanel> {
     if (mounted) {
       notice(context, message, level: level);
     } else {
-      quietNoticeNotifier.value = QuietNotice(message, level, DateTime.now(), null);
+      quietNoticeNotifier.value = QuietNotice(
+        message,
+        level,
+        DateTime.now(),
+        null,
+      );
     }
   }
 
@@ -1345,7 +1353,10 @@ class _FilesPanelState extends State<FilesPanel> {
         context,
         message,
         level: AppNoticeLevel.warning,
-        action: SnackBarAction(label: '查看明细', onPressed: _openDeleteFailuresDialog),
+        action: SnackBarAction(
+          label: '查看明细',
+          onPressed: _openDeleteFailuresDialog,
+        ),
       );
     } else {
       quietNoticeNotifier.value = QuietNotice(
@@ -3003,77 +3014,110 @@ class _FilesPanelState extends State<FilesPanel> {
                                                                 ),
                                                         ),
                                                       );
-                                                      row = Draggable<RemoteDrag>(
-                                                        // Secondary clicks belong to the file menu;
-                                                        // never enter a drag arena for that button.
-                                                        allowedButtonsFilter:
-                                                            (buttons) =>
-                                                                buttons ==
-                                                                kPrimaryMouseButton,
-                                                        data: RemoteDrag(
-                                                          p.id,
-                                                          p.path,
-                                                          selected.contains(
-                                                                f.id,
-                                                              )
-                                                              ? visible
-                                                                    .where(
-                                                                      (
-                                                                        f,
-                                                                      ) => selected
-                                                                          .contains(
-                                                                            f.id,
-                                                                          ),
-                                                                    )
-                                                                    .toList()
-                                                              : [f],
-                                                          generation: p
-                                                              .connectionGeneration,
-                                                        ),
-                                                        feedback:
-                                                            const SizedBox.shrink(),
-                                                        child: row,
-                                                      );
-                                                      final live = m;
-                                                      if (live
-                                                              is LiveWorkbenchModel &&
-                                                          p is LiveTerminalSession) {
-                                                        row = ExplorerExportDrag(
-                                                          model: live,
-                                                          source:
-                                                              p as LiveTerminalSession,
-                                                          selection: () =>
-                                                              selected.contains(
-                                                                f.id,
-                                                              )
-                                                              ? visible
-                                                                    .where(
-                                                                      (
-                                                                        entry,
-                                                                      ) => selected
-                                                                          .contains(
-                                                                            entry.id,
-                                                                          ),
-                                                                    )
-                                                                    .toList()
-                                                              : [f],
+                                                      // Inline rename editing owns
+                                                      // this row: none of the three
+                                                      // drag wrappers may sit above
+                                                      // the name editor. The row's
+                                                      // immediate multi-drag accepts
+                                                      // at 1.0 px and would beat the
+                                                      // text field's 2.0 px pan slop
+                                                      // during slow drag-selects,
+                                                      // and an outer handoff could
+                                                      // cancel the pointer into a
+                                                      // native drag at the window
+                                                      // edge. Never toggle the
+                                                      // Draggable properties at
+                                                      // runtime instead: the SDK's
+                                                      // _DraggableState does not
+                                                      // resync them in
+                                                      // didUpdateWidget.
+                                                      Widget item;
+                                                      if (editing == f.id) {
+                                                        item = row;
+                                                      } else {
+                                                        row = Draggable<RemoteDrag>(
+                                                          // Secondary clicks belong to the file menu;
+                                                          // never enter a drag arena for that button.
+                                                          allowedButtonsFilter:
+                                                              (buttons) =>
+                                                                  buttons ==
+                                                                  kPrimaryMouseButton,
+                                                          data: RemoteDrag(
+                                                            p.id,
+                                                            p.path,
+                                                            selected.contains(
+                                                                  f.id,
+                                                                )
+                                                                ? visible
+                                                                      .where(
+                                                                        (
+                                                                          f,
+                                                                        ) => selected
+                                                                            .contains(
+                                                                              f.id,
+                                                                            ),
+                                                                      )
+                                                                      .toList()
+                                                                : [f],
+                                                            generation: p
+                                                                .connectionGeneration,
+                                                          ),
+                                                          feedback:
+                                                              const SizedBox.shrink(),
                                                           child: row,
                                                         );
+                                                        final live = m;
+                                                        if (live
+                                                                is LiveWorkbenchModel &&
+                                                            p is LiveTerminalSession) {
+                                                          row = ExplorerExportDrag(
+                                                            model: live,
+                                                            source:
+                                                                p as LiveTerminalSession,
+                                                            selection: () =>
+                                                                selected
+                                                                    .contains(
+                                                                      f.id,
+                                                                    )
+                                                                ? visible
+                                                                      .where(
+                                                                        (
+                                                                          entry,
+                                                                        ) => selected.contains(
+                                                                          entry
+                                                                              .id,
+                                                                        ),
+                                                                      )
+                                                                      .toList()
+                                                                : [f],
+                                                            // Belt and braces with the
+                                                            // wrap skip above: a
+                                                            // captured lease for an
+                                                            // editing row is declined,
+                                                            // so no native handoff can
+                                                            // cancel its pointer.
+                                                            canCapture: () =>
+                                                                editing != f.id,
+                                                            child: row,
+                                                          );
+                                                        }
+                                                        item = f.folder
+                                                            ? KeyedSubtree(
+                                                                key: _folderBounds
+                                                                    .putIfAbsent(
+                                                                      f.id,
+                                                                      GlobalKey
+                                                                          .new,
+                                                                    ),
+                                                                child:
+                                                                    dropTarget(
+                                                                      folder: f,
+                                                                      child:
+                                                                          row,
+                                                                    ),
+                                                              )
+                                                            : row;
                                                       }
-                                                      Widget item = f.folder
-                                                          ? KeyedSubtree(
-                                                              key: _folderBounds
-                                                                  .putIfAbsent(
-                                                                    f.id,
-                                                                    GlobalKey
-                                                                        .new,
-                                                                  ),
-                                                              child: dropTarget(
-                                                                folder: f,
-                                                                child: row,
-                                                              ),
-                                                            )
-                                                          : row;
                                                       // Validation errors render
                                                       // below the row so the
                                                       // editor box height is

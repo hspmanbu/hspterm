@@ -63,6 +63,9 @@ enum AppLogEvent {
   // Round-12: local-edit idle auto-close (idle minutes and draft outcome
   // only, never content).
   editIdleClosed,
+  // Round-12 reconnect retry: a local-edit upload rebased its frozen origin
+  // generation onto the live one after a fresh remote stat matched.
+  editBaselineRebase,
 }
 
 /// Current launch only. Accept fixed events/numbers and code locations, never

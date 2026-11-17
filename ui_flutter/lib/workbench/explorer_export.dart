@@ -35,11 +35,17 @@ class ExplorerExportDrag extends StatefulWidget {
     required this.model,
     required this.source,
     required this.selection,
+    this.canCapture,
     required this.child,
   });
   final LiveWorkbenchModel model;
   final LiveTerminalSession source;
   final List<DemoFile> Function() selection;
+
+  /// Editing guard for the handoff lease capture: while it returns false,
+  /// the pointer stays with the widget tree (e.g. the row's inline rename
+  /// editor) and no native export gesture is ever captured.
+  final bool Function()? canCapture;
   final Widget child;
   @override
   State<ExplorerExportDrag> createState() => _ExplorerExportDragState();
@@ -223,22 +229,24 @@ class _ExplorerExportDragState extends State<ExplorerExportDrag> {
   @override
   Widget build(BuildContext context) => ExplorerDragHandoff<_ExportGesture>(
     enabled: Platform.isWindows,
-    capture: (lease) => _ExportGesture(
-      lease,
-      widget.source,
-      widget
-          .selection()
-          .map(
-            (f) => DemoFile(
-              f.id,
-              f.name,
-              folder: f.folder,
-              symlink: f.symlink,
-              byteSize: f.byteSize,
-            ),
+    capture: (lease) => (widget.canCapture?.call() ?? false)
+        ? _ExportGesture(
+            lease,
+            widget.source,
+            widget
+                .selection()
+                .map(
+                  (f) => DemoFile(
+                    f.id,
+                    f.name,
+                    folder: f.folder,
+                    symlink: f.symlink,
+                    byteSize: f.byteSize,
+                  ),
+                )
+                .toList(growable: false),
           )
-          .toList(growable: false),
-    ),
+        : null,
     onLeave: _export,
     child: widget.child,
   );
