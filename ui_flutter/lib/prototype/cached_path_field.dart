@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'model.dart';
 
@@ -86,8 +87,16 @@ class CachedPathField extends StatefulWidget {
 }
 
 class _CachedPathFieldState extends State<CachedPathField> {
-  final _focus = FocusNode();
+  // Owns the arrow keys (see [_handleKeyEvent]) so RawAutocomplete's built-in
+  // AutocompleteNext/PreviousOptionIntents never run: the framework's
+  // always-highlight-first internal index is never the source of truth here.
+  late final _focus = FocusNode(onKeyEvent: _handleKeyEvent);
   final _optionsScroll = ScrollController();
+  // -1 = nothing selected: the dropdown opens unselected with no row tinted
+  // and Enter keeps the typed text. Mirrors TerminalSuggestionsController.
+  final ValueNotifier<int> _selected = ValueNotifier<int>(-1);
+  // The candidate list actually shown in the dropdown; drives Enter and tap.
+  List<String> _currentOptions = const <String>[];
   int _request = 0;
   String? _query;
   Future<List<String>>? _lookup;
@@ -105,11 +114,64 @@ class _CachedPathFieldState extends State<CachedPathField> {
     _request++;
     _query = null;
     _lookup = null;
+    // A new query, a reopened history list or a focus loss starts unselected
+    // again, like TerminalSuggestionsController refreshing its candidates.
+    _currentOptions = const <String>[];
+    _selected.value = -1;
     _releaseComposition();
   }
 
   void _controllerChanged() {
     if (!_composing) _releaseComposition();
+  }
+
+  // Mirror TerminalSuggestionsController.move: the first arrow key from an
+  // unselected box jumps to the first (down) or last (up) candidate;
+  // afterwards movement wraps around.
+  void _moveSelection(int step) {
+    final count = _currentOptions.length;
+    if (count == 0) return;
+    final current = _selected.value;
+    _selected.value = current < 0 || current >= count
+        ? (step > 0 ? 0 : count - 1)
+        : (current + step) % count;
+  }
+
+  // Consume the plain arrow keys while candidates are shown so the SDK's own
+  // highlight intents are never invoked; modifier combos still fall through to
+  // the framework exactly as before.
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final step = switch (event.logicalKey) {
+      LogicalKeyboardKey.arrowDown => 1,
+      LogicalKeyboardKey.arrowUp => -1,
+      _ => 0,
+    };
+    final keys = HardwareKeyboard.instance;
+    if (step == 0 ||
+        keys.isControlPressed ||
+        keys.isMetaPressed ||
+        keys.isAltPressed ||
+        keys.isShiftPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (_currentOptions.isEmpty) return KeyEventResult.ignored;
+    _moveSelection(step);
+    return KeyEventResult.handled;
+  }
+
+  // Clicking a candidate navigates now: fill the field (SDK select), then
+  // submit exactly like an explicit Enter on the highlighted row. The overlay
+  // sits inside RawAutocomplete's TextFieldTapRegion, so the click never
+  // reaches TextField.onTapOutside -> onFocusLost, which would revert the fill
+  // before files.dart navigates.
+  void _choose(void Function(String) select, String path) {
+    select(path);
+    _currentOptions = const <String>[];
+    _selected.value = -1;
+    widget.onSubmitted(path);
   }
 
   Future<List<String>> _options(TextEditingValue value) {
@@ -183,6 +245,9 @@ class _CachedPathFieldState extends State<CachedPathField> {
     _invalidate();
     _focus.dispose();
     _optionsScroll.dispose();
+    // Detaching _focus can still run the focus listener -> _invalidate(), so
+    // _selected must outlive it here.
+    _selected.dispose();
     super.dispose();
   }
 
@@ -223,13 +288,25 @@ class _CachedPathFieldState extends State<CachedPathField> {
           // editor fills the address-bar height instead of a raised small input.
           decoration: const InputDecoration(hintText: '绝对路径（仅缓存补全）'),
           onSubmitted: (_) {
-            accept();
-            widget.onSubmitted(controller.text);
+            // No highlighted row: submit the typed text verbatim. With an
+            // explicit selection submit that candidate. RawAutocomplete's
+            // accept() would silently replace the typed path with its
+            // always-highlighted first candidate — the navigation bug.
+            final selected = _selected.value;
+            final options = _currentOptions;
+            widget.onSubmitted(
+              selected >= 0 && selected < options.length
+                  ? options[selected]
+                  : controller.text,
+            );
           },
         ),
       ),
       optionsViewBuilder: (context, select, values) {
         final options = values.toList();
+        // Cache exactly what the dropdown displays so Enter and taps resolve
+        // against the live list.
+        _currentOptions = options;
         return Align(
           alignment: Alignment.topLeft,
           child: Material(
@@ -242,67 +319,74 @@ class _CachedPathFieldState extends State<CachedPathField> {
             child: SizedBox(
               width: constraints.maxWidth,
               height: (options.length * 30).clamp(30, 210).toDouble(),
-              child: ListView.builder(
-                controller: _optionsScroll,
-                padding: EdgeInsets.zero,
-                itemCount: options.length,
-                itemExtent: 30,
-                itemBuilder: (context, index) {
-                  final highlighted =
-                      AutocompleteHighlightedOption.of(context) == index;
-                  if (highlighted) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (!mounted || !_optionsScroll.hasClients) return;
-                      final position = _optionsScroll.position;
-                      final top = index * 30.0;
-                      if (top < position.pixels ||
-                          top + 30 >
-                              position.pixels + position.viewportDimension) {
-                        _optionsScroll.jumpTo(
-                          (top - position.viewportDimension / 2 + 15).clamp(
-                            position.minScrollExtent,
-                            position.maxScrollExtent,
-                          ),
-                        );
-                      }
-                    });
-                  }
-                  final path = options[index];
-                  final query = widget.controller.text;
-                  final parent = query.substring(0, query.lastIndexOf('/') + 1);
-                  // History entries (unedited current path) always show the
-                  // full destination; prefix matches keep the short label.
-                  final label =
-                      query == widget.currentDirectory ||
-                          !path.startsWith(parent)
-                      ? path
-                      : path.substring(parent.length);
-                  return Tooltip(
-                    message: path,
-                    child: InkWell(
-                      key: ValueKey('cached-path-${options[index]}'),
-                      onTap: () => select(options[index]),
-                      child: ColoredBox(
-                        color: highlighted
-                            ? Theme.of(context).colorScheme.primary
-                                  .withValues(alpha: .14)
-                            : Colors.transparent,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11),
+              // Highlight is driven by our own selected count, not the
+              // framework's AutocompleteHighlightedOption, which starts at 0.
+              child: ValueListenableBuilder<int>(
+                valueListenable: _selected,
+                builder: (context, selected, _) => ListView.builder(
+                  controller: _optionsScroll,
+                  padding: EdgeInsets.zero,
+                  itemCount: options.length,
+                  itemExtent: 30,
+                  itemBuilder: (context, index) {
+                    final highlighted = selected == index;
+                    if (highlighted) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (!mounted || !_optionsScroll.hasClients) return;
+                        final position = _optionsScroll.position;
+                        final top = index * 30.0;
+                        if (top < position.pixels ||
+                            top + 30 >
+                                position.pixels + position.viewportDimension) {
+                          _optionsScroll.jumpTo(
+                            (top - position.viewportDimension / 2 + 15).clamp(
+                              position.minScrollExtent,
+                              position.maxScrollExtent,
+                            ),
+                          );
+                        }
+                      });
+                    }
+                    final path = options[index];
+                    final query = widget.controller.text;
+                    final parent = query.substring(
+                      0,
+                      query.lastIndexOf('/') + 1,
+                    );
+                    // History entries (unedited current path) always show the
+                    // full destination; prefix matches keep the short label.
+                    final label =
+                        query == widget.currentDirectory ||
+                            !path.startsWith(parent)
+                        ? path
+                        : path.substring(parent.length);
+                    return Tooltip(
+                      message: path,
+                      child: InkWell(
+                        key: ValueKey('cached-path-${options[index]}'),
+                        onTap: () => _choose(select, options[index]),
+                        child: ColoredBox(
+                          color: highlighted
+                              ? Theme.of(context).colorScheme.primary
+                                    .withValues(alpha: .14)
+                              : Colors.transparent,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             ),
           ),

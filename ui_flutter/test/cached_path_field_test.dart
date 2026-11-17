@@ -40,7 +40,9 @@ void main() {
     );
     await tester.enterText(find.byKey(const ValueKey('remote-path')), '/base/');
     await tester.pumpAndSettle();
-    for (var i = 0; i < 10; i++) {
+    // The box opens unselected (-1); the first ArrowDown highlights the first
+    // candidate, so the 11th press reaches '/base/f10'.
+    for (var i = 0; i < 11; i++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
     }
@@ -202,13 +204,63 @@ void main() {
       expect(files, hasLength(4096));
     },
   );
+  testWidgets('tapping a candidate fills the field and navigates immediately', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: '/home');
+    final submitted = <String>[];
+    final cache = <String, List<DemoFile>>{
+      '/home': [DemoFile('/home/中文 space', '中文 space', folder: true)],
+    };
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 320,
+            height: 30,
+            child: CachedPathField(
+              controller: controller,
+              currentDirectory: '/home',
+              cache: cache,
+              onSubmitted: submitted.add,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('remote-path')),
+      '/home/中',
+    );
+    await tester.pumpAndSettle();
+    expect(submitted, isEmpty);
+    expect(find.text('中文 space'), findsOneWidget);
+    expect(find.byTooltip('/home/中文 space'), findsOneWidget);
+    // New contract: a click selects and navigates in one step, like an
+    // explicit Enter on that row. The tap must not fall into onTapOutside
+    // (the dropdown shares the field's tap region), which would revert the
+    // fill before navigation.
+    await tester.tap(find.byKey(const ValueKey('cached-path-/home/中文 space')));
+    await tester.pumpAndSettle();
+    expect(controller.text, '/home/中文 space');
+    expect(submitted, ['/home/中文 space']);
+    // The dropdown closed after the selection.
+    expect(find.byTooltip('/home/中文 space'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
   testWidgets(
-    'choosing a cached path only fills; explicit submission navigates',
+    'enter with the dropdown open submits the typed text, not a candidate',
     (tester) async {
-      final controller = TextEditingController(text: '/home');
+      final controller = TextEditingController(text: '/base');
       final submitted = <String>[];
       final cache = <String, List<DemoFile>>{
-        '/home': [DemoFile('/home/中文 space', '中文 space', folder: true)],
+        '/base': [
+          DemoFile('/base/f0', 'f0', folder: true),
+          DemoFile('/base/f1', 'f1', folder: true),
+          DemoFile('/base/f2', 'f2', folder: true),
+        ],
       };
       await tester.pumpWidget(
         MaterialApp(
@@ -218,7 +270,7 @@ void main() {
               height: 30,
               child: CachedPathField(
                 controller: controller,
-                currentDirectory: '/home',
+                currentDirectory: '/base',
                 cache: cache,
                 onSubmitted: submitted.add,
               ),
@@ -228,21 +280,27 @@ void main() {
       );
       await tester.enterText(
         find.byKey(const ValueKey('remote-path')),
-        '/home/中',
+        '/base/',
       );
       await tester.pumpAndSettle();
-      expect(submitted, isEmpty);
-      expect(find.text('中文 space'), findsOneWidget);
-      expect(find.byTooltip('/home/中文 space'), findsOneWidget);
-      await tester.tap(
-        find.byKey(const ValueKey('cached-path-/home/中文 space')),
+      // The dropdown lists candidates but none is selected by default; Enter
+      // must keep the typed path verbatim instead of silently replacing it
+      // with the always-highlighted first candidate.
+      expect(
+        find.byKey(const ValueKey('cached-path-/base/f0')),
+        findsOneWidget,
       );
-      await tester.pumpAndSettle();
-      expect(controller.text, '/home/中文 space');
-      expect(submitted, isEmpty);
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
-      expect(submitted, ['/home/中文 space']);
+      expect(submitted, ['/base/']);
+      // ArrowUp from the unselected box jumps to the last candidate; Enter
+      // then submits it without rewriting the field text.
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(submitted, ['/base/', '/base/f2']);
+      expect(controller.text, '/base/');
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
