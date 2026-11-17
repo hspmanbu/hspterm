@@ -1,7 +1,11 @@
 //! Direct-first selection: source socket opt-in + explicit copy authorize a
 //! task-scoped destination credential; the original peer receipt stays pinned.
 use super::*;
-use hspterm_ssh_core::direct_transfer::{DirectRoute, ProbeStatus};
+use hspterm_ssh_core::SshError;
+use hspterm_ssh_core::direct_transfer::{DirectPreparationError, DirectRoute, ProbeStatus};
+
+/// One bounded retry for a probe that lost the connection-wide single slot.
+const PROBE_BUSY_BACKOFF: Duration = Duration::from_millis(200);
 
 pub(super) async fn select(
     source: &Connection,
@@ -103,10 +107,26 @@ pub(super) async fn select(
             Ok(())
         })?;
         let epoch = connector.authentication_epoch();
-        match connector
+        let status = match connector
             .probe(&peer, &target.target.username, epoch, stop.clone())
-            .await?
+            .await
         {
+            Err(SshError::DirectPreparation(DirectPreparationError::Busy))
+                if !stop.is_cancelled() =>
+            {
+                // The connection-wide single slot may be briefly owned by a
+                // sibling task's probe or inspect. One short backoff, probe
+                // only; the connector's bounded slot wait covers long holds.
+                tokio::select! { biased;
+                    _ = stop.cancelled() => Err(SshError::DirectPreparation(DirectPreparationError::Busy)),
+                    _ = tokio::time::sleep(PROBE_BUSY_BACKOFF) => connector
+                        .probe(&peer, &target.target.username, epoch, stop.clone())
+                        .await,
+                }
+            }
+            other => other,
+        };
+        match status? {
             ProbeStatus::Available => {}
             ProbeStatus::MissingTools => {
                 bail!("直传所需工具缺失：来源需要ssh、rsync与Python 3，目标需要rsync与Python 3")

@@ -61,17 +61,19 @@ Future<void> exerciseRemoteCopies() async {
     await Directory('${source.path}/empty/nested').create(recursive: true);
     await File('${source.path}/中文.txt').writeAsString('中文e\u0301\u0000正文');
     final target = Directory('${targetServer.directory.path}/destination 中文');
-    await expectLater(
-      rust.enqueueRemoteCopy(
-        sourceId: a.id!,
-        targetId: b.id!,
-        source: source.path,
-        destination: target.path,
-        allowMemoryRelay: false,
-      ),
-      throwsA(anything),
+    // No relay and no direct permission: the task is admitted as a whole and
+    // fails at its own select instead of being rejected at submission.
+    final denied = await rust.enqueueRemoteCopy(
+      sourceId: a.id!,
+      targetId: b.id!,
+      source: source.path,
+      destination: target.path,
+      allowMemoryRelay: false,
     );
+    final deniedTask = await remoteTask(denied, (t) => !t.busy);
+    expect(deniedTask.state, 'Failed', reason: deniedTask.error);
     expect(await target.exists(), false);
+    await rust.clearEndedRemoteCopies();
     expect(await rust.listRemoteCopies(), isEmpty);
     await expectLater(
       rust.enqueueRemoteCopy(

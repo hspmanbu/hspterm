@@ -809,6 +809,28 @@ Future<String> enqueueRemoteCopy({
   allowDirect: allowDirect,
 );
 
+/// The whole batch is one task: one enqueue-time probe below, one select, one
+/// channel pair and one DirectRoute shared by every entry. Per-file admission
+/// no longer probes at all, so a multi-file submission no longer runs a full
+/// preflight per file and cannot starve on the single probe slot.
+Future<String> enqueueRemoteCopyBatch({
+  required int sourceId,
+  required int targetId,
+  required List<RemoteCopyBatchEntry> entries,
+  required bool allowMemoryRelay,
+  int? expectedSourceGeneration,
+  int? expectedTargetGeneration,
+  bool? allowDirect,
+}) => RustLib.instance.api.crateApiEnqueueRemoteCopyBatch(
+  sourceId: sourceId,
+  targetId: targetId,
+  entries: entries,
+  allowMemoryRelay: allowMemoryRelay,
+  expectedSourceGeneration: expectedSourceGeneration,
+  expectedTargetGeneration: expectedTargetGeneration,
+  allowDirect: allowDirect,
+);
+
 Future<void> stopRemoteCopy({required String taskId, required bool cancel}) =>
     RustLib.instance.api.crateApiStopRemoteCopy(taskId: taskId, cancel: cancel);
 

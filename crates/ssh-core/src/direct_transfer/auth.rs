@@ -78,7 +78,7 @@ impl Capability {
             }
         };
         let epoch = NEXT
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
             .map_err(|_| SshError::AgentUnavailable)?;
         Ok((
             Arc::new(Self {

@@ -165,8 +165,11 @@ class _RemoteDestinationDialogState extends State<RemoteDestinationDialog> {
         setState(() {
           _accepted += error.acceptedIds.length;
           _selection = error.remaining;
-          _error =
-              '仅剩 ${_selection.paths.length} 项未入队：${appMessage(error.cause)}';
+          // Batch copies are all-or-nothing: nothing was accepted. Only a
+          // per-file move can leave a genuine unaccepted remainder.
+          _error = error.acceptedIds.isEmpty
+              ? '未入队任何任务：${appMessage(error.cause)}'
+              : '仅剩 ${_selection.paths.length} 项未入队：${appMessage(error.cause)}';
         });
       }
     } catch (error) {

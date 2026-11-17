@@ -61,19 +61,21 @@ void main() {
         await File('${source.path}/root.txt')
             .writeAsString('synthetic source text');
         final destination = '${right.directory.path}/target tree';
-        await expectLater(
-          rust.enqueueRemoteMove(
-            sourceId: a.id!,
-            targetId: b.id!,
-            source: source.path,
-            destination: destination,
-            expectedSourceGeneration: a.generation,
-            expectedTargetGeneration: b.generation,
-          ),
-          throwsA(anything),
+        // Cross-server move without relay or direct consent is admitted as a
+        // task and fails at its own select; the source is never touched.
+        final deniedMove = await rust.enqueueRemoteMove(
+          sourceId: a.id!,
+          targetId: b.id!,
+          source: source.path,
+          destination: destination,
+          expectedSourceGeneration: a.generation,
+          expectedTargetGeneration: b.generation,
         );
+        final deniedMoveTask = await remoteTask(deniedMove, (t) => !t.busy);
+        expect(deniedMoveTask.state, 'Failed', reason: deniedMoveTask.error);
         expect(await source.exists(), true);
         expect(await Directory(destination).exists(), false);
+        await rust.clearEndedRemoteCopies();
         final id = await rust.enqueueRemoteMove(
           sourceId: a.id!,
           targetId: b.id!,

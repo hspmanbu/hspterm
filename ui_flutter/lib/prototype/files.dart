@@ -1534,14 +1534,16 @@ class _FilesPanelState extends State<FilesPanel> {
           if (mounted) {
             notice(
               context,
-              '已加入 ${ids.length} 个${moving ? '移动' : '复制'}任务',
+              moving || ids.length > 1
+                  ? '已加入 ${ids.length} 个${moving ? '移动' : '复制'}任务'
+                  : '已加入 1 个复制任务（合并 ${files.length} 项）',
               level: AppNoticeLevel.success,
             );
           }
         } on RemoteFileSubmissionFailure catch (error) {
           if (!mounted) return;
-          // Already-admitted items stay in the queue. Retry/relay consent only
-          // applies to the remaining frozen selection, never to accepted work.
+          // A batch copy is all-or-nothing, so its failure keeps the whole
+          // frozen selection here; per-file moves may leave a true remainder.
           await showAppDialog<void>(
             context: context,
             barrierDismissible: false,

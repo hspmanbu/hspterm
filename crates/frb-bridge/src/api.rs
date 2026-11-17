@@ -3957,6 +3957,49 @@ pub async fn enqueue_remote_copy(
             bail!("文件操作所绑定的SSH代次已改变，请重新选择；未创建任务");
         }
         let expected_scope = with_vault(|v| Ok(v.instance_id().to_owned()))?;
+        tokio::task::spawn_blocking(move || {
+            crate::remote_transfers::enqueue(
+                source_connection,
+                target_connection,
+                source,
+                destination,
+                allow_memory_relay,
+                expected_scope,
+                allow_direct.unwrap_or(false),
+            )
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+/// The whole batch is one task: one enqueue-time probe below, one select, one
+/// channel pair and one DirectRoute shared by every entry. Per-file admission
+/// no longer probes at all, so a multi-file submission no longer runs a full
+/// preflight per file and cannot starve on the single probe slot.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Preserve the established FRB named arguments for both endpoint identities and explicit transport policy."
+)]
+pub async fn enqueue_remote_copy_batch(
+    source_id: u32,
+    target_id: u32,
+    entries: Vec<crate::remote_transfers::RemoteCopyBatchEntry>,
+    allow_memory_relay: bool,
+    expected_source_generation: Option<u64>,
+    expected_target_generation: Option<u64>,
+    allow_direct: Option<bool>,
+) -> Result<String> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        let source_connection = transfer_connection(source_id)?;
+        let target_connection = transfer_connection(target_id)?;
+        if expected_source_generation.is_some_and(|g| g != source_connection.generation)
+            || expected_target_generation.is_some_and(|g| g != target_connection.generation)
+        {
+            bail!("文件操作所绑定的SSH代次已改变，请重新选择；未创建任务");
+        }
+        let expected_scope = with_vault(|v| Ok(v.instance_id().to_owned()))?;
         let runtime = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
             runtime.block_on(crate::remote_transfers::direct::preflight(
@@ -3966,11 +4009,10 @@ pub async fn enqueue_remote_copy(
                 false,
                 allow_direct.unwrap_or(false),
             ))?;
-            crate::remote_transfers::enqueue(
+            crate::remote_transfers::enqueue_copy_batch(
                 source_connection,
                 target_connection,
-                source,
-                destination,
+                entries,
                 allow_memory_relay,
                 expected_scope,
                 allow_direct.unwrap_or(false),
@@ -4019,13 +4061,6 @@ pub async fn enqueue_remote_move(
             let source = runtime.block_on(crate::remote_transfers::prepare_move_source(
                 &source_connection,
                 source,
-            ))?;
-            runtime.block_on(crate::remote_transfers::direct::preflight(
-                &source_connection,
-                &target_connection,
-                allow_memory_relay.unwrap_or(false),
-                true,
-                allow_direct.unwrap_or(false),
             ))?;
             crate::remote_transfers::enqueue_move(
                 source_connection,

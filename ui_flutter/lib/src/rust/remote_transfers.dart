@@ -7,6 +7,29 @@ import 'frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+/// One explicit file of a same-directory batch copy. The FRB admission
+/// boundary validates every entry before any task or checkpoint exists.
+class RemoteCopyBatchEntry {
+  final String sourcePath;
+  final String destinationPath;
+
+  const RemoteCopyBatchEntry({
+    required this.sourcePath,
+    required this.destinationPath,
+  });
+
+  @override
+  int get hashCode => sourcePath.hashCode ^ destinationPath.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RemoteCopyBatchEntry &&
+          runtimeType == other.runtimeType &&
+          sourcePath == other.sourcePath &&
+          destinationPath == other.destinationPath;
+}
+
 /// Local original-task review only. It makes no statement about current files
 /// and grants no network access, credential rebinding or transfer continuation.
 class RemoteMoveEndReview {

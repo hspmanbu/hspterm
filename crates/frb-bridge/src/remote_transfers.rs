@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail};
 use hspterm_ssh_core::{
     SessionPhase,
     bandwidth::BandwidthLimiter,
-    remote_tree::{RemoteTree, RemoteTreeError, StagingPhase},
+    remote_tree::{RemoteBatchLeaf, RemoteTree, RemoteTreeError, StagingPhase},
     task_scheduler::Admission,
     tree_transfer::{ConflictDecision, NodeKind, NodeState, TreeOutcome, TreeStats},
 };
@@ -18,7 +18,7 @@ use hspterm_storage_sync::{local_tasks::LocalTaskJournal, transfer_settings::Def
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashSet},
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
@@ -51,6 +51,15 @@ enum MovePhase {
     /// User ended local waiting without deciding whether rename succeeded.
     /// A retained device record is an audit, never permission to send again.
     UserEnded,
+}
+
+/// One explicit file of a same-directory batch copy. The FRB admission
+/// boundary validates every entry before any task or checkpoint exists.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteCopyBatchEntry {
+    pub source_path: String,
+    pub destination_path: String,
 }
 
 pub struct RemoteMoveInspection {
@@ -105,6 +114,10 @@ struct CopyHeader {
     cleanup_abandoned: bool,
     #[serde(default)]
     source_retirement: Option<hspterm_ssh_core::remote_tree::SourceRetirement>,
+    /// Explicit leaves of a batch copy. Empty for scan-based tasks; inert
+    /// once the manifest exists because plan rebuilding is plan.is_none().
+    #[serde(default)]
+    entries: Vec<RemoteCopyBatchEntry>,
 }
 fn legacy_relay_permitted() -> bool {
     true
@@ -477,6 +490,76 @@ pub(crate) fn enqueue(
         CopyOperation::Copy,
     )
 }
+/// One preflight, one select and one CopyJob serve the whole batch: the task
+/// shares a single channel pair, credential lease and DirectRoute across all
+/// entries, and retires both at task end like any scan-based copy.
+pub(crate) fn enqueue_copy_batch(
+    source: Connection,
+    target: Connection,
+    entries: Vec<RemoteCopyBatchEntry>,
+    allow_memory_relay: bool,
+    expected_scope: String,
+    allow_direct: bool,
+) -> Result<String> {
+    let (source_dir, destination_dir, _leaves) = validate_batch_entries(&entries)?;
+    if same_account(&source.target, &target.target)
+        && directory_contains(&source_dir, &destination_dir)
+    {
+        bail!("批量复制目标目录不能位于来源目录之内");
+    }
+    check_pair(&source, &target)?;
+    transfers::with_relay_resources(|scheduler, up, down, default_conflict| {
+        with_vault(|v| {
+            if v.instance_id() != expected_scope {
+                bail!("直传准备期间原加密配置库已改变，未创建任务");
+            }
+            Ok(())
+        })?;
+        let mut state = registry().lock();
+        restore(&mut state)?;
+        check_pair(&source, &target)?;
+        let header = CopyHeader {
+            version: 1,
+            id: format!("task-{:032x}", rand::random::<u128>()),
+            source_target: source.target.clone(),
+            destination_target: target.target.clone(),
+            source: source_dir,
+            destination: destination_dir,
+            state: State::Waiting,
+            error: None,
+            default_conflict,
+            relay_permitted: allow_memory_relay,
+            direct_permitted: allow_direct,
+            rename_conflicts: false,
+            operation: CopyOperation::Copy,
+            move_phase: MovePhase::Pending,
+            move_directory: false,
+            rescan: Vec::new(),
+            cleanup: None,
+            cleanup_abandoned: false,
+            source_retirement: None,
+            entries,
+        };
+        save(&header, None, None)?;
+        let id = header.id.clone();
+        let j = new_job(
+            header,
+            Some(source.terminal_id),
+            Some(target.terminal_id),
+            None,
+        );
+        state.jobs.push(j.clone());
+        launch(
+            j,
+            source,
+            target,
+            scheduler.enqueue(),
+            up.clone(),
+            down.clone(),
+        );
+        Ok(id)
+    })
+}
 pub(crate) async fn prepare_move_source(source: &Connection, path: String) -> Result<String> {
     relocation::prepare_source(source, path).await
 }
@@ -548,6 +631,104 @@ fn same_account(source: &Target, target: &Target) -> bool {
         && source.port == target.port
         && source.username == target.username
         && source.fingerprint == target.fingerprint
+}
+/// Same conservative containment as the manifest boundary: the destination
+/// directory must not sit at or inside the source directory on a shared
+/// filesystem, or the batch would write into its own source tree.
+fn directory_contains(parent: &str, child: &str) -> bool {
+    child == parent
+        || child
+            .strip_prefix(parent)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+/// Admission ceiling for explicit batch entries. The manifest/checkpoint
+/// capacity stays bounded by RemoteTree limits; this only rejects absurd
+/// device-unfriendly submissions before a checkpoint exists.
+const REMOTE_COPY_BATCH_MAX: usize = 10_000;
+/// One shared admission rule for batch copies: every entry is an explicit
+/// regular-file leaf from one source directory into one destination
+/// directory. The whole batch is validated before any task, checkpoint or
+/// queue row exists, so a single invalid entry rejects every entry.
+fn validate_batch_entries(
+    entries: &[RemoteCopyBatchEntry],
+) -> Result<(String, String, Vec<RemoteBatchLeaf>)> {
+    fn absolute(path: &str) -> Result<()> {
+        if !path.starts_with('/')
+            || path.contains('\0')
+            || path.len() > 131072
+            || path
+                .split('/')
+                .skip(1)
+                .any(|part| part.is_empty() || part == "." || part == "..")
+        {
+            bail!("远端复制需要有效绝对路径");
+        }
+        Ok(())
+    }
+    if entries.is_empty() {
+        bail!("批量复制至少需要一个文件");
+    }
+    if entries.len() > REMOTE_COPY_BATCH_MAX {
+        bail!("批量复制项目数超过单任务安全容量；请分批复制");
+    }
+    let mut source_dir = None;
+    let mut destination_dir = None;
+    let mut sources = HashSet::new();
+    let mut destinations = HashSet::new();
+    let mut leaves = Vec::with_capacity(entries.len());
+    for entry in entries {
+        absolute(&entry.source_path)?;
+        absolute(&entry.destination_path)?;
+        let (source_parent, source_name) = entry
+            .source_path
+            .rsplit_once('/')
+            .context("远端复制需要有效绝对路径")?;
+        let (destination_parent, destination_name) = entry
+            .destination_path
+            .rsplit_once('/')
+            .context("远端复制需要有效绝对路径")?;
+        let source_parent = if source_parent.is_empty() {
+            "/"
+        } else {
+            source_parent
+        };
+        let destination_dir_parent = if destination_parent.is_empty() {
+            "/"
+        } else {
+            destination_parent
+        };
+        absolute(source_parent)?;
+        absolute(destination_dir_parent)?;
+        if let Some(existing) = &source_dir {
+            if existing != source_parent {
+                bail!("批量复制的来源必须位于同一目录");
+            }
+        } else {
+            source_dir = Some(source_parent.to_owned());
+        }
+        if let Some(existing) = &destination_dir {
+            if existing != destination_dir_parent {
+                bail!("批量复制的目标必须位于同一目录");
+            }
+        } else {
+            destination_dir = Some(destination_dir_parent.to_owned());
+        }
+        if !sources.insert(entry.source_path.as_str()) {
+            bail!("批量复制包含重复的来源文件");
+        }
+        if !destinations.insert(entry.destination_path.as_str()) {
+            bail!("批量复制包含重复的目标文件");
+        }
+        leaves.push(RemoteBatchLeaf {
+            source_name: source_name.to_owned(),
+            destination_name: destination_name.to_owned(),
+        });
+    }
+    Ok((
+        source_dir.expect("checked non-empty"),
+        destination_dir.expect("checked non-empty"),
+        leaves,
+    ))
 }
 fn check_move_resume(header: &CopyHeader, decision: &str) -> Result<()> {
     if let Some(source) = &header.source_retirement {
@@ -645,6 +826,7 @@ fn enqueue_operation(
             cleanup: None,
             cleanup_abandoned: false,
             source_retirement: None,
+            entries: Vec::new(),
         };
         save(&header, None, None)?;
         let id = header.id.clone();
@@ -926,9 +1108,20 @@ async fn run(
                 // or nested roots even if the saved host IDs/addresses differ.
                 let same_server = source.target.fingerprint == target.target.fingerprint;
                 let mut last = Instant::now();
-                let scanned = RemoteTree::scan(&a, &b, h.source.clone(), h.destination.clone(), same_server,
-                    h.id[5..].into(), &stop, |count| { if last.elapsed() >= Duration::from_millis(100) {
-                        j.data.lock().discovered = count as u32; last = Instant::now(); } }).await;
+                let mut discovered = |count: usize| { if last.elapsed() >= Duration::from_millis(100) {
+                    j.data.lock().discovered = count as u32; last = Instant::now(); } };
+                // A batch task rebuilds its explicit leaves over one channel
+                // pair with the same stat boundary; scan() stays the recursion
+                // path for directory tasks.
+                let scanned = if h.entries.is_empty() {
+                    RemoteTree::scan(&a, &b, h.source.clone(), h.destination.clone(), same_server,
+                        h.id[5..].into(), &stop, &mut discovered).await
+                } else {
+                    let (source_dir, destination_dir, leaves) =
+                        validate_batch_entries(&h.entries)?;
+                    RemoteTree::manifest(&a, &b, source_dir, destination_dir, leaves, same_server,
+                        h.id[5..].into(), &stop, &mut discovered).await
+                };
                 match scanned { Ok(p) => plan = Some(p), Err(RemoteTreeError::Cancelled) => return Ok(TreeOutcome::Paused), Err(error) => return Err(error.into()) }
             }
             if !h.rescan.is_empty() {
@@ -1430,6 +1623,7 @@ mod move_tests {
             cleanup: None,
             cleanup_abandoned: false,
             source_retirement: None,
+            entries: Vec::new(),
         }
     }
     #[test]
@@ -1481,5 +1675,60 @@ mod move_tests {
         b = a.clone();
         b.fingerprint = "another-fingerprint".into();
         assert!(!same_account(&a, &b));
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    fn entry(source: &str, destination: &str) -> RemoteCopyBatchEntry {
+        RemoteCopyBatchEntry {
+            source_path: source.into(),
+            destination_path: destination.into(),
+        }
+    }
+    #[test]
+    fn batch_admission_is_all_or_nothing_across_one_source_and_destination_directory() {
+        let (source, destination, leaves) = validate_batch_entries(&[
+            entry("/data/one.txt", "/target/one.txt"),
+            entry("/data/two name.txt", "/target/renamed.bin"),
+        ])
+        .unwrap();
+        assert_eq!(source, "/data");
+        assert_eq!(destination, "/target");
+        assert_eq!(leaves.len(), 2);
+        assert_eq!(leaves[1].source_name, "two name.txt");
+        assert_eq!(leaves[1].destination_name, "renamed.bin");
+        for batch in [
+            Vec::new(),
+            vec![
+                entry("/data/one.txt", "/target/one.txt"),
+                entry("/data/one.txt", "/target/copy.txt"),
+            ],
+            vec![
+                entry("/data/one.txt", "/target/one.txt"),
+                entry("/data/two.txt", "/target/one.txt"),
+            ],
+            vec![
+                entry("/data/one.txt", "/target/one.txt"),
+                entry("/other/two.txt", "/target/two.txt"),
+            ],
+            vec![
+                entry("/data/one.txt", "/target/one.txt"),
+                entry("/data/two.txt", "/elsewhere/two.txt"),
+            ],
+            vec![entry("/data/../escape", "/target/one.txt")],
+            vec![entry("relative", "/target/one.txt")],
+            vec![entry("/data//double", "/target/one.txt")],
+        ] {
+            assert!(validate_batch_entries(&batch).is_err());
+        }
+    }
+    #[test]
+    fn shared_filesystem_containment_follows_components_not_adjacent_names() {
+        assert!(directory_contains("/data", "/data"));
+        assert!(directory_contains("/data", "/data/nested"));
+        assert!(!directory_contains("/data", "/database"));
+        assert!(!directory_contains("/data/nested", "/data"));
     }
 }

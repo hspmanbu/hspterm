@@ -76,6 +76,14 @@ pub struct RemoteTree {
     pub stages: Vec<StagingPhase>,
 }
 
+/// One explicit file of a batch manifest. Both names are single path
+/// components supplied by the owning task, never remote content.
+#[derive(Clone, Debug)]
+pub struct RemoteBatchLeaf {
+    pub source_name: String,
+    pub destination_name: String,
+}
+
 #[derive(thiserror::Error)]
 pub enum RemoteTreeError {
     #[error("当前文件安全直传条件不可用且未允许中转；未开始该文件的暂存写入")]
@@ -301,6 +309,118 @@ impl RemoteTree {
                     Ok(_) => {
                         node.state = NodeState::Failed;
                         node.error = Some("不跟随符号链接，不复制特殊文件".into());
+                    }
+                    Err(error) => {
+                        node.state = NodeState::Failed;
+                        node.error = Some(error.to_string());
+                    }
+                }
+                plan.nodes.push(node);
+                plan.stages.push(StagingPhase::Absent);
+                discovered(plan.nodes.len());
+            }
+            plan.validate()?;
+            Ok(plan)
+        })
+        .await
+    }
+
+    /// Explicit-leaf manifest for one batch of named files: exactly one source
+    /// directory to one destination directory, each entry inspected by stat on
+    /// the caller's channel. No recursion, no link following and no directory
+    /// enumeration; the manifest shape, staging and checkpoint format stay
+    /// identical to scan(). Metadata only; target remains untouched.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn manifest(
+        source_sftp: &SftpSession,
+        target_sftp: &SftpSession,
+        source: String,
+        destination: String,
+        leaves: Vec<RemoteBatchLeaf>,
+        same_server: bool,
+        staging_id: String,
+        stop: &CancellationToken,
+        mut discovered: impl FnMut(usize),
+    ) -> Result<Self> {
+        cancellable(stop, async {
+            if leaves.is_empty() {
+                return Err(RemoteTreeError::InvalidPlan);
+            }
+            let source = transfer::object_path(source_sftp, &source)
+                .await
+                .map_err(|_| RemoteTreeError::InvalidPlan)?;
+            let destination = transfer::object_path(target_sftp, &destination)
+                .await
+                .map_err(|_| RemoteTreeError::InvalidPlan)?;
+            let mut plan = Self {
+                version: 1,
+                source,
+                destination,
+                staging_id,
+                // The shared destination directory is the root node, exactly
+                // like a scanned tree, so ensure_directory and every per-node
+                // parent check keep working unchanged.
+                nodes: vec![TransferNode {
+                    relative: String::new(),
+                    kind: NodeKind::Directory,
+                    size: 0,
+                    acknowledged: 0,
+                    started: false,
+                    state: NodeState::Pending,
+                    decision: ConflictDecision::Ask,
+                    destination_name: None,
+                    error: None,
+                    default_policy_pending: true,
+                }],
+                stages: vec![StagingPhase::Absent],
+            };
+            plan.validate_roots()?;
+            let root = source_sftp.symlink_metadata(&plan.source).await?;
+            if !root.is_dir() || root.is_symlink() {
+                return Err(RemoteTreeError::InvalidPlan);
+            }
+            // Equal host keys may share a filesystem; reject a destination
+            // inside the source directory even if saved host IDs differ.
+            if same_server && below(&plan.destination, &plan.source) {
+                return Err(RemoteTreeError::InvalidPlan);
+            }
+            for leaf in leaves {
+                stopped(stop)?;
+                if plan.nodes.len() >= MAX_NODES {
+                    return Err(RemoteTreeError::Capacity);
+                }
+                let path = join(&plan.source, &leaf.source_name);
+                let mut node = TransferNode {
+                    relative: leaf.source_name.clone(),
+                    kind: NodeKind::Unsupported,
+                    size: 0,
+                    acknowledged: 0,
+                    started: false,
+                    state: NodeState::Pending,
+                    decision: ConflictDecision::Ask,
+                    destination_name: None,
+                    error: None,
+                    default_policy_pending: true,
+                };
+                let inspection = async {
+                    guard_parent(source_sftp, &path).await?;
+                    Ok::<_, RemoteTreeError>(source_sftp.symlink_metadata(&path).await?)
+                }
+                .await;
+                match inspection {
+                    Ok(attrs)
+                        if attrs.is_regular() && !attrs.is_symlink() && attrs.size.is_some() =>
+                    {
+                        node.kind = NodeKind::File;
+                        node.size = attrs.size.expect("checked size");
+                        if leaf.destination_name != leaf.source_name {
+                            node.destination_name = Some(leaf.destination_name);
+                        }
+                    }
+                    Ok(_) => {
+                        node.state = NodeState::Failed;
+                        node.error =
+                            Some("批量清单只接受普通文件；不跟随符号链接或复制目录".into());
                     }
                     Err(error) => {
                         node.state = NodeState::Failed;

@@ -148,17 +148,34 @@ async fn cancelled_direct_probe_retains_unknown_open_and_root_close_waits_for_it
         .unwrap();
     cancel.cancel();
     assert!(work.await.unwrap().is_err());
-    assert!(matches!(
-        cap.probe(&endpoint, "synthetic-user", epoch, CancellationToken::new())
-            .await,
-        Err(SshError::DirectPreparation(
-            hspterm_ssh_core::direct_transfer::DirectPreparationError::Busy
-        ))
-    ));
+    // The read-only path now waits for the single slot instead of failing
+    // immediately, and the wait stays cancellable without dispatching anything.
+    let waiting = CancellationToken::new();
+    let waiter_token = waiting.clone();
+    let waiter = tokio::spawn({
+        let cap = cap.clone();
+        let target = endpoint.clone();
+        async move {
+            cap.probe(&target, "synthetic-user", epoch, waiter_token)
+                .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !waiter.is_finished(),
+        "a held slot must keep the read-only probe waiting, not failing"
+    );
     assert!(
         pending.try_recv().is_err(),
         "cancelled open must still own the only slot"
     );
+    waiting.cancel();
+    assert!(matches!(
+        waiter.await.unwrap(),
+        Err(SshError::DirectPreparation(
+            hspterm_ssh_core::direct_transfer::DirectPreparationError::Unconfirmed
+        ))
+    ));
     reply.accept().await;
     let mut stream = channel.into_stream();
     let mut body = Vec::new();

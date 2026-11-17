@@ -54,19 +54,18 @@ void main() {
         final bytes = List.generate(262147, (i) => i % 251);
         await input.writeAsBytes(bytes);
         // No permission is silently created, even when a source allows Agent requests.
-        await expectLater(
-          rust.enqueueRemoteCopy(
-            sourceId: source.id!,
-            targetId: target.id!,
-            source: input.path,
-            destination: output.path,
-            allowMemoryRelay: false,
-            allowDirect: true,
-            expectedSourceGeneration: source.generation,
-            expectedTargetGeneration: target.generation,
-          ),
-          throwsA(anything),
+        final denied = await rust.enqueueRemoteCopy(
+          sourceId: source.id!,
+          targetId: target.id!,
+          source: input.path,
+          destination: output.path,
+          allowMemoryRelay: false,
+          allowDirect: true,
+          expectedSourceGeneration: source.generation,
+          expectedTargetGeneration: target.generation,
         );
+        final deniedTask = await remoteTask(denied, (t) => !t.busy);
+        expect(deniedTask.state, 'Failed', reason: deniedTask.error);
         expect(await output.exists(), false);
         final preview = await rust.prepareAgentAuthorisation(
           id: source.id!,
@@ -117,18 +116,18 @@ void main() {
           generation: source.generation,
         );
         final later = File('${targetServer.directory.path}/later.bin');
-        await expectLater(
-          rust.enqueueRemoteCopy(
-            sourceId: source.id!,
-            targetId: target.id!,
-            source: output.path,
-            destination: later.path,
-            allowMemoryRelay: false,
-            allowDirect: true,
-          ),
-          throwsA(anything),
+        final revoked = await rust.enqueueRemoteCopy(
+          sourceId: source.id!,
+          targetId: target.id!,
+          source: output.path,
+          destination: later.path,
+          allowMemoryRelay: false,
+          allowDirect: true,
         );
+        final revokedTask = await remoteTask(revoked, (t) => !t.busy);
+        expect(revokedTask.state, 'Failed', reason: revokedTask.error);
         expect(await later.exists(), false);
+        await rust.clearEndedRemoteCopies();
         // Explicit relay-only remains available; it never probes or grants Agent.
         final relayed = await rust.enqueueRemoteCopy(
           sourceId: target.id!,

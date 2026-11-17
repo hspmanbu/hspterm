@@ -207,10 +207,17 @@ impl DirectConnector {
             return Err(DirectPreparationError::Unconfirmed.into());
         }
         let permit = if read_only {
-            self.slot
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| DirectPreparationError::Busy)?
+            // Probe/inspect no longer fail immediately when a sibling holds the
+            // single slot; that try-again race was the first-file Busy failure.
+            // The wait is bounded by the same cap as the fixed command deadline
+            // and stays cancellable through the caller's token.
+            tokio::select! { biased;
+                _ = self.root.cancelled() => return Err(SshError::Disconnected),
+                _ = cancel.cancelled() => return Err(DirectPreparationError::Unconfirmed.into()),
+                permit = tokio::time::timeout(DEADLINE, self.slot.clone().acquire_owned()) => permit
+                    .map_err(|_| DirectPreparationError::Busy)?
+                    .map_err(|_| DirectPreparationError::Unconfirmed)?,
+            }
         } else {
             tokio::select! { biased;
                 _ = self.root.cancelled() => return Err(SshError::Disconnected),

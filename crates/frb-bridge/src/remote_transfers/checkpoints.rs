@@ -317,6 +317,7 @@ mod tests {
             cleanup: None,
             cleanup_abandoned: false,
             source_retirement: None,
+            entries: Vec::new(),
         };
         let p = RemoteTree {
             version: 1,

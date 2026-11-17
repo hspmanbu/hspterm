@@ -1114,34 +1114,50 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     }
     _enqueueBatches++;
     try {
-      for (final path in clip.paths) {
+      if (clip.cut) {
+        // Moves stay one task per file: every rename result stays independent.
+        for (final path in clip.paths) {
+          if (shouldStop?.call() ?? false) {
+            throw StateError('已停止继续入队；已接受的任务仍由队列管理');
+          }
+          tasks.add(
+            await rust.enqueueRemoteMove(
+              sourceId: clip.nativeId,
+              targetId: targetId,
+              source: path,
+              destination: remotePath(directory, path.split('/').last),
+              expectedSourceGeneration: clip.generation,
+              expectedTargetGeneration: expectedGeneration,
+              allowMemoryRelay: allowMemoryRelay,
+              allowDirect: allowDirect,
+            ),
+          );
+          if (tasks.length == 1) unawaited(_refreshAfterTransferMutation());
+        }
+      } else {
+        // One batch task copies the whole selection: one probe, one channel
+        // pair and one shared direct route. Admission is all-or-nothing.
         if (shouldStop?.call() ?? false) {
           throw StateError('已停止继续入队；已接受的任务仍由队列管理');
         }
         tasks.add(
-          clip.cut
-              ? await rust.enqueueRemoteMove(
-                  sourceId: clip.nativeId,
-                  targetId: targetId,
-                  source: path,
-                  destination: remotePath(directory, path.split('/').last),
-                  expectedSourceGeneration: clip.generation,
-                  expectedTargetGeneration: expectedGeneration,
-                  allowMemoryRelay: allowMemoryRelay,
-                  allowDirect: allowDirect,
-                )
-              : await rust.enqueueRemoteCopy(
-                  sourceId: clip.nativeId,
-                  targetId: targetId,
-                  source: path,
-                  destination: remotePath(directory, path.split('/').last),
-                  allowMemoryRelay: allowMemoryRelay,
-                  allowDirect: allowDirect,
-                  expectedSourceGeneration: clip.generation,
-                  expectedTargetGeneration: expectedGeneration,
+          await rust.enqueueRemoteCopyBatch(
+            sourceId: clip.nativeId,
+            targetId: targetId,
+            entries: <remote.RemoteCopyBatchEntry>[
+              for (final path in clip.paths)
+                remote.RemoteCopyBatchEntry(
+                  sourcePath: path,
+                  destinationPath: remotePath(directory, path.split('/').last),
                 ),
+            ],
+            allowMemoryRelay: allowMemoryRelay,
+            expectedSourceGeneration: clip.generation,
+            expectedTargetGeneration: expectedGeneration,
+            allowDirect: allowDirect,
+          ),
         );
-        if (tasks.length == 1) unawaited(_refreshAfterTransferMutation());
+        unawaited(_refreshAfterTransferMutation());
       }
       return List.unmodifiable(tasks);
     } catch (error) {
