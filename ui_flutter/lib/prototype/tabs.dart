@@ -149,6 +149,26 @@ Future<void> terminalTabMenu(
   }
 }
 
+/// Tab and session-list label rules (Windows workbench feedback):
+/// - a terminal joined into tmux shows "base · session-name" and never a
+///   number;
+/// - plain shells of the same host get a creation-order number starting at 1,
+///   where the first session keeps the bare base name ("主机名", "主机名 2").
+String terminalTabLabel(WorkbenchModel model, TerminalTab t) {
+  final session = model.session(t);
+  final base = t.name;
+  String? tmux(TerminalSession s) =>
+      s is LiveTerminalSession ? s.controller.tmuxSessionName : null;
+  final name = tmux(session);
+  if (name != null && name.isNotEmpty) return '$base · $name';
+  // model.sessions follows session creation order (map insertion order).
+  final peers = model.sessions
+      .where((s) => s.host.id == session.host.id && (tmux(s) ?? '').isEmpty)
+      .toList();
+  final index = peers.indexOf(session);
+  return index > 0 ? '$base ${index + 1}' : base;
+}
+
 class TerminalTabStrip extends StatefulWidget {
   const TerminalTabStrip({
     super.key,
@@ -156,8 +176,10 @@ class TerminalTabStrip extends StatefulWidget {
     required this.group,
     this.canLeave,
     this.onWindowAction,
+    this.onNewTab,
   });
   final Future<void> Function(String)? onWindowAction;
+  final Future<void> Function()? onNewTab;
   final WorkbenchModel model;
   final TabGroup group;
   final Future<bool> Function()? canLeave;
@@ -201,12 +223,15 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, bounds) {
+      // Narrower default cards (Windows workbench feedback): more tabs fit
+      // before scrolling; hover/selected visuals are unchanged.
       final width = ((bounds.maxWidth - 32) / group.tabs.length).clamp(
-        120.0,
-        205.0,
+        90.0,
+        150.0,
       );
       final viewport = (bounds.maxWidth - 32).clamp(0.0, double.infinity);
-      final contentWidth = group.tabs.length * (width + 2) + 28;
+      final trailing = widget.onNewTab == null ? 0.0 : 30.0;
+      final contentWidth = group.tabs.length * (width + 2) + 28 + trailing;
       final spare = (viewport - contentWidth).clamp(0.0, double.infinity);
       revealSelected(width, viewport);
       return Row(
@@ -245,7 +270,7 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
                                 height: 34,
                                 child: Center(
                                   child: Text(
-                                    t.name,
+                                    terminalTabLabel(model, t),
                                     style: const TextStyle(fontSize: 11),
                                   ),
                                 ),
@@ -278,6 +303,21 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
                                 .withValues(alpha: .2),
                     ),
                   ),
+                  // Browser-style trailing new-tab button: flows after the
+                  // last card instead of the former fixed top-right slot.
+                  if (widget.onNewTab != null)
+                    SizedBox(
+                      width: 30,
+                      child: IconButton(
+                        key: const ValueKey('new-terminal'),
+                        tooltip: '新建终端标签',
+                        onPressed: () async {
+                          if (await leave()) await widget.onNewTab!();
+                        },
+                        icon: const Icon(Icons.add, size: 15),
+                        padding: EdgeInsets.zero,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -319,7 +359,7 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
                     DeskMenuItem(
                       value: t.id,
                       child: Text(
-                        '${t.pinned ? '固定 · ' : ''}${t.name}'
+                        '${t.pinned ? '固定 · ' : ''}${terminalTabLabel(model, t)}'
                         '${model.tabGroups.length > 1 ? ' · 区域 ${model.layoutGroups.indexOf(g) + 1}' : ''}'
                         '${model.session(t).disconnected ? ' · 已断开' : ''}',
                       ),
@@ -345,7 +385,7 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
         : null;
     return Tooltip(
       message:
-          '${t.name}\n${model.session(t).host.user}@${model.session(t).host.address} · ${model.isMock ? (model.session(t).disconnected ? '已断开' : '模拟连接') : model.session(t).statusLabel}\n拖到标签调整顺序；拖到终端边缘分屏',
+          '${terminalTabLabel(model, t)}\n${model.session(t).host.user}@${model.session(t).host.address} · ${model.isMock ? (model.session(t).disconnected ? '已断开' : '模拟连接') : model.session(t).statusLabel}\n拖到标签调整顺序；拖到终端边缘分屏',
       child: GestureDetector(
         onTap: () async {
           if (await leave()) model.selectTab(t.id);
@@ -410,7 +450,7 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
               if (live != null) const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  t.name,
+                  terminalTabLabel(model, t),
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 11),
                 ),

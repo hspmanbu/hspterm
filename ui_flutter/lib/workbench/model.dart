@@ -2154,7 +2154,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         }
       }
       final state =
-          '${s.controller.reconnectNotice}/${s.controller.phase}/${s.controller.generation}/${s.controller.error}/${s.controller.tmuxReadonly}';
+          '${s.controller.reconnectNotice}/${s.controller.phase}/${s.controller.generation}/${s.controller.error}/${s.controller.tmuxReadonly}/${s.controller.tmuxSessionName}';
       if (state == observed) return;
       observed = state;
       s.disconnected = !s.controller.connected;

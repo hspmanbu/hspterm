@@ -328,7 +328,13 @@ class _TerminalGroupState extends State<TerminalGroup> {
                       child: Row(
                         children: [
                           Expanded(
-                            child: TerminalTabStrip(model: model, group: group),
+                            child: TerminalTabStrip(
+                              model: model,
+                              group: group,
+                              onNewTab: () async {
+                                model.newTab();
+                              },
+                            ),
                           ),
                           Tool(
                             model.maximizedGroupId == group.id

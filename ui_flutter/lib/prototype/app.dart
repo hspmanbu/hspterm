@@ -336,6 +336,9 @@ class PrototypeAppState extends State<PrototypeApp> {
                                 canLeave: leave,
                                 onWindowAction: (action) =>
                                     window(context, action),
+                                onNewTab: () async {
+                                  m.newTab();
+                                },
                               )
                             : Row(
                                 children: [
@@ -353,6 +356,13 @@ class PrototypeAppState extends State<PrototypeApp> {
                                         ),
                                       ),
                                     ),
+                                  // With every tab closed no strip exists;
+                                  // keep the new-tab entry where the first
+                                  // card would start until one is opened.
+                                  if (m.tabGroups.isEmpty)
+                                    Tool(Icons.add, '新建终端标签', () async {
+                                      if (await leave()) m.newTab();
+                                    }, key: const ValueKey('new-terminal')),
                                   Expanded(
                                     child: WindowDragRegion(
                                       onAction: (action) =>
@@ -385,9 +395,6 @@ class PrototypeAppState extends State<PrototypeApp> {
                           m.page == WorkPage.workspace &&
                           !m.startPage)
                         GroupActions(model: m, group: m.layoutGroups.single),
-                      Tool(Icons.add, '新建终端标签', () async {
-                        if (await leave()) m.newTab();
-                      }, key: const ValueKey('new-terminal')),
                       PopupMenuButton<String>(
                         key: const ValueKey('app-menu'),
                         tooltip: '应用菜单',
@@ -690,15 +697,30 @@ class _StartPageState extends State<StartPage> {
     super.dispose();
   }
 
+  /// Most recent connection, preselected until the user picks something else
+  /// so one click on 连接 reopens it. The device-local recent list loads with
+  /// the catalog; the dropdown follows it until then (initialValue updates
+  /// across rebuilds when the user has not chosen a host yet).
+  String? get _recentDefault {
+    final hosts = widget.model.hosts;
+    for (final id in widget.model.recent) {
+      for (final h in hosts) {
+        if (h.id == id) return h.id;
+      }
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) => Focus(
     focusNode: focus,
     onKeyEvent: (_, e) {
+      final pick = selected ?? _recentDefault;
       if (e is KeyDownEvent &&
           e.logicalKey == LogicalKeyboardKey.enter &&
-          selected != null) {
+          pick != null) {
         widget.model.openHost(
-          widget.model.hosts.firstWhere((h) => h.id == selected),
+          widget.model.hosts.firstWhere((h) => h.id == pick),
         );
         return KeyEventResult.handled;
       }
@@ -713,16 +735,7 @@ class _StartPageState extends State<StartPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
-                  children: [
-                    DeskBadge('SSH / SFTP'),
-                    SizedBox(width: 8),
-                    Text(
-                      'Windows 工作台预览',
-                      style: TextStyle(fontSize: 11, color: Color(0xff8090a0)),
-                    ),
-                  ],
-                ),
+                const Row(children: [DeskBadge('SSH / SFTP')]),
                 const SizedBox(height: 18),
                 const Text(
                   '开始新的连接',
@@ -741,43 +754,50 @@ class _StartPageState extends State<StartPage> {
                   ),
                 ),
                 const SizedBox(height: 25),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: selected,
-                        isExpanded: true,
-                        decoration: InputDecoration(
-                          labelText: widget.model.isMock ? '选择模拟主机' : '选择已保存主机',
-                          prefixIcon: Icon(Icons.dns_outlined, size: 17),
+                Builder(
+                  builder: (context) {
+                    final pick = selected ?? _recentDefault;
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: pick,
+                            isExpanded: true,
+                            decoration: InputDecoration(
+                              labelText: widget.model.isMock
+                                  ? '选择模拟主机'
+                                  : '选择已保存主机',
+                              prefixIcon: Icon(Icons.dns_outlined, size: 17),
+                            ),
+                            items: [
+                              for (final h in widget.model.hosts)
+                                DropdownMenuItem(
+                                  value: h.id,
+                                  child: Text(
+                                    h.name,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: (v) => setState(() => selected = v),
+                          ),
                         ),
-                        items: [
-                          for (final h in widget.model.hosts)
-                            DropdownMenuItem(
-                              value: h.id,
-                              child: Text(
-                                h.name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: (v) => setState(() => selected = v),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    FilledButton.icon(
-                      key: const ValueKey('quick-connect'),
-                      onPressed: selected == null
-                          ? null
-                          : () => widget.model.openHost(
-                              widget.model.hosts.firstWhere(
-                                (h) => h.id == selected,
-                              ),
-                            ),
-                      icon: const Icon(Icons.arrow_forward, size: 16),
-                      label: const Text('连接'),
-                    ),
-                  ],
+                        const SizedBox(width: 10),
+                        FilledButton.icon(
+                          key: const ValueKey('quick-connect'),
+                          onPressed: pick == null
+                              ? null
+                              : () => widget.model.openHost(
+                                  widget.model.hosts.firstWhere(
+                                    (h) => h.id == pick,
+                                  ),
+                                ),
+                          icon: const Icon(Icons.arrow_forward, size: 16),
+                          label: const Text('连接'),
+                        ),
+                      ],
+                    );
+                  },
                 ),
                 const SizedBox(height: 12),
                 Wrap(
@@ -808,6 +828,7 @@ class _StartPageState extends State<StartPage> {
                 const SizedBox(height: 26),
                 LayoutBuilder(
                   builder: (context, inner) {
+                    final pick = selected ?? _recentDefault;
                     Widget group(String title, List<DemoHost> hosts) => Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -837,7 +858,7 @@ class _StartPageState extends State<StartPage> {
                                 decoration: BoxDecoration(
                                   color: Theme.of(context).colorScheme.surface,
                                   border: Border.all(
-                                    color: selected == h.id
+                                    color: pick == h.id
                                         ? Theme.of(context).colorScheme.primary
                                         : Theme.of(context).dividerColor,
                                   ),

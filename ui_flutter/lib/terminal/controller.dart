@@ -166,6 +166,13 @@ class TerminalController extends ChangeNotifier {
 
   int? _tmuxToken;
   bool? tmuxReadonly;
+
+  /// Display name of the tmux session this terminal joined (create or
+  /// attach); null for a plain SSH shell. Tabs and session lists read it.
+  /// Deliberately not cleared on reconnect: Rust auto-restore replays a
+  /// previously confirmed session identity without a new dialog, and a new
+  /// dialog choice simply overwrites it here.
+  String? tmuxSessionName;
   // Encrypted SSH preferences; applied to live tmux tabs without reconnect.
   bool tmuxLocalSelection = true;
   bool tmuxShiftEnterLf = false;
@@ -298,8 +305,9 @@ class TerminalController extends ChangeNotifier {
         generation == expected &&
         phase == 'Connecting';
     tmx.TmuxSelection? choice;
+    tmx.TmuxPrompt? prompt;
     try {
-      final prompt = await backend.tmuxPrompt(value, token);
+      prompt = await backend.tmuxPrompt(value, token);
       // The independently coalesced status event can follow this prompt. The
       // native read validates its actual original Connecting attempt first.
       if (!_disposed &&
@@ -321,6 +329,8 @@ class TerminalController extends ChangeNotifier {
       if (current()) report(failure);
     } finally {
       if (!current()) choice = null;
+      tmuxSessionName = _tmuxDisplayName(prompt, choice);
+      notifyListeners();
       try {
         await backend.answerTmux(
           value,
@@ -337,6 +347,24 @@ class TerminalController extends ChangeNotifier {
       } catch (failure) {
         if (current()) report(failure);
       }
+    }
+  }
+
+  /// The joined session's display name: the typed name for a created session,
+  /// the listing entry for an attached one, null for plain shells/cancel.
+  String? _tmuxDisplayName(tmx.TmuxPrompt? prompt, tmx.TmuxSelection? choice) {
+    final c = choice;
+    if (c == null || prompt == null) return null;
+    switch (c.kind) {
+      case 2:
+        return c.name;
+      case 3:
+        for (final s in prompt.sessions) {
+          if (s.id == c.sessionId) return s.name;
+        }
+        return null;
+      default:
+        return null;
     }
   }
 
