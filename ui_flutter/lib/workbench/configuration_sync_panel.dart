@@ -259,6 +259,13 @@ class ConfigurationSyncBanner extends StatelessWidget {
     animation: controller,
     builder: (context, _) {
       final state = controller.state;
+      // A disabled target must not keep the failure banner up: the residual
+      // failed phase and stale controller notices (including the greyed
+      // manual retry) vanish the moment eligibility drops and only return
+      // after the target is enabled again.
+      if (state?.eligible == false) {
+        return const SizedBox.shrink();
+      }
       if (controller.error == null &&
           state?.review == null &&
           state?.phase != 'failed' &&

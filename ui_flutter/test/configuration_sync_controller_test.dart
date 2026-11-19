@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:hspterm/workbench/configuration_sync_reference_model.dart';
 import 'package:hspterm/workbench/configuration_sync_references.dart';
 import 'package:hspterm/workbench/configuration_sync.dart';
+import 'package:hspterm/workbench/configuration_sync_panel.dart';
 
 Map<String, dynamic> referenceOption() => {
   'id': 'host-${'a' * 32}',
@@ -36,6 +37,7 @@ class _Gateway implements ConfigurationSyncGateway {
       intervalLoads = 0,
       intervalSaves = 0;
   String phase = 'idle', operation = '', review = 'review-1';
+  String? error;
   bool risky = false, eligible = true, retry = false, references = false;
   int checkInterval = 0;
   final List<String> diverged = [], directions = [], savedIntervals = [];
@@ -49,7 +51,7 @@ class _Gateway implements ConfigurationSyncGateway {
     'eligible': eligible,
     'operation': operation.isEmpty ? null : operation,
     'phase': phase,
-    'error': phase == 'cancelled' ? 'cancelled' : null,
+    'error': phase == 'cancelled' ? 'cancelled' : error,
     'commits': commits,
     'configuration_updates': updates,
     'remote_published': false,
@@ -327,6 +329,19 @@ void main() {
     expect(syncFailureLabel(state), contains('令牌刷新结果未确认'));
     expect(state.commits, 0);
   });
+  test(
+    'a typed data mismatch explains the sync password, not a collection id',
+    () {
+      final gateway = _Gateway()..error = 'data';
+      final value = jsonDecode(gateway.snapshot()) as Map<String, dynamic>;
+      value['phase'] = 'failed';
+      final state = ConfigurationSyncState(value);
+      expect(state.error, 'data');
+      expect(syncFailureLabel(state), contains('同步密码或数据版本不匹配'));
+      expect(syncFailureLabel(state), contains('与创建该数据集时一致的同步密码'));
+      expect(syncFailureLabel(state), isNot(contains('集合标识')));
+    },
+  );
   testWidgets(
     'startup and an idle clock never synchronize persisted state without a check interval',
     (tester) async {
@@ -527,6 +542,75 @@ void main() {
       await drainAsync(tester, controller.shutdown());
       expect(gateway.prepares, 0);
       expect(gateway.cancels, greaterThanOrEqualTo(1));
+      controller.dispose();
+    },
+  );
+  testWidgets(
+    'disabling the target immediately hides the failure banner until re-enabled',
+    (tester) async {
+      final gateway = _Gateway()..error = 'data';
+      final controller = ConfigurationSyncController(gateway: gateway);
+      await controller.start();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ConfigurationSyncBanner(controller: controller)),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('手动重试'), findsNothing);
+      gateway.publish('failed');
+      await tester.pump();
+      expect(find.textContaining('同步密码或数据版本不匹配'), findsOneWidget);
+      expect(find.text('手动重试'), findsOneWidget);
+      // A stale request-level notice rides along in the smaller line.
+      controller.error = '同步请求未完成；请查看状态后明确重试。';
+      controller.notifyListeners();
+      await tester.pump();
+      expect(find.text('同步请求未完成；请查看状态后明确重试。'), findsOneWidget);
+      // Unchecking the target must drop the residual failed state, the
+      // controller notice and the greyed manual retry all at once.
+      gateway.eligible = false;
+      gateway.publish('failed');
+      await tester.pump();
+      expect(controller.state?.eligible, false);
+      expect(controller.error, isNull);
+      expect(find.text('手动重试'), findsNothing);
+      expect(find.textContaining('同步密码或数据版本不匹配'), findsNothing);
+      // Re-enabling restores the banner from the still-failed state.
+      gateway.eligible = true;
+      gateway.publish('failed');
+      await tester.pump();
+      expect(find.textContaining('同步密码或数据版本不匹配'), findsOneWidget);
+      expect(find.text('手动重试'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await drainAsync(tester, controller.shutdown());
+      controller.dispose();
+    },
+  );
+  testWidgets(
+    'disabling the target stops the periodic timer and re-enabling re-arms it',
+    (tester) async {
+      final gateway = _Gateway()..checkInterval = 1;
+      final controller = ConfigurationSyncController(gateway: gateway);
+      await controller.start();
+      expect(controller.checkIntervalMinutes, 1);
+      expect(controller.checkTimerArmed, isTrue);
+      await tester.pump(const Duration(minutes: 1));
+      expect(gateway.reserves, 1);
+      gateway.eligible = false;
+      gateway.publish('idle');
+      await tester.pump();
+      expect(controller.checkTimerArmed, isFalse);
+      await tester.pump(const Duration(minutes: 5));
+      expect(gateway.reserves, 1);
+      gateway.eligible = true;
+      gateway.publish('idle');
+      await tester.pump();
+      expect(controller.checkTimerArmed, isTrue);
+      await tester.pump(const Duration(minutes: 1));
+      expect(gateway.reserves, 2);
+      expect(gateway.confirms, 2);
+      await drainAsync(tester, controller.shutdown());
       controller.dispose();
     },
   );

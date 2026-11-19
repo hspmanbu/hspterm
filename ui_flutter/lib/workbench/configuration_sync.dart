@@ -245,6 +245,10 @@ class ConfigurationSyncController extends ChangeNotifier {
   /// Minutes between periodic checks; 0 disables. Device-local, default 10.
   int get checkIntervalMinutes => _checkIntervalMinutes;
   bool get checkIntervalLoaded => _checkIntervalLoaded;
+
+  /// Whether the periodic check timer is armed right now. A disabled target
+  /// never keeps it armed; enabling a target re-arms it.
+  bool get checkTimerArmed => _checkTimer != null;
   bool _closing = false,
       _disposed = false,
       _pendingAuto = false,
@@ -269,6 +273,7 @@ class ConfigurationSyncController extends ChangeNotifier {
     }
     if (state?.sequence == next.sequence && state?.owner == next.owner) return;
     final disabled = state?.eligible == true && !next.eligible;
+    final enabled = state?.eligible != true && next.eligible;
     state = next;
     if (next.active) {
       _operation = next.operation;
@@ -280,7 +285,12 @@ class ConfigurationSyncController extends ChangeNotifier {
       _debounce?.cancel();
       _debounce = null;
       if (disabled) {
+        // The disabled target owns nothing anymore: residual failure notices
+        // must not keep a banner alive and the periodic timer must stop.
+        error = null;
         _editEpoch++;
+        _checkTimer?.cancel();
+        _checkTimer = null;
         if (_operation != null) {
           unawaited(
             _cancelNative().catchError((Object _) {
@@ -290,6 +300,10 @@ class ConfigurationSyncController extends ChangeNotifier {
           );
         }
       }
+    } else if (enabled) {
+      // Re-enabling the target restores the periodic schedule from the
+      // already-loaded device-local interval.
+      _restartCheckTimer();
     }
     if (next.configurationUpdates > _commits) {
       _commits = next.configurationUpdates;
@@ -442,10 +456,17 @@ class ConfigurationSyncController extends ChangeNotifier {
   /// Periodic check interval. Fires only when a target is eligible, no work is
   /// running and no review/references candidate is pending; needing review
   /// stops the periodic attempts until the user resolves it explicitly.
+  /// A disabled target never keeps a timer; enabling one restarts it.
   void _restartCheckTimer() {
     _checkTimer?.cancel();
     _checkTimer = null;
-    if (_closing || _disposed || _faulted || _owner == null) return;
+    if (_closing ||
+        _disposed ||
+        _faulted ||
+        _owner == null ||
+        state?.eligible != true) {
+      return;
+    }
     if (_checkIntervalMinutes <= 0 || _checkIntervalMinutes > 1440) return;
     _checkTimer = Timer.periodic(Duration(minutes: _checkIntervalMinutes), (_) {
       if (_closing || _disposed || _faulted || busy) return;
@@ -750,9 +771,8 @@ String syncFailureLabel(ConfigurationSyncState? state) {
     'references' => '两端的分组或跳板引用冲突；请调整相关配置后重新同步。',
     'clock' => '设备时钟异常，请校准后重试。',
     'capacity' => '同步数据超过容量限制，两端数据均保留。',
-    'first_read_decrypt' =>
-      '本地没有同步基线且云端对象解密失败：同步密码必须与最初创建数据集的设备一致（密码参与派生集合）。',
-    'data' => '同步密码、集合标识或数据版本不匹配，未应用。',
+    'first_read_decrypt' => '本地没有同步基线且云端对象解密失败：同步密码必须与最初创建数据集的设备一致（密码参与派生集合）。',
+    'data' => '同步密码或数据版本不匹配，未应用；新设备接入请使用与创建该数据集时一致的同步密码。',
     'denied' => '同步服务器拒绝访问，请检查已保存认证。',
     'directory' => '同步目录未就绪：请在服务器上准备 hspterm 目录或核对 WebDAV 根目录地址。',
     'authorization' => 'Google Drive 本机授权缺失、已撤销或与目标绑定不一致；请重新授权并明确配置目标。',
