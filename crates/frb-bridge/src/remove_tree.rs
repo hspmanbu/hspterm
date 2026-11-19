@@ -389,13 +389,21 @@ pub(crate) async fn remove_remote_tree(
                         }
                     },
                 };
+                let stack_base = pending.len();
                 let expansion =
                     expand_remote_directory(&path, depth, stream, budget, &mut pending, outcome)
                         .await?;
                 if let RemoveExpansion::Complete = expansion {
+                    // The children queued by the expansion sit at or above
+                    // `stack_base`; parking the parent's RMDIR right below them
+                    // makes LIFO processing delete every subtree entry first
+                    // and the directory last, for arbitrarily deep nesting. (A
+                    // plain push would RMDIR before the children — ENOTEMPTY;
+                    // insert(0) would order an ancestor's RMDIR before a
+                    // descendant's once a grandchild expands.)
                     // Even with failed siblings, the root RMDIR is still
                     // attempted: it classifies the final state truthfully.
-                    pending.push(RemoveVisit::RemoveDir(path));
+                    pending.insert(stack_base, RemoveVisit::RemoveDir(path));
                 }
             }
         }

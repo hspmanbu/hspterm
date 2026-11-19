@@ -1337,7 +1337,10 @@ class _FilesPanelState extends State<FilesPanel> {
   void _reportDeleteFailure(Object error) {
     final text = appMessage(error);
     if (text.contains('未执行')) {
-      _reportDeleteNotice('会话已变化，未删除任何文件', AppNoticeLevel.info);
+      // Generation drift means nothing was deleted; that must be visible, not
+      // a quiet status-bar line the user reads as "the delete just did
+      // nothing" after confirming the dialog.
+      _reportDeleteNotice('会话已变化，未删除任何文件', AppNoticeLevel.warning);
     } else {
       _reportDeleteNotice('删除未全部完成：$text', AppNoticeLevel.warning);
     }

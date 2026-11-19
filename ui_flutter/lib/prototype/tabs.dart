@@ -39,7 +39,15 @@ Future<void> terminalTabMenu(
   final g = model.groupOf(t.id)!;
   final value = await showMenu<String>(
     context: context,
-    position: RelativeRect.fromLTRB(position.dx, position.dy, 0, 0),
+    // Same (left, top, right, bottom) anchor as every other right-click menu:
+    // zeroed right/bottom make Flutter treat the pointer as screen-edge
+    // adjacent and reopen the menu docked to the top-right corner.
+    position: RelativeRect.fromLTRB(
+      position.dx,
+      position.dy,
+      position.dx,
+      position.dy,
+    ),
     items: [
       const DeskMenuItem(value: 'rename', child: Text('重命名终端')),
       DeskMenuItem(value: 'pin', child: Text(t.pinned ? '取消固定' : '固定标签')),
