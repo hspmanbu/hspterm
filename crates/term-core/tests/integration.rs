@@ -83,3 +83,40 @@ fn readline_keypad_and_public_command_anchor_reflow_do_not_revoke_private_input(
         "actual alternate-screen entry still revokes private readiness"
     );
 }
+
+#[test]
+fn plain_caret_keys_keep_suggestions_but_mid_line_edits_fail_closed() {
+    let mut t = terminal(true);
+    t.feed(packet(1, "R", "").as_bytes()).unwrap();
+    t.observe_integration_text(b"git st");
+    let prefix = |t: &Terminal| {
+        t.integration_input()
+            .map(|(_, text)| text.as_str().to_owned())
+    };
+    assert_eq!(prefix(&t).as_deref(), Some("git st"));
+    // Click-to-cursor replays and arrow browsing only move Readline's POINT;
+    // the mirrored line — and with it the suggestion prefix — stays exact.
+    for key in [Key::Left, Key::Left, Key::Right, Key::Home, Key::End] {
+        t.observe_integration_key(&KeyEvent::press(key), b"\x1b[D");
+    }
+    assert_eq!(prefix(&t).as_deref(), Some("git st"));
+    t.observe_integration_text(b"atus");
+    assert_eq!(prefix(&t).as_deref(), Some("git status"));
+    // An edit with the caret before the end would insert mid-line, which an
+    // append-only mirror must never guess: fail closed until the next prompt.
+    t.observe_integration_key(&KeyEvent::press(Key::Left), b"\x1b[D");
+    t.observe_integration_text(b"x");
+    assert_eq!(prefix(&t), None);
+    // History recall replaces the whole line, so it still revokes.
+    t.feed(packet(2, "R", "").as_bytes()).unwrap();
+    t.observe_integration_text(b"pwd");
+    t.observe_integration_key(&KeyEvent::press(Key::Up), b"\x1b[A");
+    assert_eq!(prefix(&t), None);
+    // Shift-arrows and modified arrows stay fail-closed.
+    t.feed(packet(3, "R", "").as_bytes()).unwrap();
+    t.observe_integration_text(b"ls");
+    let mut shift_left = KeyEvent::press(Key::Left);
+    shift_left.modifiers.shift = true;
+    t.observe_integration_key(&shift_left, b"\x1b[1;2D");
+    assert_eq!(prefix(&t), None);
+}

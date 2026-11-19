@@ -124,14 +124,17 @@ class _TerminalSuggestionsOverlayState
         final ticket = state.view!.ticket;
         final width = min(480.0, size.width - 18);
         final frame = state.terminal.metadata;
-        final row = frame?.cursorRow ?? widget.cursorRow;
+        // A frame from just before a font/zoom/geometry change can still
+        // carry a cursor row outside the current viewport. Clamp it to the
+        // last visible row instead of dropping the box: the next frame
+        // re-anchors it, and candidates must not vanish with position.
+        final lastRow = max(0, size.height ~/ widget.cell.height - 1);
+        final row = (frame?.cursorRow ?? widget.cursorRow).clamp(0, lastRow);
         final column = frame?.cursorColumn ?? widget.cursorColumn;
-        if (row < 0 ||
-            row * widget.cell.height >= size.height ||
-            (frame != null &&
-                (frame.displayOffset > 0 ||
-                    !frame.cursorVisible ||
-                    row >= frame.rows))) {
+        if (frame != null &&
+            (frame.displayOffset > 0 ||
+                !frame.cursorVisible ||
+                row >= frame.rows)) {
           return const IgnorePointer(child: SizedBox.expand());
         }
         final desired = min(200.0, choices.length * 30.0 + 24);

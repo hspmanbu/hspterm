@@ -486,6 +486,17 @@ class TerminalViewState extends State<TerminalView>
     LogicalKeyboardKey.metaLeft,
     LogicalKeyboardKey.metaRight,
   }.contains(key);
+
+  /// Plain caret-only movement (arrows/Home/End, no modifiers) never edits
+  /// the remote Readline line, so the candidate prefix is still exact and the
+  /// native proof survives it. Hiding here could never be undone: no input
+  /// revision changes, so no reload would bring the box back.
+  bool _caretOnlyKey(LogicalKeyboardKey key, int mods) =>
+      mods == 0 &&
+      (key == LogicalKeyboardKey.arrowLeft ||
+          key == LogicalKeyboardKey.arrowRight ||
+          key == LogicalKeyboardKey.home ||
+          key == LogicalKeyboardKey.end);
   KeyEventResult _key(FocusNode node, KeyEvent event) {
     final mods = _mods, down = event is! KeyUpEvent, key = event.logicalKey;
     if (down && !_isModifier(key) && key != LogicalKeyboardKey.escape) {
@@ -547,7 +558,9 @@ class TerminalViewState extends State<TerminalView>
       }
       return KeyEventResult.handled;
     }
-    if (down && !_isModifier(key)) _suggestions.inputChanged();
+    if (down && !_isModifier(key) && !_caretOnlyKey(key, mods)) {
+      _suggestions.inputChanged();
+    }
     if (composing && mods & 6 == 0) return KeyEventResult.ignored;
     if (!composing &&
         widget.onPasteImage != null &&

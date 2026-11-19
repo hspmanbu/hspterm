@@ -83,9 +83,23 @@ pub struct State {
     next_request: u64,
     ready: bool,
     text: Zeroizing<String>,
+    /// Mirror of Readline's POINT in characters. Exact while every tracked
+    /// edit appended at the caret: pure caret keys move it without touching
+    /// the proof, and any edit with the caret before the end fail-closes in
+    /// typed/backspace instead of guessing the insertion point.
+    caret: usize,
     edit: Option<PendingEdit>,
     enter: Option<PendingEnter>,
     receipts: VecDeque<(u64, bool)>,
+}
+
+/// Caret-only movement; the mirrored line text is untouched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaretMove {
+    Left,
+    Right,
+    Home,
+    End,
 }
 fn single_line(text: &str) -> bool {
     text.len() <= MAX_LINE && !text.chars().any(char::is_control)
@@ -133,6 +147,7 @@ impl State {
             next_request: 0,
             ready: false,
             text: Zeroizing::new(String::new()),
+            caret: 0,
             edit: None,
             enter: None,
             receipts: VecDeque::new(),
@@ -180,6 +195,7 @@ impl State {
         }
         self.ready = false;
         self.text = Zeroizing::new(String::new());
+        self.caret = 0;
         self.edit = None;
         self.enter = None;
         self.revision = self.revision.saturating_add(1);
@@ -201,6 +217,22 @@ impl State {
             self.invalidate();
         }
     }
+    /// Caret-only movement (plain arrows/Home/End). The line text — and so
+    /// the suggestion prefix and proof — is unchanged; only the mirrored
+    /// POINT moves. No revision bump: a click that dismissed the box must
+    /// not resurrect it until the input actually changes.
+    pub fn caret(&mut self, movement: CaretMove) {
+        if !self.ready || self.edit.is_some() {
+            return;
+        }
+        let chars = self.text.chars().count();
+        self.caret = match movement {
+            CaretMove::Left => self.caret.saturating_sub(1),
+            CaretMove::Right => (self.caret + 1).min(chars),
+            CaretMove::Home => 0,
+            CaretMove::End => chars,
+        };
+    }
     /// Invoke in the PTY owner's input order. Any unsupported key/paste/IME or
     /// cursor/history edit must call invalidate rather than infer an edit.
     pub fn typed(&mut self, text: &str) -> Result<(), Failure> {
@@ -208,10 +240,17 @@ impl State {
             self.invalidate();
             return Err(Failure::Unavailable);
         }
+        if self.caret != self.text.chars().count() {
+            // The caret sits before the end, so the remote inserted mid-line
+            // while the mirror can only append; guessing would desync it.
+            self.invalidate();
+            return Err(Failure::Unavailable);
+        }
         if !single_line(text) || self.text.len().saturating_add(text.len()) > MAX_LINE {
             self.invalidate();
             return Err(Failure::Unsupported);
         }
+        self.caret += text.chars().count();
         self.text.push_str(text);
         self.revision = self.revision.checked_add(1).ok_or_else(|| {
             self.invalidate();
@@ -222,10 +261,11 @@ impl State {
     /// Backspace after non-ASCII input is deliberately uncertain until a fresh
     /// prompt; different Readline locales/grapheme policies must not be guessed.
     pub fn backspace(&mut self) -> Result<(), Failure> {
-        if !self.ready || !self.text.is_ascii() {
+        if !self.ready || !self.text.is_ascii() || self.caret != self.text.chars().count() {
             self.invalidate();
             return Err(Failure::Unsupported);
         }
+        self.caret = self.caret.saturating_sub(1);
         self.text.pop();
         self.revision = self.revision.checked_add(1).ok_or_else(|| {
             self.invalidate();
@@ -298,6 +338,7 @@ impl State {
         self.next_request = id;
         self.ready = false;
         self.text = Zeroizing::new(String::new());
+        self.caret = 0;
         self.edit = Some(PendingEdit {
             id,
             prompt: self.prompt,
@@ -410,6 +451,7 @@ impl State {
                         });
                     } else {
                         self.receipt(pending.id, true);
+                        self.caret = text.chars().count();
                         self.text = text;
                         self.ready = true;
                     }
@@ -651,5 +693,60 @@ mod tests {
             assert!(s.receipts.len() <= 8);
         }
         assert_eq!(s.outcome(1), None);
+    }
+    #[test]
+    fn caret_moves_keep_the_exact_prefix_and_proof() {
+        let now = Instant::now();
+        let mut s = state();
+        ready(&mut s, 1, now);
+        s.typed("git status").unwrap();
+        let proof = s.proof().unwrap();
+        // Click-to-cursor replays and arrow browsing only move POINT.
+        for _ in 0..3 {
+            s.caret(CaretMove::Left);
+        }
+        assert_eq!(s.proof(), Some(proof), "caret keys never bump the revision");
+        assert_eq!(s.prefix(), Some("git status"));
+        for _ in 0..2 {
+            s.caret(CaretMove::Right);
+        }
+        s.caret(CaretMove::End);
+        assert_eq!(s.prefix(), Some("git status"));
+        // Back at the end the mirror is exact again, so appending works.
+        s.typed(" --short").unwrap();
+        assert_eq!(s.prefix(), Some("git status --short"));
+        s.backspace().unwrap();
+        assert_eq!(s.prefix(), Some("git status --shor"));
+    }
+    #[test]
+    fn edits_with_the_caret_mid_line_fail_closed() {
+        let now = Instant::now();
+        let mut s = state();
+        ready(&mut s, 1, now);
+        s.typed("中文").unwrap();
+        s.caret(CaretMove::Home);
+        // Insertion before the end has an unknowable position in an
+        // append-only mirror; backspace likewise deletes elsewhere.
+        assert!(s.typed("X").is_err());
+        assert!(s.prefix().is_none());
+        ready(&mut s, 2, now);
+        s.typed("abc").unwrap();
+        s.caret(CaretMove::Left);
+        assert!(s.backspace().is_err());
+        assert!(s.prefix().is_none());
+        // A dead state ignores caret keys; only a fresh prompt re-arms.
+        s.caret(CaretMove::End);
+        assert!(s.prefix().is_none());
+        ready(&mut s, 3, now);
+        assert_eq!(s.prefix(), Some(""));
+        // Clamp at both edges keeps the mirror honest.
+        s.caret(CaretMove::Left);
+        s.typed("ok").unwrap();
+        assert_eq!(s.prefix(), Some("ok"));
+        for _ in 0..5 {
+            s.caret(CaretMove::Right);
+        }
+        s.typed("!").unwrap();
+        assert_eq!(s.prefix(), Some("ok!"));
     }
 }

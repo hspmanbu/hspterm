@@ -599,6 +599,14 @@ impl Terminal {
                 }
                 Err(_) => state.invalidate(),
             },
+            // Plain caret movement never edits the mirrored Readline line, so
+            // the suggestion proof and prefix stay exact (shift-select and
+            // modified arrows stay fail-closed below). This is what keeps
+            // candidates alive after click-to-cursor replays and arrow edits.
+            Key::Left if !m.shift => state.caret(integration::CaretMove::Left),
+            Key::Right if !m.shift => state.caret(integration::CaretMove::Right),
+            Key::Home if !m.shift => state.caret(integration::CaretMove::Home),
+            Key::End if !m.shift => state.caret(integration::CaretMove::End),
             _ => state.invalidate(),
         }
     }

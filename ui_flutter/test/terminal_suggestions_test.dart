@@ -128,6 +128,91 @@ void main() {
   );
 
   testWidgets(
+    'stale cursor rows beyond the live viewport clamp instead of hiding',
+    (tester) async {
+      final backend = SuggestionsBackend();
+      final current = await controller(backend);
+      final suggestions = TerminalSuggestionsController(current)
+        ..setWanted(true);
+      try {
+        // A frame from before a shrink: 40 rows with the cursor on the last
+        // row, while the overlay's live viewport only fits 12 rows of 20px.
+        current.applyFrame(
+          rust.RenderFrame(
+            revision: 2,
+            contentRevision: 1,
+            outputLines: 0,
+            sizeLocked: false,
+            sameWordEnabled: null,
+            sameWordCaseSensitive: null,
+            decorationsLimited: null,
+            searchRevision: null,
+            searchSpans: [],
+            columns: 6,
+            rows: 40,
+            full: true,
+            changedRows: const [],
+            cursorColumn: 0,
+            cursorRow: 39,
+            cursorVisible: true,
+            cursorShape: 2,
+            cursorBlink: false,
+            osc52Enabled: null,
+            rightClickPaste: null,
+            copyOnSelection: null,
+            imagePasteShortcut: null,
+            cursorColor: 0xffffffff,
+            background: 0xff10151d,
+            alternateScreen: false,
+            mouseReporting: false,
+            historyLines: 0,
+            displayOffset: 0,
+          ),
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 600,
+                  height: 240,
+                  child: Stack(
+                    children: [
+                      TerminalSuggestionsOverlay(
+                        controller: suggestions,
+                        viewport: const Size(600, 240),
+                        cell: const Size(10, 20),
+                        cursorColumn: 0,
+                        cursorRow: 39,
+                        choose: (_, _) {},
+                        delete: (_, _) {},
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 30));
+        await tester.pump();
+        final popup = find.byKey(const ValueKey('terminal-suggestions-popup'));
+        expect(popup, findsOneWidget, reason: '位置过时不应丢掉候选框');
+        final rect = tester.getRect(popup);
+        expect(rect.top, greaterThanOrEqualTo(0));
+        expect(rect.bottom, lessThanOrEqualTo(240));
+        // At the clamped last row the box must pop up above the input row.
+        expect(rect.bottom, lessThanOrEqualTo(11 * 20.0));
+      } finally {
+        await tester.pumpWidget(const SizedBox());
+        suggestions.dispose();
+        await closeTerminal(tester, current);
+      }
+    },
+  );
+
+  testWidgets(
     'candidate delete keeps its slot but reveals only on row hover or keyboard selection',
     (tester) async {
       final backend = SuggestionsBackend(),
