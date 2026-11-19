@@ -313,12 +313,14 @@ void main() {
         find.byKey(ValueKey('tab-overflow-${m.focusedGroupId}')),
       );
       await tester.pumpAndSettle();
+      // 24 same-host sessions: creation-order numbering labels the 24th card
+      // "Terminal 23 - 24" (first session keeps the bare base name).
       await tester.scrollUntilVisible(
-        find.text('Terminal 23').last,
+        find.text('Terminal 23 - 24').last,
         160,
         scrollable: find.byType(Scrollable).last,
       );
-      await tester.tap(find.text('Terminal 23').last);
+      await tester.tap(find.text('Terminal 23 - 24').last);
       await tester.pumpAndSettle();
       visible(m.tabs.last.id);
       final last = m.tabs.last;

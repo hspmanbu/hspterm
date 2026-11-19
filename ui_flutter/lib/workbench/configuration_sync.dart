@@ -222,8 +222,8 @@ class NativeConfigurationSyncGateway implements ConfigurationSyncGateway {
 /// Owned by the application, independent of a settings route or terminal view.
 /// One-shot debounce only after an actual edit event, plus the user-configured
 /// periodic check interval (default 10 minutes, 0 disables). The periodic tick
-/// only starts an exchange when eligible and idle; a pending review stops it
-/// and is never auto-confirmed.
+/// only starts an exchange when eligible and idle; a pending review that needs
+/// consent stops it and is never auto-confirmed.
 class ConfigurationSyncController extends ChangeNotifier {
   ConfigurationSyncController({
     this.gateway = const NativeConfigurationSyncGateway(),
@@ -544,8 +544,13 @@ class ConfigurationSyncController extends ChangeNotifier {
       return;
     }
     _accept(await gateway.prepare(owner, operation));
-    while (automatic &&
-        !_closing &&
+    // Any candidate that needs no explicit consent — no references, no
+    // unresolved divergence, no conflicts, no credential changes and no
+    // incoming deletions (this includes a no-op exchange where both sides
+    // equal the baseline, and single-sided auto-merges) — confirms itself
+    // for manual syncs too. Only a genuinely risky candidate parks in the
+    // review phase and raises the review banner/dialog.
+    while (!_closing &&
         epoch == _editEpoch &&
         state?.phase == 'review' &&
         state?.operation == operation &&

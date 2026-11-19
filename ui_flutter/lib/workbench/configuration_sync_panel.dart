@@ -129,8 +129,6 @@ Future<void> showConfigurationSyncReview(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   SelectableText(review.endpoint),
-                  const SizedBox(height: 8),
-                  SelectableText('集合：${review.collection}'),
                   const SizedBox(height: 12),
                   Text(
                     '云端更新 ${review.counts['incoming_winners']} 项，其中两端同改需选方向 ${review.counts['conflicts']} 项。',

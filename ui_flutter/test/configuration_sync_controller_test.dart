@@ -424,7 +424,7 @@ void main() {
     },
   );
   testWidgets(
-    'automatic credential conflicts stop at review and manual sync always reviews',
+    'consent reviews stop the flow, and manual sync without them never pops a review',
     (tester) async {
       final gateway = _Gateway()..risky = true;
       final controller = ConfigurationSyncController(gateway: gateway);
@@ -436,10 +436,13 @@ void main() {
       expect(controller.state?.review?.needsConsent, isTrue);
       await controller.confirm(controller.state!);
       expect(gateway.confirms, 1);
+      // No divergence, conflict, credential change or deletion: the manual
+      // exchange completes itself instead of parking at a zero-count review.
       gateway.risky = false;
       await controller.synchronize();
-      expect(controller.state?.phase, 'review');
-      expect(gateway.confirms, 1);
+      expect(gateway.confirms, 2);
+      expect(controller.state?.phase, 'committed');
+      expect(controller.state?.review, isNull);
       await drainAsync(tester, controller.shutdown());
       controller.dispose();
     },
@@ -447,7 +450,11 @@ void main() {
   testWidgets(
     'a changed server review cannot reuse a previously captured confirmation',
     (tester) async {
-      final gateway = _Gateway()..retry = true;
+      // risky keeps the manual exchange parked at a consent review so the
+      // stale-token guards below are exercised through explicit confirms.
+      final gateway = _Gateway()
+        ..risky = true
+        ..retry = true;
       final controller = ConfigurationSyncController(gateway: gateway);
       await controller.start();
       await controller.synchronize();

@@ -153,7 +153,7 @@ Future<void> terminalTabMenu(
 /// - a terminal joined into tmux shows "base · session-name" and never a
 ///   number;
 /// - plain shells of the same host get a creation-order number starting at 1,
-///   where the first session keeps the bare base name ("主机名", "主机名 2").
+///   where the first session keeps the bare base name ("主机名", "主机名 - 2").
 String terminalTabLabel(WorkbenchModel model, TerminalTab t) {
   final session = model.session(t);
   final base = t.name;
@@ -166,7 +166,7 @@ String terminalTabLabel(WorkbenchModel model, TerminalTab t) {
       .where((s) => s.host.id == session.host.id && (tmux(s) ?? '').isEmpty)
       .toList();
   final index = peers.indexOf(session);
-  return index > 0 ? '$base ${index + 1}' : base;
+  return index > 0 ? '$base - ${index + 1}' : base;
 }
 
 class TerminalTabStrip extends StatefulWidget {
@@ -243,7 +243,7 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  for (final t in group.tabs)
+                  for (final (i, t) in group.tabs.indexed)
                     DragTarget<TerminalTabDrag>(
                       onWillAcceptWithDetails: (d) =>
                           d.data.id != t.id && model.tabById(d.data.id) != null,
@@ -285,6 +285,10 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
                               t,
                               width,
                               candidates.isNotEmpty,
+                              separator:
+                                  i > 0 &&
+                                  !_activeTab(group.tabs[i - 1]) &&
+                                  !_activeTab(t),
                             ),
                           ),
                     ),
@@ -371,11 +375,21 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
       );
     },
   );
-  Widget _tab(BuildContext context, TerminalTab t, double width, bool target) {
-    final active =
-        group.selectedId == t.id &&
-        !model.startPage &&
-        model.page == WorkPage.workspace;
+
+  /// Selected card in the workspace page: the one card without a divider
+  /// beside it and with the accent bar and page background.
+  bool _activeTab(TerminalTab t) =>
+      group.selectedId == t.id &&
+      !model.startPage &&
+      model.page == WorkPage.workspace;
+  Widget _tab(
+    BuildContext context,
+    TerminalTab t,
+    double width,
+    bool target, {
+    bool separator = false,
+  }) {
+    final active = _activeTab(t);
     final session = model.session(t);
     final live =
         !model.isMock &&
@@ -399,7 +413,10 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
           width: width,
           height: 35,
           margin: const EdgeInsets.only(left: 2, top: 3),
-          padding: const EdgeInsets.only(left: 9),
+          // A divider card trades 8px of leading padding for the short
+          // separator line, so icon/text offsets and the strip layout
+          // (per-card width, reveal math) stay byte-identical.
+          padding: EdgeInsets.only(left: separator ? 1 : 9),
           decoration: BoxDecoration(
             color: target
                 ? Theme.of(context).colorScheme.primary.withValues(alpha: .18)
@@ -418,6 +435,14 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
           ),
           child: Row(
             children: [
+              if (separator) ...[
+                Container(
+                  width: 1,
+                  height: 14,
+                  color: Theme.of(context).dividerColor.withValues(alpha: .6),
+                ),
+                const SizedBox(width: 7),
+              ],
               Icon(
                 t.pinned ? Icons.push_pin_outlined : Icons.circle,
                 size: t.pinned ? 12 : 6,
