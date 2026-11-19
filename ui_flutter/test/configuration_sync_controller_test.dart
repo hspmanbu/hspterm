@@ -32,9 +32,13 @@ class _Gateway implements ConfigurationSyncGateway {
       cancels = 0,
       closes = 0,
       commits = 0,
-      updates = 0;
+      updates = 0,
+      intervalLoads = 0,
+      intervalSaves = 0;
   String phase = 'idle', operation = '', review = 'review-1';
   bool risky = false, eligible = true, retry = false, references = false;
+  int checkInterval = 0;
+  final List<String> diverged = [], directions = [], savedIntervals = [];
   int referenceReads = 0, resolutions = 0;
   final referenceWrites = <List<Map<String, String>>>[];
   Completer<void>? prepareGate, reserveGate;
@@ -64,6 +68,7 @@ class _Gateway implements ConfigurationSyncGateway {
               'sensitive_changes': risky ? 1 : 0,
               'incoming_deletions': 0,
               'credential_changes': risky ? 1 : 0,
+              'diverged': diverged,
             },
           }
         : null,
@@ -107,6 +112,9 @@ class _Gateway implements ConfigurationSyncGateway {
 
   @override
   Future<String> confirm(String owner, String operation, String review) async {
+    // Mirrors the native gate: unresolved both-modified units cannot be
+    // published or applied before an explicit whole-direction choice.
+    if (diverged.isNotEmpty) return snapshot();
     confirms++;
     if (retry) {
       retry = false;
@@ -149,6 +157,34 @@ class _Gateway implements ConfigurationSyncGateway {
   Future<void> cancel(String owner, String operation) async {
     cancels++;
     publish('cancelled');
+  }
+
+  @override
+  Future<String> resolveDirection(
+    String owner,
+    String operation,
+    String review,
+    String direction,
+  ) async {
+    directions.add(direction);
+    diverged.clear();
+    risky = direction == 'remote';
+    this.review = 'direction-review-${directions.length}';
+    publish('review');
+    return snapshot();
+  }
+
+  @override
+  Future<int> loadCheckInterval() async {
+    intervalLoads++;
+    return checkInterval;
+  }
+
+  @override
+  Future<void> saveCheckInterval(int minutes) async {
+    intervalSaves++;
+    savedIntervals.add('$minutes');
+    checkInterval = minutes;
   }
 
   @override
@@ -291,18 +327,76 @@ void main() {
     expect(syncFailureLabel(state), contains('令牌刷新结果未确认'));
     expect(state.commits, 0);
   });
-  testWidgets('startup and an idle clock never synchronize persisted state', (
-    tester,
-  ) async {
-    final gateway = _Gateway();
-    final controller = ConfigurationSyncController(gateway: gateway);
-    await controller.start();
-    await tester.pump(const Duration(minutes: 10));
-    expect(gateway.prepares, 0);
-    expect(gateway.reserves, 0);
-    await drainAsync(tester, controller.shutdown());
-    controller.dispose();
-  });
+  testWidgets(
+    'startup and an idle clock never synchronize persisted state without a check interval',
+    (tester) async {
+      final gateway = _Gateway();
+      final controller = ConfigurationSyncController(gateway: gateway);
+      await controller.start();
+      await tester.pump(const Duration(minutes: 10));
+      expect(gateway.prepares, 0);
+      expect(gateway.reserves, 0);
+      expect(gateway.intervalLoads, 1);
+      await drainAsync(tester, controller.shutdown());
+      controller.dispose();
+    },
+  );
+  testWidgets(
+    'a configured check interval fires automatic sync and a pending review stops it',
+    (tester) async {
+      final gateway = _Gateway()..checkInterval = 1;
+      final controller = ConfigurationSyncController(gateway: gateway);
+      await controller.start();
+      expect(controller.checkIntervalMinutes, 1);
+      await tester.pump(const Duration(minutes: 1));
+      expect(gateway.reserves, 1);
+      expect(gateway.confirms, 1);
+      expect(controller.state?.phase, 'committed');
+      // A both-modified unit stops the automatic loop at the review; the tick
+      // must not cancel the pending candidate while the user decides.
+      gateway.diverged.add('host-${'a' * 32}');
+      gateway.risky = true;
+      await tester.pump(const Duration(minutes: 1));
+      expect(gateway.reserves, 2);
+      expect(gateway.confirms, 1);
+      expect(controller.state?.phase, 'review');
+      expect(controller.state?.review!.needsDirection, isTrue);
+      await tester.pump(const Duration(minutes: 3));
+      expect(gateway.reserves, 2);
+      // Saving a new interval restarts the timer from the confirmed value.
+      await controller.setCheckIntervalMinutes(0);
+      expect(gateway.savedIntervals, ['0']);
+      gateway.risky = false;
+      gateway.diverged.clear();
+      await tester.pump(const Duration(minutes: 10));
+      expect(gateway.reserves, 2);
+      await drainAsync(tester, controller.shutdown());
+      controller.dispose();
+    },
+  );
+  testWidgets(
+    'divergence direction resolution publishes the choice and a fresh review token',
+    (tester) async {
+      final gateway = _Gateway()..risky = true;
+      gateway.diverged.add('host-${'a' * 32}');
+      final controller = ConfigurationSyncController(gateway: gateway);
+      await controller.start();
+      await controller.synchronize();
+      final original = controller.state!;
+      expect(original.review!.needsDirection, isTrue);
+      await controller.confirm(original);
+      expect(gateway.confirms, 0);
+      await controller.resolveDirection(original, 'local');
+      expect(gateway.directions, ['local']);
+      expect(controller.state!.review!.token, isNot(original.review!.token));
+      expect(controller.state!.review!.needsDirection, isFalse);
+      await controller.confirm(controller.state!);
+      expect(gateway.confirms, 1);
+      expect(controller.state?.phase, 'committed');
+      await drainAsync(tester, controller.shutdown());
+      controller.dispose();
+    },
+  );
   testWidgets(
     'actual edits debounce to one exchange while a foreign scope is ignored',
     (tester) async {

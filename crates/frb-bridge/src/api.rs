@@ -6806,6 +6806,52 @@ pub async fn resolve_configuration_sync_references(
     .await;
     crate::public_errors::finish(outcome)
 }
+/// Whole-direction choice ("local" keeps this device's version of every unit
+/// modified on both sides; "remote" takes the cloud's) applied to the pending
+/// review before any publication. Metadata only; no candidate body crosses.
+pub async fn resolve_configuration_sync_direction(
+    owner: String,
+    operation: String,
+    review: String,
+    direction: String,
+) -> Result<String> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        crate::configuration_sync::resolve_direction(owner, operation, review, direction).await
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+/// Device-local periodic check interval in minutes (0 disables, default 10,
+/// maximum 1440). Reading never starts HTTP; the record is never synced.
+pub async fn load_configuration_sync_interval() -> Result<u32> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        tokio::task::spawn_blocking(|| {
+            with_vault(|v| Ok(hspterm_storage_sync::sync_interval::load(v)?))
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+/// Saves the interval through the same record CAS as the other device
+/// preferences. The application restarts its periodic timer from the ACK.
+pub async fn save_configuration_sync_interval(minutes: u32) -> Result<u32> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        ensure!(
+            minutes <= 1440,
+            "同步检查间隔必须在 0–1440 分钟内；0 表示关闭"
+        );
+        tokio::task::spawn_blocking(move || {
+            with_vault(|v| Ok(hspterm_storage_sync::sync_interval::save(v, minutes)?))
+        })
+        .await?
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
 /// The proposal's write-only secrets are immediately wrapped in a zeroizing
 /// buffer; neither this proposal nor passwords are returned or diagnosed.
 pub async fn save_configuration_sync_settings(proposal: String) -> Result<String> {

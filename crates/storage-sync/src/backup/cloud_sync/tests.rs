@@ -255,8 +255,9 @@ fn two_devices_merge_disjoint_hosts_then_apply_without_a_credential_or_order_res
     let bb = Baseline::load(&b, COLLECTION, NOW).unwrap();
     let pa = ba.capture_local(&a, NOW).unwrap();
     let pb = bb.capture_local(&b, NOW + 1).unwrap();
-    let (merged, _) = pa.document().merge(pb.document(), NOW + 2).unwrap();
-    let (reverse, _) = pb.document().merge(pa.document(), NOW + 2).unwrap();
+    let empty = Document::empty(COLLECTION).unwrap();
+    let (merged, _) = pa.document().merge(&empty, pb.document(), NOW + 2).unwrap();
+    let (reverse, _) = pb.document().merge(&empty, pa.document(), NOW + 2).unwrap();
     assert!(encoded(&merged).as_slice() == encoded(&reverse).as_slice());
     apply(&mut a, &ba, &pa, &merged);
     apply(&mut b, &bb, &pb, &merged);
@@ -299,8 +300,11 @@ fn lww_deletions_survive_an_offline_device_and_equal_timestamp_equivocation_is_r
         .delete(std::slice::from_ref(&h.id))
         .unwrap();
     let deleted = initial.capture(&v, ACTOR_A, NOW + 10).unwrap();
-    let (merged, summary) = initial.merge(&deleted, NOW + 20).unwrap();
+    // A device whose baseline is the pre-deletion document pulls the deletion:
+    // its side is unchanged since the baseline, so the cloud tombstone wins.
+    let (merged, summary) = initial.merge(&initial, &deleted, NOW + 20).unwrap();
     assert_eq!(summary.incoming_deletions, 1);
+    assert_eq!(summary.conflicts, 0);
     assert!(
         merged
             .items
@@ -310,10 +314,41 @@ fn lww_deletions_survive_an_offline_device_and_equal_timestamp_equivocation_is_r
             .value
             .is_none()
     );
-    let (again, summary) = merged.merge(&initial, NOW + 20).unwrap();
-    assert_eq!(summary.incoming_deletions, 0);
+    // Re-applying the same merge from the same unchanged baseline is
+    // idempotent: the old snapshot cannot revive the deleted host.
+    let (again, summary) = initial.merge(&initial, &merged, NOW + 20).unwrap();
+    assert_eq!(summary.incoming_deletions, 1);
     assert!(encoded(&again).as_slice() == encoded(&merged).as_slice());
-    let mut corrupted = initial.clone();
+    // A device that MODIFIED the host while another device deleted it has no
+    // automatic winner: the unit is reported for an explicit direction choice.
+    let mut modified = initial.clone();
+    let item = modified.items.iter_mut().find(|i| i.id == h.id).unwrap();
+    item.stamp = Stamp::next(Some(&item.stamp), ACTOR_B, NOW + 5).unwrap();
+    let (divergent, diverged_summary) = modified.merge(&initial, &deleted, NOW + 20).unwrap();
+    assert_eq!(diverged_summary.conflicts, 1);
+    assert_eq!(diverged_summary.diverged.as_slice(), [h.id.as_str()]);
+    assert!(
+        divergent
+            .items
+            .iter()
+            .find(|i| i.id == h.id)
+            .unwrap()
+            .value
+            .is_some()
+    );
+    let (mut corrupted, _) = modified
+        .merge_candidate(&initial, &deleted, NOW + 20, Divergence::PreferRemote)
+        .unwrap();
+    assert!(
+        corrupted
+            .items
+            .iter()
+            .find(|i| i.id == h.id)
+            .unwrap()
+            .value
+            .is_none()
+    );
+    corrupted = initial.clone();
     corrupted
         .items
         .iter_mut()
@@ -321,11 +356,15 @@ fn lww_deletions_survive_an_offline_device_and_equal_timestamp_equivocation_is_r
         .unwrap()
         .value = None;
     assert!(matches!(
-        initial.merge(&corrupted, NOW + 20),
+        initial.merge(&empty_base(), &corrupted, NOW + 20),
         Err(SyncError::Invalid)
     ));
     // Explicit later recreation is an actual new local operation, not an old
     // offline snapshot resurfacing after deletion-marker pruning.
+}
+
+fn empty_base() -> Document {
+    Document::empty(COLLECTION).unwrap()
 }
 
 #[test]
@@ -376,7 +415,9 @@ fn history_merges_commands_and_clear_epochs_even_if_the_other_document_has_a_new
         .find(|i| i.id == super::super::HISTORY)
         .unwrap()
         .stamp = Stamp::next(None, ACTOR_B, NOW + 20).unwrap();
-    let (merged, _) = cleared.merge(&stale, NOW + 30).unwrap();
+    let (merged, _) = cleared
+        .merge(&Document::empty(COLLECTION).unwrap(), &stale, NOW + 30)
+        .unwrap();
     let item = merged
         .items
         .iter()
@@ -580,7 +621,11 @@ fn plaintext_local_rows_unchanged_by_failed_reference_merge_and_unknown_future_c
         .unwrap();
     old.zeroize();
     assert!(broken.validate(NOW).is_err());
-    assert!(doc.merge(&broken, NOW).is_err());
+    assert!(
+        broken
+            .merge(&Document::empty(COLLECTION).unwrap(), &doc, NOW)
+            .is_err()
+    );
     assert!(v.get(&h.id).unwrap().unwrap().as_slice() == original.as_slice());
     v.apply(&[RecordChange::Put(
         "config-unknown-future",
@@ -598,7 +643,7 @@ fn conditional_exchange_uses_frozen_local_changes_and_never_acknowledges_conflic
     host(&mut v, "Exchange fixture");
     let baseline = Baseline::load(&v, COLLECTION, NOW).unwrap();
     let proposal = baseline.capture_local(&v, NOW).unwrap();
-    let mut exchange = Exchange::new(&proposal);
+    let mut exchange = Exchange::new(&proposal, baseline.document());
     let ExchangeStep::Upload(pending) = exchange
         .accept_read(RemoteRead::Missing, b"synthetic-sync-key", NOW)
         .unwrap()

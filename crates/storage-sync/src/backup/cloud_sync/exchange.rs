@@ -15,7 +15,12 @@ pub struct Exchange {
     pub(super) operation: u128,
     pub(super) local: Document,
     pub(super) original: Document,
+    /// Last locally applied baseline: the shared three-way merge ancestor.
+    pub(super) base: Document,
+    remote: Option<Document>,
+    etag: Option<EntityTag>,
     reads: u8,
+    pub(super) resolution: Divergence,
     pub(super) actor: String,
 }
 pub enum ExchangeStep {
@@ -33,7 +38,7 @@ impl ExchangeStep {
         match self {
             Self::Upload(p) => p.summary(),
             Self::AlreadyCurrent(a) => a.summary(),
-            Self::References(p) => p.summary,
+            Self::References(p) => p.summary.clone(),
         }
     }
     pub fn uploads(&self) -> bool {
@@ -58,16 +63,20 @@ pub struct Acknowledged {
 }
 impl Acknowledged {
     pub fn summary(&self) -> MergeSummary {
-        self.summary
+        self.summary.clone()
     }
 }
 impl Exchange {
-    pub fn new(proposal: &LocalProposal) -> Self {
+    pub fn new(proposal: &LocalProposal, base: &Document) -> Self {
         Self {
             operation: proposal.operation,
             local: proposal.document.clone(),
             original: proposal.document.clone(),
+            base: base.clone(),
+            remote: None,
+            etag: None,
             reads: 0,
+            resolution: Divergence::Unresolved,
             actor: proposal.actor.clone(),
         }
     }
@@ -84,47 +93,92 @@ impl Exchange {
             return Err(SyncError::Changed);
         }
         self.reads += 1;
-        let (document, summary, condition) = match read {
-            RemoteRead::Missing => (
-                self.local.clone(),
-                MergeSummary::default(),
-                PublicationCondition::CreateOnly,
-            ),
+        match read {
+            RemoteRead::Missing => {
+                let document = self.local.clone();
+                let ciphertext = document.encrypt(password, now)?;
+                Ok(ExchangeStep::Upload(PendingUpload {
+                    operation: self.operation,
+                    document,
+                    ciphertext,
+                    condition: PublicationCondition::CreateOnly,
+                    summary: MergeSummary::default(),
+                }))
+            }
             RemoteRead::Present { etag, ciphertext } => {
                 let remote =
                     Document::decrypt(&ciphertext, password, self.local.collection(), now)?;
-                let (merged, summary) = self.local.merge_candidate(&remote, now)?;
-                match merged.validate(now) {
-                    Ok(()) => {}
-                    Err(SyncError::References) => {
-                        return Ok(ExchangeStep::References(PendingReferences {
-                            remote,
-                            etag,
-                            summary,
-                        }));
-                    }
-                    Err(error) => return Err(error),
-                }
-                let summary = references::summary(&self.original, &merged, summary.conflicts);
-                if merged.encode(now)?.as_slice() == remote.encode(now)?.as_slice() {
-                    return Ok(ExchangeStep::AlreadyCurrent(Acknowledged {
-                        operation: self.operation,
-                        document: merged,
-                        etag,
-                        summary,
-                    }));
-                }
-                (merged, summary, PublicationCondition::Match(etag))
+                self.remote = Some(remote.clone());
+                self.etag = Some(etag);
+                let etag = self.etag.clone().expect("etag stored before rebuild");
+                self.rebuild(&remote, &etag, password, now)
             }
-        };
-        let ciphertext = document.encrypt(password, now)?;
+        }
+    }
+    /// Recompute the merge and its review step from the frozen local proposal,
+    /// the applied baseline and the last verified remote read, applying any
+    /// explicit whole-direction choice. An unresolved both-modified unit keeps
+    /// the local side tentatively and is never published (the driver refuses
+    /// to confirm such a step); reference repair is only offered once no
+    /// unresolved divergence remains, so the direction dialog always comes
+    /// first and never re-appears behind a repaired candidate.
+    fn rebuild(
+        &self,
+        remote: &Document,
+        etag: &EntityTag,
+        password: &[u8],
+        now: u64,
+    ) -> Result<ExchangeStep> {
+        let (merged, summary) =
+            self.local
+                .merge_candidate(&self.base, remote, now, self.resolution)?;
+        match merged.validate(now) {
+            Ok(()) => {}
+            Err(SyncError::References) if summary.diverged.is_empty() => {
+                return Ok(ExchangeStep::References(PendingReferences {
+                    remote: remote.clone(),
+                    etag: etag.clone(),
+                    summary,
+                }));
+            }
+            Err(error) => return Err(error),
+        }
+        let summary = references::summary(&self.original, &merged, summary.conflicts);
+        if merged.encode(now)?.as_slice() == remote.encode(now)?.as_slice() {
+            return Ok(ExchangeStep::AlreadyCurrent(Acknowledged {
+                operation: self.operation,
+                document: merged,
+                etag: etag.clone(),
+                summary,
+            }));
+        }
+        let ciphertext = merged.encrypt(password, now)?;
         Ok(ExchangeStep::Upload(PendingUpload {
             operation: self.operation,
-            document,
+            document: merged,
             ciphertext,
-            condition,
+            condition: PublicationCondition::Match(etag.clone()),
             summary,
         }))
+    }
+    /// Apply the user's whole-direction choice to EVERY unit modified on both
+    /// sides since the baseline, then recompute the review step. The choice
+    /// stays frozen for later 412 re-reads of the same operation.
+    pub fn resolve_divergence(
+        &mut self,
+        direction: Divergence,
+        password: &[u8],
+        now: u64,
+    ) -> Result<ExchangeStep> {
+        if direction == Divergence::Unresolved {
+            return Err(SyncError::Invalid);
+        }
+        let (remote, etag) = match (self.remote.clone(), self.etag.clone()) {
+            (Some(remote), Some(etag)) => (remote, etag),
+            _ => return Err(SyncError::Changed),
+        };
+        self.resolution = direction;
+        self.rebuild(&remote, &etag, password, now)
     }
 }
 impl PendingUpload {
@@ -162,7 +216,7 @@ impl PendingUpload {
         &self.condition
     }
     pub fn summary(&self) -> MergeSummary {
-        self.summary
+        self.summary.clone()
     }
     /// A timeout/aborted PUT has UNKNOWN outcome, not success or confirmed
     /// precondition failure. The driver re-reads before any later publication.

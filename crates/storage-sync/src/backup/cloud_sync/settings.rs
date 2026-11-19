@@ -158,6 +158,11 @@ pub struct Proposal {
     pub vault_scope: String,
     pub revision: String,
     pub target: Target,
+    /// Some(root): derive target.collection from the normalized root and the
+    /// effective sync password (new or already stored) instead of using the
+    /// explicit target.collection value. None keeps stored collections.
+    #[serde(default)]
+    pub derive_collection: Option<String>,
     pub secrets: SecretChanges,
     pub confirm_target_change: bool,
 }
@@ -392,6 +397,27 @@ pub(super) fn archive(target: &Target) -> String {
             .collect::<String>()
     )
 }
+/// Frozen derivation spec (never change once released): the collection is the
+/// first 16 bytes of SHA-256("HSPTerm collection v1\0" + normalized_root +
+/// "\0" + sync_password) as 32 lowercase hex characters. The same root with
+/// the same password always addresses the same dataset; changing either
+/// routes through the existing explicit target-switch/archive confirmation.
+pub(in crate::backup) const COLLECTION_DERIVATION_LABEL: &[u8] = b"HSPTerm collection v1\0";
+pub(in crate::backup) fn derived_collection(root: &str, password: &[u8]) -> Result<String> {
+    let root = webdav::checked_root(root).map_err(|_| SyncError::Invalid)?;
+    let mut hash = Sha256::new();
+    hash.update(COLLECTION_DERIVATION_LABEL);
+    hash.update(root.as_bytes());
+    hash.update([0]);
+    hash.update(password);
+    let derived: String = hash
+        .finalize()
+        .iter()
+        .take(16)
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    Ok(derived)
+}
 pub fn save(vault: &mut Vault, proposal: Proposal) -> Result<View> {
     save_inner(vault, proposal, None)
 }
@@ -423,7 +449,24 @@ fn save_inner(
     if view(vault, &before).revision != proposal.revision {
         return Err(SyncError::Changed);
     }
-    let target = proposal.target.checked()?;
+    let mut target = proposal.target.checked()?;
+    if let Some(root) = proposal.derive_collection.as_deref() {
+        // Derivation is WebDAV-only and must agree with the endpoint the form
+        // derived; the effective password is the new one when replaced, else
+        // the already-stored one the device can still decrypt with.
+        if target.drive.is_some() {
+            return Err(SyncError::Invalid);
+        }
+        if webdav::derive_object(root).map_err(|_| SyncError::Invalid)? != target.endpoint {
+            return Err(SyncError::Invalid);
+        }
+        let effective = proposal
+            .secrets
+            .sync_password
+            .as_deref()
+            .unwrap_or(before.secrets.sync_password.as_str());
+        target.collection = derived_collection(root, effective.as_bytes())?;
+    }
     let drive_account = if let Some(drive) = &target.drive {
         let (account, raw) = crate::google_drive_account::capture_checkpoint(vault)?;
         let binding_matches = account.as_ref().is_some_and(|a| {

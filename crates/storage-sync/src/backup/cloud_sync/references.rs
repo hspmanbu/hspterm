@@ -1,5 +1,6 @@
-//! Explicit repair of mixed LWW references. Only complete original units can
-//! be selected; credentials never leave Rust and history always keeps its CRDT.
+//! Explicit repair of mixed three-way references. Only complete original units
+//! can be selected; credentials never leave Rust and history always keeps its
+//! CRDT.
 use super::*;
 use exchange::PendingReferences;
 use std::collections::BTreeSet;
@@ -112,7 +113,9 @@ impl Exchange {
         if selections.is_empty() || selections.len() > MAX_ITEMS {
             return Err(SyncError::Invalid);
         }
-        let (mut candidate, old_summary) = self.local.merge_candidate(&pending.remote, now)?;
+        let (mut candidate, old_summary) =
+            self.local
+                .merge_candidate(&self.base, &pending.remote, now, self.resolution)?;
         let a = self.local.by_id();
         let b = pending.remote.by_id();
         let latest = self

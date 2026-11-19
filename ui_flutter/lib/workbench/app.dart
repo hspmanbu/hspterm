@@ -465,6 +465,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
             const SizedBox(height: 24),
             ConfigurationSyncSettingsPanel(
               gateway: NativeConfigurationSyncSettingsGateway(m),
+              schedule: m.configurationSync,
             ),
             const SizedBox(height: 24),
             ConfigurationSyncRuntimePanel(controller: m.configurationSync),

@@ -320,3 +320,77 @@ fn public_webdav_accepts_explicit_http_without_relaxing_url_boundaries() {
         assert!(checked_endpoint(endpoint).is_err());
     }
 }
+
+#[test]
+fn roots_normalize_to_one_object_and_derivation_rejects_ambiguous_input() {
+    for (root, object) in [
+        (
+            "https://dav.internal",
+            "https://dav.internal/hspterm/config.hspterm",
+        ),
+        (
+            "https://dav.internal/",
+            "https://dav.internal/hspterm/config.hspterm",
+        ),
+        (
+            "http://127.0.0.1:8443/dav",
+            "http://127.0.0.1:8443/dav/hspterm/config.hspterm",
+        ),
+        (
+            "http://127.0.0.1:8443/dav/",
+            "http://127.0.0.1:8443/dav/hspterm/config.hspterm",
+        ),
+    ] {
+        assert_eq!(derive_object(root).unwrap(), object);
+    }
+    for root in [
+        "ftp://dav.internal",
+        "https://user:secret@dav.internal",
+        "https://dav.internal/?token=x",
+        "https://dav.internal/#section",
+        "not a url",
+    ] {
+        assert!(checked_root(root).is_err());
+        assert!(derive_object(root).is_err());
+    }
+}
+
+#[tokio::test]
+async fn first_sync_collection_creation_is_explicit_single_and_fail_closed() {
+    for (status, ready) in [
+        ("201 Created", true),
+        ("405 Method Not Allowed", true),
+        ("200 OK", true),
+        ("204 No Content", true),
+        ("409 Conflict", false),
+        ("404 Not Found", false),
+        ("500 Internal Server Error", false),
+    ] {
+        let (url, worker) = server(response(status, "", b"")).await;
+        let result = client(&url)
+            .ensure_collection(&CancellationToken::new())
+            .await;
+        assert_eq!(result.is_ok(), ready, "{status}");
+        let request = worker.await.unwrap();
+        let text = String::from_utf8_lossy(&request).to_lowercase();
+        assert!(text.starts_with("mkcol / http/1.1\r\n"), "{status}");
+        assert!(text.contains("authorization: *** "), "{status}");
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!(
+        "http://{}/dav/hspterm/config.hspterm",
+        listener.local_addr().unwrap()
+    );
+    let transport = client(&endpoint);
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    assert!(matches!(
+        transport.ensure_collection(&cancel).await,
+        Err(TransportError::Cancelled)
+    ));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(30), listener.accept())
+            .await
+            .is_err()
+    );
+}

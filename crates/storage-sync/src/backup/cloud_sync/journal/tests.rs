@@ -170,7 +170,10 @@ fn cloud_ack_observes_remote_clock_retires_pending_atomically_and_does_not_trigg
     for item in &mut remote.items {
         item.stamp = Stamp::next(None, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", now + 1000).unwrap();
     }
-    let (merged, _) = proposal.document().merge(&remote, now + 1000).unwrap();
+    let (merged, _) = proposal
+        .document()
+        .merge(baseline.document(), &remote, now + 1000)
+        .unwrap();
     let mut rx = subscribe();
     baseline
         .prepare_apply(&v, &proposal, &merged, None, now + 1000)

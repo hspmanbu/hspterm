@@ -1,5 +1,8 @@
-//! Exact-object WebDAV GET/conditional PUT. No directory scans, MKCOL, DELETE,
-//! redirects, ambient proxy, SSH credentials, startup timer or automatic retry.
+//! Exact-object WebDAV GET/conditional PUT plus ONE explicit first-sync MKCOL
+//! of the object's parent collection. No directory scans, nested MKCOL trees,
+//! DELETE, redirects, ambient proxy, SSH credentials or automatic retry.
+//! The stored endpoint stays the exact derived object
+//! `<normalized root>hspterm/config.hspterm`; users only enter a root.
 use super::{
     Acknowledged, EntityTag, MAX_ENCRYPTED_BYTES, PendingUpload, PublicationCondition, RemoteRead,
 };
@@ -20,6 +23,10 @@ pub enum TransportError {
     Denied,
     #[error("同步服务器响应不支持安全条件写入或格式无效")]
     Response,
+    #[error(
+        "同步目录未就绪：服务器拒绝创建或父目录不存在；请核对根目录地址，或先在服务器上准备 hspterm 目录"
+    )]
+    Directory,
     #[error("同步响应超过安全容量")]
     Capacity,
     #[error("同步写入结果未确认；可能已写入，后续必须重新读取，不可盲目重发")]
@@ -48,6 +55,11 @@ pub struct WebDav {
 pub enum PutResponse {
     Confirmed(Acknowledged),
     PreconditionFailed,
+}
+/// Outcome of the single first-sync MKCOL of the object's parent collection.
+pub enum CollectionReady {
+    Created,
+    Exists,
 }
 
 pub(super) fn valid_auth(username: &str, password: &str) -> bool {
@@ -82,6 +94,43 @@ pub(super) fn checked_endpoint(value: &str) -> Result<String> {
         return Err(TransportError::Configuration);
     }
     Ok(result)
+}
+/// Frozen single-object path appended to a user-supplied root. The stored
+/// endpoint always remains the exact object URL; only the settings UI derives.
+pub(in crate::backup) const DERIVED_OBJECT_PATH: &str = "hspterm/config.hspterm";
+/// Validate a user-entered WebDAV ROOT (not an object URL): http/https with a
+/// host, no userinfo/query/fragment; the path may be empty, "/" or end with
+/// "/". The normalized form always ends with exactly one trailing slash.
+pub(super) fn checked_root(value: &str) -> Result<String> {
+    if value.len() > 8192 || value.chars().any(char::is_control) {
+        return Err(TransportError::Configuration);
+    }
+    let mut url = Url::parse(value).map_err(|_| TransportError::Configuration)?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(TransportError::Configuration);
+    }
+    if !url.path().ends_with('/') {
+        url.set_path(&format!("{}/", url.path()));
+    }
+    Ok(url.to_string())
+}
+/// Pure derivation: normalized root + the frozen single object path. The
+/// result must still pass the existing exact-object validation that every
+/// stored endpoint is checked against.
+pub(super) fn derive_object(root: &str) -> Result<String> {
+    let root = checked_root(root)?;
+    let object = format!("{root}{DERIVED_OBJECT_PATH}");
+    if object.len() > 8192 {
+        return Err(TransportError::Configuration);
+    }
+    exact_url(&object)?;
+    Ok(object)
 }
 pub(super) fn checked_proxy(value: &str) -> Result<bool> {
     if value.len() > 4096 || value.chars().any(char::is_control) {
@@ -193,6 +242,45 @@ impl WebDav {
         tokio::select! { biased;
             _ = cancel.cancelled() => Err(TransportError::Cancelled),
             result = self.read_inner() => result,
+        }
+    }
+    /// One explicit MKCOL of the object's PARENT collection before the first
+    /// synchronization of a WebDAV target. This is the ONLY directory write:
+    /// 201/200/204 created or already usable, 405 means the collection exists
+    /// (or MKCOL is unsupported but the path is usable); 409/404 mean a parent
+    /// collection is missing and any other failure is rejected explicitly —
+    /// never silently ignored and never compensated by nested MKCOL trees.
+    pub async fn ensure_collection(&self, cancel: &CancellationToken) -> Result<CollectionReady> {
+        tokio::select! { biased;
+            _ = cancel.cancelled() => Err(TransportError::Cancelled),
+            result = self.ensure_collection_inner() => result,
+        }
+    }
+    async fn ensure_collection_inner(&self) -> Result<CollectionReady> {
+        let path = self.endpoint.path().to_owned();
+        let parent = match path.rfind('/') {
+            Some(index) if index > 0 => &path[..index],
+            _ => "/",
+        };
+        let mut collection = self.endpoint.clone();
+        collection.set_path(parent);
+        let method =
+            reqwest::Method::from_bytes(b"MKCOL").map_err(|_| TransportError::Configuration)?;
+        let response = self
+            .authenticate(self.client.request(method, collection))
+            .send()
+            .await
+            .map_err(|_| TransportError::Network)?;
+        match response.status() {
+            StatusCode::CREATED => Ok(CollectionReady::Created),
+            StatusCode::OK | StatusCode::NO_CONTENT | StatusCode::METHOD_NOT_ALLOWED => {
+                Ok(CollectionReady::Exists)
+            }
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(TransportError::Denied),
+            // 409 Conflict is the WebDAV "intermediate collection missing"
+            // signal; a missing parent must be fixed on the server or by
+            // correcting the root, not by recursive implicit directory writes.
+            _ => Err(TransportError::Directory),
         }
     }
     async fn read_inner(&self) -> Result<RemoteRead> {

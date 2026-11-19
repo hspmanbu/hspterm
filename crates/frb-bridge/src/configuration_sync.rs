@@ -220,6 +220,7 @@ fn failure(error: &anyhow::Error, op: &Operation) -> &'static str {
         return match e {
             webdav::TransportError::WriteUnknown => "write_unknown",
             webdav::TransportError::Denied => "denied",
+            webdav::TransportError::Directory => "directory",
             webdav::TransportError::Cancelled => "cancelled",
             webdav::TransportError::Capacity => "capacity",
             _ => "network",
@@ -646,7 +647,7 @@ pub(crate) async fn prepare(id: String, operation: String) -> Result<String> {
                 target.ensure_proposal(&proposal)?;
                 Ok((baseline, proposal))
             })?;
-            let exchange = Exchange::new(&proposal);
+            let exchange = Exchange::new(&proposal, baseline.document());
             Ok(Workflow {
                 target,
                 baseline,
@@ -658,6 +659,13 @@ pub(crate) async fn prepare(id: String, operation: String) -> Result<String> {
             })
         })
         .await?;
+        // The ONLY directory write in the protocol: one explicit MKCOL of the
+        // object's parent collection before this device's FIRST verified
+        // exchange with a WebDAV target (no stored baseline ETag yet). A
+        // stored ETag means a previous round already confirmed the collection.
+        if let (Transport::WebDav(client), None) = (&flow.transport, flow.baseline.etag()) {
+            client.ensure_collection(&op.cancel).await?;
+        }
         let flow = read_step(&root, &op, &lease, flow).await?;
         publish_review(&root, &op, flow)?;
         status(&id)
@@ -803,8 +811,16 @@ pub(crate) async fn confirm(id: String, operation: String, review: String) -> Re
             ExchangeStep::References(_) => {
                 anyhow::bail!("先明确解决原引用冲突，不能直接发布无效配置")
             }
-            ExchangeStep::AlreadyCurrent(ack) => ack,
+            ExchangeStep::AlreadyCurrent(ack) => {
+                if !ack.summary().diverged.is_empty() {
+                    anyhow::bail!("两端同时修改的单位未选择整体方向，不能应用")
+                }
+                ack
+            }
             ExchangeStep::Upload(upload) => {
+                if !upload.summary().diverged.is_empty() {
+                    anyhow::bail!("两端同时修改的单位未选择整体方向，不能发布")
+                }
                 op.attempting_put.store(true, Ordering::Release);
                 match flow.transport.publish(upload, &op.cancel).await? {
                     webdav::PutResponse::PreconditionFailed => {
@@ -924,6 +940,62 @@ pub(crate) async fn resolve_references(
             *op.pending.lock() = Some(flow);
             root.emit(|s| s.error = Some("references"));
         }
+        Err(error) => {
+            finish(&root, &op, failure(&error, &op));
+        }
+    }
+    status(&id)
+}
+/// Whole-direction choice for units modified on both sides since the
+/// baseline. The direction applies to ALL diverged units together; a fresh
+/// review token is issued and the old one can no longer be confirmed.
+pub(crate) async fn resolve_direction(
+    id: String,
+    operation: String,
+    review: String,
+    direction: String,
+) -> Result<String> {
+    let root = owner(&id)?;
+    let op = root.operation(&operation)?;
+    let lease = acquire(&root, &op)?;
+    let mut abort = AbortGuard {
+        op: op.clone(),
+        completed: false,
+    };
+    let flow = {
+        let state = root.status.lock();
+        ensure!(
+            state.phase == "review" && state.review.as_ref().is_some_and(|r| r.token == review),
+            "原同步审阅已失效"
+        );
+        op.pending
+            .lock()
+            .take()
+            .filter(|f| f.review.as_deref() == Some(review.as_str()))
+            .context("原同步候选已释放")?
+    };
+    let (r, o) = (root.clone(), op.clone());
+    let result = blocking(&lease, move || {
+        let mut flow = flow;
+        ensure_source(&r, &o, &flow)?;
+        let direction = match direction.as_str() {
+            "local" => cloud::Divergence::PreferLocal,
+            "remote" => cloud::Divergence::PreferRemote,
+            _ => return Err(anyhow::anyhow!("整体方向选择无效；未改变候选")),
+        };
+        let step = flow.exchange.resolve_divergence(
+            direction,
+            flow.target.password(),
+            cloud::journal::now_millis()?,
+        )?;
+        flow.step = Some(step);
+        ensure_source(&r, &o, &flow)?;
+        Ok(flow)
+    })
+    .await;
+    abort.completed = true;
+    match result {
+        Ok(flow) => publish_review(&root, &op, flow)?,
         Err(error) => {
             finish(&root, &op, failure(&error, &op));
         }

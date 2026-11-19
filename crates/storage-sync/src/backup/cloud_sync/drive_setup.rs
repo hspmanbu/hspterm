@@ -331,6 +331,7 @@ impl Creation {
             vault_scope: source.vault_scope,
             revision: source.revision,
             target,
+            derive_collection: None,
             secrets: settings::SecretChanges {
                 sync_password: Some(self.stored.password.clone()),
                 webdav: settings::CredentialChange::Remove,

@@ -55,6 +55,7 @@ fn proposal(view: &View, target: Target) -> Proposal {
         vault_scope: view.vault_scope.clone(),
         revision: view.revision.clone(),
         target,
+        derive_collection: None,
         secrets: SecretChanges {
             sync_password: None,
             webdav: CredentialChange::Keep,
@@ -441,4 +442,52 @@ fn webdav_http_targets_remain_valid_without_relaxing_drive_endpoint_binding() {
     let mut drive = drive_target();
     drive.endpoint = drive.endpoint.replacen("https://", "http://", 1);
     assert!(drive.checked().is_err());
+}
+
+#[test]
+fn derived_collections_are_deterministic_password_bound_and_replace_explicit_ids() {
+    let root = tempfile::tempdir().unwrap();
+    let mut v = vault(root.path());
+    let first = derived_collection("https://dav.invalid/dav/", b"synthetic-first").unwrap();
+    let normalized = derived_collection("https://dav.invalid/dav", b"synthetic-first").unwrap();
+    assert_eq!(first, normalized);
+    assert!(opaque(&first));
+    assert_ne!(
+        first,
+        derived_collection("https://dav.invalid/dav/", b"synthetic-second").unwrap()
+    );
+    assert_ne!(
+        first,
+        derived_collection("https://other.invalid/", b"synthetic-first").unwrap()
+    );
+    for bad in [
+        "ftp://dav.invalid",
+        "https://user:pass@dav.invalid",
+        "not a url",
+    ] {
+        assert!(derived_collection(bad, b"synthetic-first").is_err());
+    }
+    // A derived proposal must carry the endpoint derived from the same root;
+    // the stored collection becomes the derived dataset id. A mismatched
+    // endpoint/root pair is rejected without touching stored state.
+    let source = load(&v).unwrap();
+    let mut derived_target = target();
+    derived_target.endpoint = webdav::derive_object("https://dav.invalid/dav/").unwrap();
+    let mut p = proposal(&source, derived_target);
+    p.derive_collection = Some("https://dav.invalid/dav/".into());
+    p.secrets.sync_password = Some("synthetic-derived-password".into());
+    p.confirm_target_change = true;
+    let saved = save(&mut v, p).unwrap();
+    assert_eq!(
+        saved.target.as_ref().unwrap().collection,
+        derived_collection("https://dav.invalid/dav/", b"synthetic-derived-password").unwrap()
+    );
+    let fresh = load(&v).unwrap();
+    let mut mismatch = target();
+    mismatch.endpoint = webdav::derive_object("https://dav.invalid/dav/").unwrap();
+    mismatch.collection = saved.target.as_ref().unwrap().collection.clone();
+    let mut p = proposal(&fresh, mismatch);
+    p.derive_collection = Some("https://different.invalid/root".into());
+    p.secrets.sync_password = None;
+    assert!(matches!(save(&mut v, p), Err(SyncError::Invalid)));
 }

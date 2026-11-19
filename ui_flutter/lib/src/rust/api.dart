@@ -1879,6 +1879,33 @@ Future<String> resolveConfigurationSyncReferences({
   choices: choices,
 );
 
+/// Whole-direction choice ("local" keeps this device's version of every unit
+/// modified on both sides; "remote" takes the cloud's) applied to the pending
+/// review before any publication. Metadata only; no candidate body crosses.
+Future<String> resolveConfigurationSyncDirection({
+  required String owner,
+  required String operation,
+  required String review,
+  required String direction,
+}) => RustLib.instance.api.crateApiResolveConfigurationSyncDirection(
+  owner: owner,
+  operation: operation,
+  review: review,
+  direction: direction,
+);
+
+/// Device-local periodic check interval in minutes (0 disables, default 10,
+/// maximum 1440). Reading never starts HTTP; the record is never synced.
+Future<int> loadConfigurationSyncInterval() =>
+    RustLib.instance.api.crateApiLoadConfigurationSyncInterval();
+
+/// Saves the interval through the same record CAS as the other device
+/// preferences. The application restarts its periodic timer from the ACK.
+Future<int> saveConfigurationSyncInterval({required int minutes}) => RustLib
+    .instance
+    .api
+    .crateApiSaveConfigurationSyncInterval(minutes: minutes);
+
 /// The proposal's write-only secrets are immediately wrapped in a zeroizing
 /// buffer; neither this proposal nor passwords are returned or diagnosed.
 Future<String> saveConfigurationSyncSettings({required String proposal}) =>

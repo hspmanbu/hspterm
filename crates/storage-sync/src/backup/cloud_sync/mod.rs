@@ -220,7 +220,7 @@ struct DocumentRef<'a> {
     collection: &'a str,
     items: &'a [Item],
 }
-#[derive(Clone, Copy, Default, Serialize)]
+#[derive(Clone, Default, Serialize)]
 pub struct MergeSummary {
     pub conflicts: u32,
     pub incoming_winners: u32,
@@ -228,6 +228,20 @@ pub struct MergeSummary {
     pub sensitive_changes: u32,
     pub incoming_deletions: u32,
     pub credential_changes: u32,
+    /// Units modified on BOTH sides since the shared baseline without an
+    /// explicit whole-direction choice yet. Non-empty means publication is
+    /// blocked until the user picks one direction for all of them.
+    pub diverged: Vec<String>,
+}
+/// Whole-direction resolution for units changed on both sides since the shared
+/// baseline. Unresolved keeps the local side tentatively and reports the unit
+/// list; the application must obtain an explicit direction before publishing.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum Divergence {
+    #[default]
+    Unresolved,
+    PreferLocal,
+    PreferRemote,
 }
 impl Document {
     fn serializable(&self) -> DocumentRef<'_> {
@@ -389,79 +403,110 @@ impl Document {
         next.validate(now)?;
         Ok(next)
     }
-    /// Deterministic whole-unit LWW, except command history, whose independent
-    /// clear-epoch CRDT is merged even when one document has a newer timestamp.
-    pub fn merge(&self, remote: &Self, now: u64) -> Result<(Self, MergeSummary)> {
-        let (merged, summary) = self.merge_candidate(remote, now)?;
+    /// Three-way merge: `self` is the current local document (L), `base` is
+    /// the last locally applied baseline, `remote` is the freshest cloud copy
+    /// (R). Units changed on one side only still merge automatically (pull the
+    /// cloud change or push the local change); units changed on BOTH sides
+    /// are never auto-resolved by timestamp — they are reported through
+    /// `summary.diverged` and keep the local side tentatively until the caller
+    /// re-merges with an explicit `Divergence` direction. Command history
+    /// keeps its clear-epoch CRDT union regardless of timestamps.
+    pub fn merge(&self, base: &Self, remote: &Self, now: u64) -> Result<(Self, MergeSummary)> {
+        let (merged, summary) = self.merge_candidate(base, remote, now, Divergence::Unresolved)?;
         merged.validate(now)?;
         Ok((merged, summary))
     }
     // Only the bounded original-source reference resolver may inspect this
     // intermediate state. It is never encrypted, published or applied before
     // full validation succeeds.
-    fn merge_candidate(&self, remote: &Self, now: u64) -> Result<(Self, MergeSummary)> {
+    fn merge_candidate(
+        &self,
+        base: &Self,
+        remote: &Self,
+        now: u64,
+        divergence: Divergence,
+    ) -> Result<(Self, MergeSummary)> {
         self.validate(now)?;
         remote.validate(now)?;
-        if self.collection != remote.collection {
+        base.validate(now)?;
+        if self.collection != remote.collection || base.collection != self.collection {
             return Err(SyncError::Invalid);
         }
         let a = self.by_id();
         let b = remote.by_id();
+        let c = base.by_id();
         let ids: std::collections::BTreeSet<_> = a.keys().chain(b.keys()).copied().collect();
         let mut summary = MergeSummary::default();
         let mut items = Vec::with_capacity(ids.len());
         for id in ids {
             let left = a.get(id).copied();
             let right = b.get(id).copied();
-            let chosen = match (left, right) {
-                (Some(a), Some(b)) if id == super::HISTORY => {
-                    let x = projection::history(a)?;
-                    let y = projection::history(b)?;
-                    let merged = crate::command_history::merge_sync_payload(x, y)
-                        .map_err(|_| SyncError::Invalid)?;
-                    let mut item = if a.stamp >= b.stamp {
-                        a.clone()
-                    } else {
-                        b.clone()
-                    };
-                    item.value = Some(Bundle {
-                        records: BTreeMap::from([(super::HISTORY.into(), merged.to_vec())]),
-                    });
-                    if a.value != item.value {
-                        summary.incoming_winners += 1;
-                        summary.sensitive_changes += 1;
-                    }
-                    item
-                }
-                (Some(a), Some(b)) => {
-                    if a.stamp == b.stamp && a.value != b.value {
-                        return Err(SyncError::Invalid);
-                    }
-                    if a.value != b.value {
-                        summary.conflicts += 1;
-                    }
-                    if b.stamp > a.stamp {
-                        if a.value != b.value {
-                            summary.incoming_winners += 1;
-                            if projection::sensitive(id) {
-                                summary.sensitive_changes += 1;
+            let common = c.get(id).copied();
+            let chosen = if let (Some(a), Some(b)) = (left, right)
+                && id == super::HISTORY
+            {
+                let x = projection::history(a)?;
+                let y = projection::history(b)?;
+                let merged = crate::command_history::merge_sync_payload(x, y)
+                    .map_err(|_| SyncError::Invalid)?;
+                let mut item = if a.stamp >= b.stamp {
+                    a.clone()
+                } else {
+                    b.clone()
+                };
+                item.value = Some(Bundle {
+                    records: BTreeMap::from([(super::HISTORY.into(), merged.to_vec())]),
+                });
+                item
+            } else {
+                match (left, right) {
+                    (Some(a), Some(b)) => {
+                        if a.stamp == b.stamp && a.value != b.value {
+                            return Err(SyncError::Invalid);
+                        }
+                        if a.value == b.value {
+                            // Converged identical content keeps the later
+                            // mutation stamp for future comparisons.
+                            if b.stamp > a.stamp {
+                                b.clone()
+                            } else {
+                                a.clone()
+                            }
+                        } else {
+                            let base_value = common.and_then(|i| i.value.as_ref());
+                            if a.value.as_ref() == base_value {
+                                // L unchanged since the baseline: pull R.
+                                b.clone()
+                            } else if b.value.as_ref() == base_value {
+                                // R unchanged since the baseline: push L.
+                                a.clone()
+                            } else {
+                                // Both sides changed the same unit: no
+                                // automatic timestamp winner. Report it and
+                                // keep the chosen whole direction.
+                                summary.conflicts += 1;
+                                if divergence == Divergence::Unresolved {
+                                    summary.diverged.push((*id).into());
+                                }
+                                match divergence {
+                                    Divergence::PreferRemote => b.clone(),
+                                    _ => a.clone(),
+                                }
                             }
                         }
-                        b.clone()
-                    } else {
-                        a.clone()
                     }
+                    (Some(a), None) => a.clone(),
+                    (None, Some(b)) => b.clone(),
+                    (None, None) => unreachable!("union contains only present keys"),
                 }
-                (Some(a), None) => a.clone(),
-                (None, Some(b)) => {
-                    summary.incoming_winners += 1;
-                    if projection::sensitive(id) && b.value.is_some() {
-                        summary.sensitive_changes += 1;
-                    }
-                    b.clone()
-                }
-                (None, None) => unreachable!("union contains only present keys"),
             };
+            let left_value = left.and_then(|i| i.value.as_ref());
+            if chosen.value.as_ref() != left_value {
+                summary.incoming_winners += 1;
+                if projection::sensitive(id) {
+                    summary.sensitive_changes += 1;
+                }
+            }
             if chosen.value.is_none() {
                 summary.deleted += 1;
                 if left.is_some_and(|i| i.value.is_some()) {
@@ -470,8 +515,8 @@ impl Document {
             }
             if projection::sensitive(id)
                 && id != super::HISTORY
-                && left.map(|i| &i.value) != Some(&chosen.value)
-                && (chosen.value.is_some() || left.is_some_and(|i| i.value.is_some()))
+                && chosen.value.as_ref() != left_value
+                && (chosen.value.is_some() || left_value.is_some())
             {
                 summary.credential_changes += 1;
             }

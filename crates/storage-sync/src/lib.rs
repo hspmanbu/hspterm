@@ -27,6 +27,7 @@ pub mod secure_unlock;
 pub mod sftp_host_prefs;
 pub mod sftp_last_dirs;
 pub mod ssh_proxy;
+pub mod sync_interval;
 pub mod terminal_preferences;
 pub mod tmux_locale_preferences;
 pub mod tmux_preferences;

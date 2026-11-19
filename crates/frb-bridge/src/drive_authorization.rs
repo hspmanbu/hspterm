@@ -540,6 +540,7 @@ fn object_proposal(
     Ok(settings::Proposal {
         vault_scope: source.vault_scope.clone(),
         revision: source.revision.clone(),
+        derive_collection: None,
         secrets: settings::SecretChanges {
             sync_password: choice.sync_password.take(),
             webdav: settings::CredentialChange::Remove,

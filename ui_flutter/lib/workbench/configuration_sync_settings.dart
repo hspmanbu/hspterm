@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../src/rust/api.dart' as rust;
+import 'configuration_sync.dart';
 import 'model.dart';
 import 'google_drive_account.dart' show validDesktopClientId;
 
@@ -131,6 +132,24 @@ Map<String, dynamic>? _syncTarget(Object? raw) {
   return Map<String, dynamic>.unmodifiable(target);
 }
 
+/// The single object this application derives from a WebDAV root. Mirrors the
+/// frozen Rust derivation `<normalized root>hspterm/config.hspterm`.
+const _derivedObjectPath = 'hspterm/config.hspterm';
+
+String deriveWebDavObject(String root) {
+  final base = root.endsWith('/') ? root : '$root/';
+  return '$base$_derivedObjectPath';
+}
+
+/// Reverse derivation for loading an older stored endpoint: strip the fixed
+/// object suffix to recover the root (kept with its trailing slash). An
+/// endpoint that is not in the derived structure returns null and the form
+/// shows the endpoint itself unchanged.
+String? rootFromEndpoint(String endpoint) =>
+    endpoint.endsWith('/$_derivedObjectPath')
+    ? endpoint.substring(0, endpoint.length - _derivedObjectPath.length)
+    : null;
+
 abstract interface class ConfigurationSyncSettingsGateway {
   Object get owner;
   bool get isClosing;
@@ -169,8 +188,16 @@ class NativeConfigurationSyncSettingsGateway
 /// This form owns write-only secret controllers. Model tracks native writes
 /// beyond page disposal; no secret is attached to the model, preferences or logs.
 class ConfigurationSyncSettingsPanel extends StatefulWidget {
-  const ConfigurationSyncSettingsPanel({super.key, required this.gateway});
+  const ConfigurationSyncSettingsPanel({
+    super.key,
+    required this.gateway,
+    this.schedule,
+  });
   final ConfigurationSyncSettingsGateway gateway;
+
+  /// Runtime controller owning the periodic-check timer; present in the real
+  /// workbench so interval changes restart it immediately.
+  final ConfigurationSyncController? schedule;
   @override
   State<ConfigurationSyncSettingsPanel> createState() =>
       _ConfigurationSyncSettingsPanelState();
@@ -179,9 +206,9 @@ class ConfigurationSyncSettingsPanel extends StatefulWidget {
 class _ConfigurationSyncSettingsPanelState
     extends State<ConfigurationSyncSettingsPanel> {
   final _form = GlobalKey<FormState>();
-  final _endpoint = TextEditingController(),
-      _collection = TextEditingController(),
-      _timeout = TextEditingController();
+  final _root = TextEditingController(),
+      _timeout = TextEditingController(),
+      _interval = TextEditingController();
   final _password = TextEditingController(),
       _user = TextEditingController(),
       _authPassword = TextEditingController();
@@ -189,19 +216,21 @@ class _ConfigurationSyncSettingsPanelState
       _proxyUser = TextEditingController(),
       _proxyPassword = TextEditingController();
   ConfigurationSyncSettings? _source;
+  String _loadedRoot = '';
   bool _loading = true,
       _saving = false,
       _enabled = false,
       _authenticate = false,
       _proxyEnabled = false,
-      _proxyAuth = false;
+      _proxyAuth = false,
+      _savingInterval = false;
   bool _replacePassword = true, _replaceAuth = true, _replaceProxyAuth = true;
   bool _webDavOverride = false;
   bool get _editingWebDav =>
       _source?.target?['drive'] == null || _webDavOverride;
   bool _edited = false;
   int _request = 0;
-  String? _error, _notice;
+  String? _error, _notice, _intervalNotice;
   List<TextEditingController> get _secrets => [
     _password,
     _user,
@@ -244,9 +273,17 @@ class _ConfigurationSyncSettingsPanelState
     final proxy = t?['proxy'] as Map<String, dynamic>?;
     _source = value;
     _webDavOverride = false;
-    _endpoint.text = t?['endpoint'] as String? ?? '';
-    _collection.text = t?['collection'] as String? ?? value.suggestedCollection;
+    final endpoint = t?['endpoint'] as String?;
+    // Reverse-derive the root from a derived endpoint; an older endpoint in a
+    // different shape is shown unchanged so an untouched form re-saves the
+    // exact same object without triggering a target switch.
+    _loadedRoot = t == null || t['drive'] != null
+        ? (endpoint ?? '')
+        : (rootFromEndpoint(endpoint ?? '') ?? endpoint ?? '');
+    _root.text = _loadedRoot;
     _timeout.text = '${t?['timeout_seconds'] ?? 60}';
+    _interval.text =
+        '${widget.schedule?.checkIntervalLoaded == true ? widget.schedule!.checkIntervalMinutes : 10}';
     _enabled = t?['enabled'] as bool? ?? false;
     _authenticate = t?['authenticate'] as bool? ?? false;
     _proxyEnabled = proxy != null;
@@ -291,8 +328,7 @@ class _ConfigurationSyncSettingsPanelState
   }
 
   bool get _composing => [
-    _endpoint,
-    _collection,
+    _root,
     _timeout,
     _proxy,
     ..._secrets,
@@ -305,7 +341,7 @@ class _ConfigurationSyncSettingsPanelState
           title: const Text('更换同步目标'),
           content: const SingleChildScrollView(
             child: Text(
-              '原云端数据不会删除。本机将归档原目标的同步基线，并把当前配置作为新目标的一次本机修改。返回旧目标时恢复该目标基线。\n\n新设备须使用相同集合标识和同步密码。确认更换地址或集合？',
+              '原云端数据不会删除。本机将归档原目标的同步基线，并把当前配置作为新目标的一次本机修改。返回旧目标时恢复该目标基线。\n\n新设备须使用相同根目录和同步密码（同一数据集）。确认更换根目录或密码？',
             ),
           ),
           actions: [
@@ -332,12 +368,28 @@ class _ConfigurationSyncSettingsPanelState
       return;
     }
     final old = source.target;
+    // WebDAV roots derive the single object URL and (for new or edited
+    // targets) the collection from the root + effective sync password. A
+    // stored target whose form was left untouched re-saves its exact
+    // endpoint/collection, never re-deriving a different dataset silently.
+    final priorWebDav = old != null && old['drive'] == null;
+    final rootChanged = _root.text != _loadedRoot;
+    final deriving =
+        _editingWebDav && (!priorWebDav || rootChanged || _replacePassword);
+    final endpoint = _editingWebDav
+        ? (deriving
+              ? deriveWebDavObject(_root.text)
+              : old!['endpoint'] as String)
+        : old!['endpoint'] as String;
+    final collection = _editingWebDav
+        ? (old?['collection'] as String? ?? source.suggestedCollection)
+        : old!['collection'] as String;
     if (_authenticate &&
         source.authSet &&
         !_replaceAuth &&
         old != null &&
         Uri.tryParse(old['endpoint'] as String)?.origin !=
-            Uri.tryParse(_endpoint.text)?.origin) {
+            Uri.tryParse(endpoint)?.origin) {
       setState(() {
         _replaceAuth = true;
         _error = '更换服务器后，请明确填写新服务器的认证再保存。';
@@ -359,8 +411,8 @@ class _ConfigurationSyncSettingsPanelState
     final request = ++_request;
     final target = <String, dynamic>{
       'enabled': _enabled,
-      'endpoint': _endpoint.text,
-      'collection': _collection.text,
+      'endpoint': endpoint,
+      'collection': collection,
       'authenticate': _authenticate,
       'timeout_seconds': int.parse(_timeout.text),
       'proxy': _proxyEnabled
@@ -371,8 +423,8 @@ class _ConfigurationSyncSettingsPanelState
     final switching =
         source.target != null &&
         (source.target!['endpoint'] != target['endpoint'] ||
-            source.target!['collection'] != target['collection'] ||
-            source.target!['drive'] != null && _editingWebDav);
+            source.target!['drive'] != null && _editingWebDav ||
+            deriving && _replacePassword && priorWebDav);
     setState(() {
       _saving = true;
       _error = null;
@@ -415,6 +467,7 @@ class _ConfigurationSyncSettingsPanelState
           'vault_scope': source.scope,
           'revision': source.revision,
           'target': target,
+          'derive_collection': deriving ? _root.text : null,
           'secrets': secretChanges,
           'confirm_target_change': switching,
         });
@@ -444,6 +497,37 @@ class _ConfigurationSyncSettingsPanelState
         _clearSecrets();
         setState(() => _saving = false);
       }
+    }
+  }
+
+  /// Device-local periodic check interval (0 disables, 1–1440 minutes,
+  /// default 10). Saved through its own record CAS and applied by restarting
+  /// the runtime controller's timer from the confirmed value.
+  Future<void> _saveInterval() async {
+    final schedule = widget.schedule;
+    if (schedule == null || _savingInterval || widget.gateway.isClosing) {
+      return;
+    }
+    final minutes = int.tryParse(_interval.text);
+    if (minutes == null || minutes < 0 || minutes > 1440) {
+      setState(() => _intervalNotice = '检查间隔必须在 0–1440 分钟内；0 表示关闭');
+      return;
+    }
+    setState(() {
+      _savingInterval = true;
+      _intervalNotice = null;
+    });
+    try {
+      await schedule.setCheckIntervalMinutes(minutes);
+      if (mounted) {
+        setState(() => _intervalNotice = '定时检查间隔已保存。');
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _intervalNotice = '检查间隔保存未确认；请重新载入后重试。');
+      }
+    } finally {
+      if (mounted) setState(() => _savingInterval = false);
     }
   }
 
@@ -504,12 +588,10 @@ class _ConfigurationSyncSettingsPanelState
             ),
             const SizedBox(height: 8),
             const Text(
-              '保存正式主机、凭据、书签、允许的设置及合格单行命令历史；不包含画面、滚动历史、任务、草稿或字体。同步密码与主密码独立，请在各设备使用相同集合标识。',
+              '保存正式主机、凭据、书签、允许的设置及合格单行命令历史；不包含画面、滚动历史、任务、草稿或字体。同步密码与主密码独立；相同根目录与相同同步密码即同一数据集，请在各设备保持一致。',
             ),
             const SizedBox(height: 8),
-            const Text(
-              '启用后仅在配置变更或手动操作时同步，不在启动或空闲时同步。冲突及凭据变化需审阅。Drive 对象通过下方明确发现与选择。',
-            ),
+            const Text('启用后在配置变更、定时检查或手动操作时同步。冲突及凭据变化需审阅。Drive 对象通过下方明确发现与选择。'),
             if (_loading)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
@@ -524,7 +606,8 @@ class _ConfigurationSyncSettingsPanelState
                     ? null
                     : () => setState(() {
                         _webDavOverride = true;
-                        _endpoint.clear();
+                        _root.clear();
+                        _loadedRoot = '';
                         _authenticate = false;
                         _replaceAuth = true;
                         _enabled = false;
@@ -536,34 +619,56 @@ class _ConfigurationSyncSettingsPanelState
             if (_source != null) ...[
               _check('启用此同步目标', _enabled, (v) => _enabled = v),
               _field(
-                _editingWebDav ? 'WebDAV 文件地址（HTTP / HTTPS）' : 'Drive 对象地址（只读）',
-                _endpoint,
+                _editingWebDav ? 'WebDAV 根目录（HTTP / HTTPS）' : 'Drive 对象地址（只读）',
+                _root,
                 readOnly: !_editingWebDav,
-                help: '填写文件地址；HTTP不保护WebDAV登录信息，配置内容仍端到端加密',
+                help: _editingWebDav
+                    ? '只填根目录；对象地址自动派生为 根目录/hspterm/config.hspterm。HTTP不保护WebDAV登录信息，配置内容仍端到端加密'
+                    : null,
                 validator: (v) {
                   final uri = Uri.tryParse(v ?? '');
-                  return uri == null ||
-                          !(_editingWebDav ? {'http', 'https'} : {'https'})
-                              .contains(uri.scheme) ||
-                          uri.host.isEmpty ||
-                          uri.userInfo.isNotEmpty ||
-                          uri.hasQuery ||
-                          uri.hasFragment ||
-                          uri.path.isEmpty ||
-                          uri.path.endsWith('/') ||
-                          utf8.encode(v!).length > 8192
-                      ? '请填写完整 HTTP / HTTPS 文件地址'
-                      : null;
+                  if (uri == null ||
+                      !(_editingWebDav ? {'http', 'https'} : {'https'})
+                          .contains(uri.scheme) ||
+                      uri.host.isEmpty ||
+                      uri.userInfo.isNotEmpty ||
+                      uri.hasQuery ||
+                      uri.hasFragment ||
+                      utf8.encode(v!).length > 8192) {
+                    return _editingWebDav
+                        ? '请填写 WebDAV 根目录（HTTP / HTTPS）'
+                        : '对象地址无效';
+                  }
+                  if (_editingWebDav) {
+                    final derived = Uri.tryParse(deriveWebDavObject(v));
+                    if (derived == null ||
+                        derived.path.isEmpty ||
+                        derived.path.endsWith('/')) {
+                      return '根目录无法派生有效对象地址';
+                    }
+                  }
+                  return null;
                 },
               ),
-              _field(
-                '集合标识',
-                _collection,
-                readOnly: !_editingWebDav,
-                validator: (v) => RegExp(r'^[a-f0-9]{32}$').hasMatch(v ?? '')
-                    ? null
-                    : '需要 32 位小写十六进制标识',
-              ),
+              if (_editingWebDav)
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _root,
+                  builder: (context, value, _) {
+                    final shown = value.text.isEmpty
+                        ? '（未填写）'
+                        : deriveWebDavObject(value.text);
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        '派生对象地址（只读）：$shown\n集合标识由根目录与同步密码自动派生，无需填写。',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               _field(
                 '请求超时（秒）',
                 _timeout,
@@ -650,6 +755,36 @@ class _ConfigurationSyncSettingsPanelState
                 ],
               ],
             ],
+            if (widget.schedule != null) ...[
+              const SizedBox(height: 10),
+              const Text(
+                '定时检查间隔（本设备）',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              _field(
+                '检查间隔（分钟）',
+                _interval,
+                help: '0 关闭定时检查；范围 0–1440，默认 10。仅本设备生效，不同步',
+                validator: (v) {
+                  final n = int.tryParse(v ?? '');
+                  return n == null || n < 0 || n > 1440
+                      ? '范围为 0–1440 分钟；0 表示关闭'
+                      : null;
+                },
+              ),
+              if (_intervalNotice != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(_intervalNotice!),
+                ),
+              OutlinedButton(
+                onPressed: _savingInterval || widget.gateway.isClosing
+                    ? null
+                    : _saveInterval,
+                child: Text(_savingInterval ? '正在保存…' : '保存检查间隔'),
+              ),
+            ],
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -695,7 +830,7 @@ class _ConfigurationSyncSettingsPanelState
   @override
   void dispose() {
     _request++;
-    for (final c in [_endpoint, _collection, _timeout, _proxy, ..._secrets]) {
+    for (final c in [_root, _timeout, _interval, _proxy, ..._secrets]) {
       c.dispose();
     }
     super.dispose();

@@ -97,6 +97,25 @@ void main() {
     expect(parsed, isNotNull);
   });
 
+  test(
+    'roots derive one fixed object and reverse-derive the original root',
+    () {
+      expect(
+        deriveWebDavObject('https://dav.internal'),
+        'https://dav.internal/hspterm/config.hspterm',
+      );
+      expect(
+        deriveWebDavObject('https://dav.internal/dav/'),
+        'https://dav.internal/dav/hspterm/config.hspterm',
+      );
+      expect(
+        rootFromEndpoint('https://dav.internal/dav/hspterm/config.hspterm'),
+        'https://dav.internal/dav/',
+      );
+      expect(rootFromEndpoint('https://fixture.invalid/object'), isNull);
+    },
+  );
+
   testWidgets(
     'a Drive target cannot be silently overwritten through the WebDAV form',
     (tester) async {
@@ -121,7 +140,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('当前唯一同步目标为 Google Drive'), findsOneWidget);
       expect(
-        find.widgetWithText(TextFormField, 'WebDAV 文件地址（HTTP / HTTPS）'),
+        find.widgetWithText(TextFormField, 'WebDAV 根目录（HTTP / HTTPS）'),
         findsNothing,
       );
       expect(
@@ -143,22 +162,13 @@ void main() {
             .readOnly,
         isTrue,
       );
-      expect(
-        tester
-            .widget<TextField>(
-              find.descendant(
-                of: find.widgetWithText(TextFormField, '集合标识'),
-                matching: find.byType(TextField),
-              ),
-            )
-            .readOnly,
-        isTrue,
-      );
+      expect(find.widgetWithText(TextFormField, '集合标识'), findsNothing);
+      expect(find.textContaining('派生对象地址'), findsNothing);
       expect(gateway.writes, isEmpty);
       await tester.tap(find.text('改为配置 WebDAV 目标'));
       await tester.pump();
       expect(
-        find.widgetWithText(TextFormField, 'WebDAV 文件地址（HTTP / HTTPS）'),
+        find.widgetWithText(TextFormField, 'WebDAV 根目录（HTTP / HTTPS）'),
         findsOneWidget,
       );
       expect(gateway.writes, isEmpty);
@@ -198,8 +208,8 @@ void main() {
       await tester.pumpWidget(_app(gateway));
       await tester.pumpAndSettle();
       await tester.enterText(
-        _field('WebDAV 文件地址（HTTP / HTTPS）'),
-        'https://new-fixture.invalid/object',
+        _field('WebDAV 根目录（HTTP / HTTPS）'),
+        'https://new-fixture.invalid/dav',
       );
       await tester.ensureVisible(_field('同步密码'));
       await tester.enterText(_field('同步密码'), 'synthetic-ui-sync-password');
@@ -214,8 +224,12 @@ void main() {
       // and public views are separately tested not to return secret contents.
       expect(
         proposal['target'],
-        containsPair('endpoint', 'https://new-fixture.invalid/object'),
+        containsPair(
+          'endpoint',
+          'https://new-fixture.invalid/dav/hspterm/config.hspterm',
+        ),
       );
+      expect(proposal['derive_collection'], 'https://new-fixture.invalid/dav');
       expect(gateway.submittedPasswords, ['synthetic-ui-sync-password']);
       expect(password.text, isEmpty);
       expect(find.text('同步设置已加密保存；启用后配置变更会合并触发同步。'), findsOneWidget);
@@ -236,7 +250,7 @@ void main() {
           .onPressed,
       isNull,
     );
-    expect(_field('WebDAV 文件地址（HTTP / HTTPS）'), findsNothing);
+    expect(_field('WebDAV 根目录（HTTP / HTTPS）'), findsNothing);
     expect(gateway.writes, isEmpty);
     expect(find.textContaining('读取同步配置失败'), findsOneWidget);
   });
@@ -247,7 +261,7 @@ void main() {
       await tester.pumpWidget(_app(gateway));
       await tester.pumpAndSettle();
       await tester.enterText(
-        _field('WebDAV 文件地址（HTTP / HTTPS）'),
+        _field('WebDAV 根目录（HTTP / HTTPS）'),
         'https://other-fixture.invalid/object',
       );
       await _save(tester);
@@ -298,7 +312,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester
-            .widget<TextField>(_field('WebDAV 文件地址（HTTP / HTTPS）'))
+            .widget<TextField>(_field('WebDAV 根目录（HTTP / HTTPS）'))
             .controller!
             .text,
         'https://current-fixture.invalid/object',
@@ -314,7 +328,7 @@ void main() {
       await tester.pumpWidget(_app(initial));
       await tester.pumpAndSettle();
       await tester.enterText(
-        _field('WebDAV 文件地址（HTTP / HTTPS）'),
+        _field('WebDAV 根目录（HTTP / HTTPS）'),
         'https://edited-fixture.invalid/object',
       );
       final replacement = _Gateway(owner: owner);
@@ -324,7 +338,7 @@ void main() {
       expect(replacement.loads, 0);
       expect(
         tester
-            .widget<TextField>(_field('WebDAV 文件地址（HTTP / HTTPS）'))
+            .widget<TextField>(_field('WebDAV 根目录（HTTP / HTTPS）'))
             .controller!
             .text,
         'https://edited-fixture.invalid/object',
@@ -342,7 +356,7 @@ void main() {
       await tester.pumpWidget(_app(gateway, scale: 1.25));
       await tester.pumpAndSettle();
       final controller = tester
-          .widget<TextField>(_field('WebDAV 文件地址（HTTP / HTTPS）'))
+          .widget<TextField>(_field('WebDAV 根目录（HTTP / HTTPS）'))
           .controller!;
       final text = controller.text;
       controller.value = TextEditingValue(

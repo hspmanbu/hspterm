@@ -22,10 +22,16 @@ fn host(v: &mut Vault, name: &str) -> HostRecord {
 fn broken(v: &mut Vault) -> (Exchange, LocalProposal, Document, String, String) {
     let a = host(v, "A");
     let mut b = host(v, "B");
-    let mut remote = Document::empty(COLLECTION)
+    // The shared three-way baseline: both hosts without jump edits, applied
+    // to the local ledger so the merge has a real common ancestor.
+    let seeded = Baseline::load(v, COLLECTION, NOW).unwrap();
+    let initial = seeded.capture_local(v, NOW).unwrap();
+    seeded
+        .prepare_apply(v, &initial, initial.document(), None, NOW)
         .unwrap()
-        .capture(v, OTHER, NOW)
+        .commit(v)
         .unwrap();
+    let mut remote = initial.document().clone();
     let item = remote.items.iter_mut().find(|i| i.id == a.id).unwrap();
     let bundle = item.value.as_mut().unwrap();
     let mut wire: HostRecord = serde_json::from_slice(&bundle.records[&a.id]).unwrap();
@@ -37,11 +43,9 @@ fn broken(v: &mut Vault) -> (Exchange, LocalProposal, Document, String, String) 
     remote.validate(NOW + 10).unwrap();
     b.jump_host_id = Some(a.id.clone());
     v.put(&b.id, &serde_json::to_vec(&b).unwrap()).unwrap();
-    let proposal = Baseline::load(v, COLLECTION, NOW + 2)
-        .unwrap()
-        .capture_local(v, NOW + 2)
-        .unwrap();
-    let exchange = Exchange::new(&proposal);
+    let baseline = Baseline::load(v, COLLECTION, NOW + 2).unwrap();
+    let proposal = baseline.capture_local(v, NOW + 2).unwrap();
+    let exchange = Exchange::new(&proposal, baseline.document());
     (exchange, proposal, remote, a.id, b.id)
 }
 fn read(remote: &Document, etag: &str) -> RemoteRead {
@@ -55,8 +59,9 @@ fn independently_valid_jump_edits_get_metadata_only_repair_and_full_validation_b
     let dir = tempfile::tempdir().unwrap();
     let mut v = Vault::create(&dir.path().join("refs.vault"), b"synthetic-master").unwrap();
     let (mut exchange, proposal, remote, a, b) = broken(&mut v);
+    let base = Baseline::load(&v, COLLECTION, NOW + 2).unwrap();
     assert!(matches!(
-        proposal.document.merge(&remote, NOW + 10),
+        proposal.document.merge(base.document(), &remote, NOW + 10),
         Err(SyncError::References)
     ));
     let step = exchange

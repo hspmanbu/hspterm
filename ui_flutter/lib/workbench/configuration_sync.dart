@@ -6,6 +6,15 @@ import 'package:flutter/foundation.dart';
 import '../src/rust/api.dart' as rust;
 import 'configuration_sync_reference_model.dart';
 
+const _summaryCountKeys = [
+  'conflicts',
+  'incoming_winners',
+  'deleted',
+  'sensitive_changes',
+  'incoming_deletions',
+  'credential_changes',
+];
+
 class SyncReview {
   SyncReview(Map<String, dynamic> value)
     : token = value['token'] as String,
@@ -13,21 +22,21 @@ class SyncReview {
       collection = value['collection'] as String,
       uploads = value['uploads'] as bool,
       references = value['references'] as bool? ?? false,
-      counts = Map.unmodifiable(
-        (value['summary'] as Map<String, dynamic>).cast<String, int>(),
-      ) {
+      divergedUnits = List.unmodifiable(
+        ((value['summary'] as Map<String, dynamic>)['diverged'] as List?)
+                ?.cast<String>() ??
+            const [],
+      ),
+      counts = Map.unmodifiable({
+        for (final key in _summaryCountKeys)
+          key: (value['summary'] as Map<String, dynamic>)[key] as int,
+      }) {
     if (token.isEmpty ||
         !RegExp(r'^[a-f0-9]{32}$').hasMatch(collection) ||
-        counts.length != 6 ||
-        !counts.keys.toSet().containsAll({
-          'conflicts',
-          'incoming_winners',
-          'deleted',
-          'sensitive_changes',
-          'incoming_deletions',
-          'credential_changes',
-        }) ||
-        counts.values.any((n) => n < 0 || n > 24000)) {
+        counts.length != _summaryCountKeys.length ||
+        !counts.keys.toSet().containsAll(_summaryCountKeys) ||
+        counts.values.any((n) => n < 0 || n > 24000) ||
+        divergedUnits.any((id) => id.isEmpty || id.length > 256)) {
       throw const FormatException('同步审阅元数据无效');
     }
     final uri = Uri.tryParse(endpoint);
@@ -42,9 +51,15 @@ class SyncReview {
   }
   final String token, endpoint, collection;
   final bool uploads, references;
+  final List<String> divergedUnits;
   final Map<String, int> counts;
+
+  /// Units modified on both sides since the shared baseline need one explicit
+  /// whole-direction choice before anything may be published or applied.
+  bool get needsDirection => divergedUnits.isNotEmpty;
   bool get needsConsent =>
       references ||
+      needsDirection ||
       counts['conflicts']! > 0 ||
       counts['credential_changes']! > 0 ||
       counts['incoming_deletions']! > 0;
@@ -123,8 +138,16 @@ abstract interface class ConfigurationSyncGateway {
     String review,
     List<Map<String, String>> choices,
   );
+  Future<String> resolveDirection(
+    String owner,
+    String operation,
+    String review,
+    String direction,
+  );
   Future<void> cancel(String owner, String operation);
   Future<void> close(String owner);
+  Future<int> loadCheckInterval();
+  Future<void> saveCheckInterval(int minutes);
 }
 
 class NativeConfigurationSyncGateway implements ConfigurationSyncGateway {
@@ -151,11 +174,6 @@ class NativeConfigurationSyncGateway implements ConfigurationSyncGateway {
         review: review,
       );
   @override
-  Future<void> cancel(String owner, String operation) =>
-      rust.cancelConfigurationSync(owner: owner, operation: operation);
-  @override
-  Future<void> close(String owner) => rust.closeConfigurationSync(owner: owner);
-  @override
   Future<String> referenceChoices(
     String owner,
     String operation,
@@ -177,10 +195,35 @@ class NativeConfigurationSyncGateway implements ConfigurationSyncGateway {
     review: review,
     choices: jsonEncode(choices),
   );
+  @override
+  Future<String> resolveDirection(
+    String owner,
+    String operation,
+    String review,
+    String direction,
+  ) => rust.resolveConfigurationSyncDirection(
+    owner: owner,
+    operation: operation,
+    review: review,
+    direction: direction,
+  );
+  @override
+  Future<void> cancel(String owner, String operation) =>
+      rust.cancelConfigurationSync(owner: owner, operation: operation);
+  @override
+  Future<void> close(String owner) => rust.closeConfigurationSync(owner: owner);
+  @override
+  Future<int> loadCheckInterval() => rust.loadConfigurationSyncInterval();
+  @override
+  Future<void> saveCheckInterval(int minutes) =>
+      rust.saveConfigurationSyncInterval(minutes: minutes);
 }
 
 /// Owned by the application, independent of a settings route or terminal view.
-/// One-shot debounce only after an actual edit event; no startup/idle polling.
+/// One-shot debounce only after an actual edit event, plus the user-configured
+/// periodic check interval (default 10 minutes, 0 disables). The periodic tick
+/// only starts an exchange when eligible and idle; a pending review stops it
+/// and is never auto-confirmed.
 class ConfigurationSyncController extends ChangeNotifier {
   ConfigurationSyncController({
     this.gateway = const NativeConfigurationSyncGateway(),
@@ -195,6 +238,13 @@ class ConfigurationSyncController extends ChangeNotifier {
   Completer<void>? _streamDone;
   Future<void>? _starting, _work, _cancellation, _refresh, _shutdown;
   Timer? _debounce;
+  Timer? _checkTimer;
+  int _checkIntervalMinutes = 0;
+  bool _checkIntervalLoaded = false;
+
+  /// Minutes between periodic checks; 0 disables. Device-local, default 10.
+  int get checkIntervalMinutes => _checkIntervalMinutes;
+  bool get checkIntervalLoaded => _checkIntervalLoaded;
   bool _closing = false,
       _disposed = false,
       _pendingAuto = false,
@@ -349,6 +399,9 @@ class ConfigurationSyncController extends ChangeNotifier {
       _opening = false;
       _notify();
       _schedule();
+      if (_owner != null && !_checkIntervalLoaded) {
+        unawaited(refreshCheckInterval());
+      }
     }
   }();
 
@@ -384,6 +437,56 @@ class ConfigurationSyncController extends ChangeNotifier {
         unawaited(_synchronize(automatic: true));
       }
     });
+  }
+
+  /// Periodic check interval. Fires only when a target is eligible, no work is
+  /// running and no review/references candidate is pending; needing review
+  /// stops the periodic attempts until the user resolves it explicitly.
+  void _restartCheckTimer() {
+    _checkTimer?.cancel();
+    _checkTimer = null;
+    if (_closing || _disposed || _faulted || _owner == null) return;
+    if (_checkIntervalMinutes <= 0 || _checkIntervalMinutes > 1440) return;
+    _checkTimer = Timer.periodic(Duration(minutes: _checkIntervalMinutes), (_) {
+      if (_closing || _disposed || _faulted || busy) return;
+      final current = state;
+      if (current?.eligible != true ||
+          current!.active ||
+          current.review != null) {
+        return;
+      }
+      unawaited(_synchronize(automatic: true));
+    });
+  }
+
+  /// Loads the stored interval and (re)starts the timer. Failure disables the
+  /// periodic check; manual sync is unaffected.
+  Future<void> refreshCheckInterval() async {
+    if (_closing || _disposed) return;
+    try {
+      _checkIntervalMinutes = await gateway.loadCheckInterval();
+      _checkIntervalLoaded = true;
+    } catch (_) {
+      _checkIntervalMinutes = 0;
+      _checkIntervalLoaded = true;
+      error = '读取定时检查间隔失败；已停用定时检查，手动同步不受影响。';
+    }
+    _restartCheckTimer();
+    _notify();
+  }
+
+  /// Saves the interval (0–1440, 0 disables) through the device-local record
+  /// CAS and restarts the timer from the confirmed value.
+  Future<void> setCheckIntervalMinutes(int minutes) async {
+    if (_closing || _disposed) return;
+    if (minutes < 0 || minutes > 1440) {
+      throw RangeError.value(minutes, 'minutes', '检查间隔必须在 0–1440 分钟内');
+    }
+    await gateway.saveCheckInterval(minutes);
+    _checkIntervalMinutes = minutes;
+    _checkIntervalLoaded = true;
+    _restartCheckTimer();
+    _notify();
   }
 
   Future<void> _run(Future<void> Function() action) {
@@ -514,6 +617,31 @@ class ConfigurationSyncController extends ChangeNotifier {
       ),
     );
   });
+
+  /// Applies the user's whole-direction choice for units modified on both
+  /// sides since the baseline; a fresh review token replaces the old one.
+  Future<void> resolveDirection(
+    ConfigurationSyncState original,
+    String direction,
+  ) => _run(() async {
+    if (state?.owner != original.owner ||
+        state?.operation != original.operation ||
+        state?.review?.token != original.review?.token ||
+        original.review == null ||
+        original.review!.references ||
+        original.review!.divergedUnits.isEmpty ||
+        !{'local', 'remote'}.contains(direction)) {
+      return;
+    }
+    _accept(
+      await gateway.resolveDirection(
+        original.owner,
+        original.operation!,
+        original.review!.token,
+        direction,
+      ),
+    );
+  });
   Future<void> _cancelNative() {
     final current = _cancellation;
     if (current != null) return current;
@@ -559,6 +687,8 @@ class ConfigurationSyncController extends ChangeNotifier {
     _pendingAuto = false;
     _debounce?.cancel();
     _debounce = null;
+    _checkTimer?.cancel();
+    _checkTimer = null;
     _notify();
     await _starting;
     await _cancelNative();
@@ -582,6 +712,8 @@ class ConfigurationSyncController extends ChangeNotifier {
     if (_owner == null) {
       _starting = null;
       unawaited(start());
+    } else {
+      _restartCheckTimer();
     }
   }
 
@@ -608,6 +740,7 @@ String syncFailureLabel(ConfigurationSyncState? state) {
     'capacity' => '同步数据超过容量限制，两端数据均保留。',
     'data' => '同步密码、集合标识或数据版本不匹配，未应用。',
     'denied' => '同步服务器拒绝访问，请检查已保存认证。',
+    'directory' => '同步目录未就绪：请在服务器上准备 hspterm 目录或核对 WebDAV 根目录地址。',
     'authorization' => 'Google Drive 本机授权缺失、已撤销或与目标绑定不一致；请重新授权并明确配置目标。',
     'authorization_busy' => '另一个 Google Drive 账号操作尚未结束；结束后请手动重试同步。',
     'network' => '同步网络、TLS 或服务器响应失败。',
