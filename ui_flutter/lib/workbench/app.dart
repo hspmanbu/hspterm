@@ -48,6 +48,9 @@ import 'remote_destination.dart';
 import 'terminal_links.dart';
 import 'terminal_paths.dart';
 import 'terminal_notifications.dart';
+import 'forwarding_dialog.dart';
+import 'forwarding_status.dart';
+import '../src/rust/forwardings/runtime.dart' show RunStatus;
 import 'ssh_network_defaults.dart';
 import 'display_settings.dart';
 import 'temporary_connection.dart';
@@ -164,7 +167,9 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
     m.addListener(_bindNotices);
     _lastPaletteBinding = m.paletteBinding;
     m.addListener(_paletteChanged);
+    m.addListener(_bindForwardingMonitors);
     _bindNotices();
+    _bindForwardingMonitors();
     _tmuxRequest = (source, prompt) {
       final result = Completer<tmx.TmuxSelection?>();
       _confirmTail = _confirmTail
@@ -288,6 +293,105 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
         ),
       ),
     );
+  }
+
+  /// Attaches the app-level restoration-failure sink to every live session's
+  /// forwarding monitor. Monitors themselves follow session lifecycles; this
+  /// only routes their already event-driven reports to the notice UI.
+  void _bindForwardingMonitors() {
+    if (!mounted) return;
+    for (final s in m.sessions.cast<LiveTerminalSession>()) {
+      s.forwardings.bind((run) => unawaited(_forwardingRestoreFailed(s, run)));
+    }
+  }
+
+  /// A reconnect could not restore a forwarding rule. Previously this was
+  /// visible only inside the forwarding dialog; it now surfaces as a
+  /// terminal-scoped non-modal warning with the rule, its endpoint, a
+  /// readable reason, and retry/view actions.
+  Future<void> _forwardingRestoreFailed(
+    LiveTerminalSession s,
+    RunStatus run,
+  ) async {
+    if (!mounted || !m.sessions.contains(s) || !s.controller.connected) return;
+    final name = run.name.replaceFirst(' · 恢复失败', '');
+    var endpoint = '';
+    if (run.ruleId.isNotEmpty) {
+      try {
+        final rules = await rust.forwardingRules(hostId: s.host.id);
+        final rule = rules.where((r) => r.id == run.ruleId).firstOrNull;
+        if (rule != null) {
+          endpoint =
+              '（${forwardingKindLabel(rule.kind)} ${rule.bindAddress}:'
+              '${rule.bindPort == 0 ? '自动分配' : rule.bindPort}）';
+        }
+      } catch (_) {
+        // Best-effort endpoint context; the notice itself still fires.
+      }
+    }
+    if (!mounted) return;
+    final context = _navigator.currentContext;
+    if (context == null || !context.mounted) return;
+    showAppNotice(
+      context,
+      '端口转发恢复失败：$name$endpoint · ${run.lastError ?? '端口被占用或无权限监听'}',
+      level: AppNoticeLevel.warning,
+      action: SnackBarAction(
+        label: '重试',
+        onPressed: () => unawaited(_retryForwarding(s, run)),
+      ),
+      secondaryAction: SnackBarAction(
+        label: '查看',
+        onPressed: () => unawaited(_viewForwardings(s)),
+      ),
+    );
+  }
+
+  /// One explicit retry through the normal start_forwarding chain; the failed
+  /// restoration entry is retired by the same call in the runtime.
+  Future<void> _retryForwarding(LiveTerminalSession s, RunStatus run) async {
+    if (!mounted) return;
+    final context = _navigator.currentContext;
+    if (context == null) return;
+    final id = s.controller.id, generation = s.controller.generation;
+    if (id == null || !s.controller.connected || run.generation != generation) {
+      showAppNotice(
+        context,
+        '原连接已变化，端口转发未能重试；请重新连接后再试。',
+        level: AppNoticeLevel.warning,
+      );
+      return;
+    }
+    try {
+      await rust.startForwarding(
+        id: id,
+        generation: generation,
+        ruleId: run.ruleId,
+      );
+      if (!mounted || !context.mounted) return;
+      showAppNotice(context, '端口转发已重新启动并监听。', level: AppNoticeLevel.success);
+    } catch (error) {
+      if (!mounted || !context.mounted) return;
+      showAppNotice(
+        context,
+        '端口转发重试失败：${appMessage(error)}',
+        level: AppNoticeLevel.error,
+        action: SnackBarAction(
+          label: '查看',
+          onPressed: () => unawaited(_viewForwardings(s)),
+        ),
+      );
+    }
+  }
+
+  Future<void> _viewForwardings(LiveTerminalSession s) async {
+    if (!mounted || !m.sessions.contains(s)) return;
+    final tab = m.tabs.where((t) => identical(m.session(t), s)).firstOrNull;
+    if (tab != null) await _activateNoticeTab(tab.id);
+    if (!mounted) return;
+    final context = _navigator.currentContext;
+    if (context == null || !context.mounted) return;
+    await showSavedForwardings(context, m, s.host.snapshot(), terminal: s);
   }
 
   Future<void> _activateNoticeTab(String id) async {
@@ -414,6 +518,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
     _diagnostics.stop();
     m.removeListener(_bindNotices);
     m.removeListener(_paletteChanged);
+    m.removeListener(_bindForwardingMonitors);
     // Keep the original shutdown hook until the actual OS worker has ended,
     // including an externally owned model closed immediately after unmount.
     unawaited(

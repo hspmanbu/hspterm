@@ -63,6 +63,7 @@ void showAppNotice(
   Object message, {
   AppNoticeLevel level = AppNoticeLevel.info,
   SnackBarAction? action,
+  SnackBarAction? secondaryAction,
 }) {
   final text = appMessage(message);
   if (level != AppNoticeLevel.warning && level != AppNoticeLevel.error) {
@@ -82,14 +83,33 @@ void showAppNotice(
   // Errors outrank whatever transient SnackBar is on screen; ordinary quiet
   // notices never touch the SnackBar at all.
   messenger.hideCurrentSnackBar();
+  // SnackBar renders one trailing action natively; a second action (e.g.
+  // forwarding "重试" plus "查看") is laid out inline with matching color.
+  Widget content = Text(text);
+  if (secondaryAction != null && action != null) {
+    final inverse = Theme.of(context).colorScheme.inversePrimary;
+    content = Row(
+      children: [
+        Expanded(child: Text(text)),
+        TextButton(
+          onPressed: action.onPressed,
+          child: Text(action.label, style: TextStyle(color: inverse)),
+        ),
+        TextButton(
+          onPressed: secondaryAction.onPressed,
+          child: Text(secondaryAction.label, style: TextStyle(color: inverse)),
+        ),
+      ],
+    );
+  }
   messenger.showSnackBar(
     SnackBar(
-      content: Text(text),
+      content: content,
       duration: const Duration(seconds: 6),
       showCloseIcon: true,
       persist: false,
       behavior: SnackBarBehavior.floating,
-      action: action,
+      action: secondaryAction != null && action != null ? null : action,
     ),
   );
 }

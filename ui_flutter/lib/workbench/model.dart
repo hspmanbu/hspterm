@@ -25,6 +25,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../prototype/model.dart';
 import '../src/rust/api.dart' as rust;
+import 'forwarding_status.dart';
 import '../src/rust/transfers.dart' as jobs;
 import '../src/rust/remote_transfers.dart' as remote;
 import '../terminal/backend.dart';
@@ -152,6 +153,10 @@ class LiveTerminalSession extends TerminalSession {
 
   final view = GlobalKey<TerminalViewState>();
   Object? _view;
+
+  /// Event-driven forwarding run cache for this session; tab markers, tab
+  /// menus and restoration-failure notices read it. Disposed with the session.
+  late final forwardings = TerminalForwardingMonitor(this);
   VoidCallback? changedListener;
   int directoryEpoch = 0, sftpGeneration = 0;
   int pathLocationEpoch = 0;
@@ -832,6 +837,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
           }
           _retiringSessions.remove(source);
           source.disposeInspection();
+          source.forwardings.dispose();
           source.controller.dispose();
           if (!_disposed) changed();
         }().whenComplete(() {
@@ -3162,6 +3168,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         for (final s in sessions.cast<LiveTerminalSession>()) {
           s.clearTemporaryInput();
           s.disposeInspection();
+          s.forwardings.dispose();
           s.controller.dispose();
         }
       }),

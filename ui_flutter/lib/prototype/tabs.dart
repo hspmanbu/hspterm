@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../src/rust/forwardings/runtime.dart' show RunStatus;
+import '../workbench/forwarding_dialog.dart';
+import '../workbench/forwarding_status.dart';
+import '../workbench/model.dart';
 import 'design.dart';
 import 'model.dart';
 import 'window_chrome.dart';
@@ -37,6 +41,22 @@ Future<void> terminalTabMenu(
   Offset position,
 ) async {
   final g = model.groupOf(t.id)!;
+  // Live forwarding counts are refreshed on menu open (no polling); the mock
+  // workbench has no forwarding runtime and gets no entry.
+  LiveTerminalSession? live;
+  if (!model.isMock && model is LiveWorkbenchModel) {
+    final session = model.session(t);
+    if (session is LiveTerminalSession) {
+      live = session;
+      if (live.controller.id != null && live.controller.connected) {
+        await live.forwardings.refresh();
+        if (!context.mounted) return;
+      }
+    }
+  }
+  final runs = live?.forwardings.runs.value ?? const <RunStatus>[];
+  final running = forwardingRunningCount(runs),
+      failed = forwardingFailedCount(runs);
   final value = await showMenu<String>(
     context: context,
     // Same (left, top, right, bottom) anchor as every other right-click menu:
@@ -59,6 +79,15 @@ Future<void> terminalTabMenu(
               : '断开连接 · 保留标签',
         ),
       ),
+      if (live != null)
+        DeskMenuItem(
+          value: 'forwardings',
+          child: Text(
+            failed > 0
+                ? '端口转发($running 个运行中/$failed 个启动失败)'
+                : '端口转发($running 个运行中)',
+          ),
+        ),
       const DeskMenuDivider(),
       for (final (side, name) in [
         (TabPlacement.left, '左'),
@@ -96,6 +125,14 @@ Future<void> terminalTabMenu(
     model.togglePin(t.id);
   } else if (value == 'connection') {
     model.setDisconnected(t.id, !model.session(t).disconnected);
+  } else if (value == 'forwardings' && live != null) {
+    if (!context.mounted || model.tabById(t.id) == null) return;
+    await showSavedForwardings(
+      context,
+      model as LiveWorkbenchModel,
+      live.host.snapshot(),
+      terminal: live,
+    );
   } else if (value == 'close') {
     await closeTerminalTab(context, model, t.id);
   } else if (value == 'merge') {
@@ -299,6 +336,13 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
         group.selectedId == t.id &&
         !model.startPage &&
         model.page == WorkPage.workspace;
+    final session = model.session(t);
+    final live =
+        !model.isMock &&
+            model is LiveWorkbenchModel &&
+            session is LiveTerminalSession
+        ? session
+        : null;
     return Tooltip(
       message:
           '${t.name}\n${model.session(t).host.user}@${model.session(t).host.address} · ${model.isMock ? (model.session(t).disconnected ? '已断开' : '模拟连接') : model.session(t).statusLabel}\n拖到标签调整顺序；拖到终端边缘分屏',
@@ -342,6 +386,28 @@ class _TerminalTabStripState extends State<TerminalTabStrip> {
                     : Desk.accent,
               ),
               const SizedBox(width: 7),
+              // Event-driven forwarding state: a warning mark survives as long
+              // as a start failed; hover lists every listener and its phase.
+              if (live != null)
+                ValueListenableBuilder<List<RunStatus>>(
+                  valueListenable: live.forwardings.runs,
+                  builder: (context, runs, _) {
+                    if (runs.isEmpty) return const SizedBox.shrink();
+                    final failed = forwardingFailedCount(runs),
+                        running = forwardingRunningCount(runs);
+                    return Tooltip(
+                      message: failed > 0
+                          ? '端口转发：$running 个运行中 · $failed 个启动失败\n${describeForwardingRuns(runs)}'
+                          : '端口转发：$running 个运行中\n${describeForwardingRuns(runs)}',
+                      child: Icon(
+                        Icons.alt_route,
+                        size: 12,
+                        color: failed > 0 ? Desk.warning : Desk.accent,
+                      ),
+                    );
+                  },
+                ),
+              if (live != null) const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   t.name,

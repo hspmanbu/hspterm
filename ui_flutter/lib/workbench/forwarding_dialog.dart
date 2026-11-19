@@ -309,7 +309,7 @@ class _ForwardingDialogState extends State<ForwardingDialog> {
         }
       }
       if (!mounted) return;
-      final value = await showAppDialog<List<RuleConfig>>(
+      final value = await showAppDialog<_EditorCommit>(
         context: context,
         barrierDismissible: false,
         builder: (_) => _RuleEditor(
@@ -319,13 +319,72 @@ class _ForwardingDialogState extends State<ForwardingDialog> {
           draft: draft,
         ),
       );
-      if (value != null && mounted) setState(() => _rules = value);
+      if (value != null && mounted) {
+        final before = _rules;
+        setState(() => _rules = value.rules);
+        unawaited(_offerStartAfterSave(value, before));
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
       _editorOpen = false;
     }
+  }
+
+  /// Saving only persists configuration and never starts a listener. When the
+  /// host still has a connected terminal, offer one explicit start through
+  /// the normal start chain on the selected (or only) terminal; without a
+  /// connectable terminal nothing is asked and the status quo stays.
+  Future<void> _offerStartAfterSave(
+    _EditorCommit commit,
+    List<RuleConfig> before,
+  ) async {
+    final editedId = commit.editedId;
+    final rule = commit.rules
+        .where(
+          (r) => editedId != null
+              ? r.id == editedId
+              : !before.any((b) => b.id == r.id),
+        )
+        .firstOrNull;
+    if (rule == null || !rule.enabled) return;
+    final target = (_session?.current ?? false)
+        ? _session
+        : widget.sessions.where((s) => s.current).firstOrNull;
+    if (target == null) return;
+    if (_runs.any(
+      (run) =>
+          run.ruleId == rule.id &&
+          !['stopped', 'failed', 'disconnected'].contains(run.phase),
+    )) {
+      return;
+    }
+    final confirmed = await showAppDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: const Text('规则已保存，未自动启动'),
+        content: Text(
+          '规则已保存，未自动启动。是否立即应用到所选终端？\n\n'
+          '“${rule.name}” → ${target.label}',
+        ),
+        actions: [
+          TextButton(
+            autofocus: true,
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('立即启动'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    if (!identical(_session, target)) _selectSource(target);
+    await _start(rule);
   }
 
   Future<void> _remove(RuleConfig rule) async {
@@ -680,6 +739,15 @@ class _ForwardingDialogState extends State<ForwardingDialog> {
   );
 }
 
+class _EditorCommit {
+  const _EditorCommit(this.rules, this.editedId);
+  final List<RuleConfig> rules;
+
+  /// The rule this editor session created or changed, so the caller can offer
+  /// one explicit start. Null identification means "the newly added rule".
+  final String? editedId;
+}
+
 class _RuleEditor extends StatefulWidget {
   const _RuleEditor({
     this.original,
@@ -827,7 +895,7 @@ class _RuleEditorState extends State<_RuleEditor> {
     return !_dirty && _draftError == null;
   }
 
-  Future<void> _close([List<RuleConfig>? result]) async {
+  Future<void> _close([_EditorCommit? result]) async {
     _timer?.cancel();
     setState(() => _allowClose = true);
     await WidgetsBinding.instance.endOfFrame;
@@ -945,7 +1013,9 @@ class _RuleEditorState extends State<_RuleEditor> {
     try {
       if (!await _flush(force: true) || !mounted) return;
       final saved = await widget.gateway.commitDraft(widget.host, revision);
-      if (mounted) await _close(saved);
+      if (mounted) {
+        await _close(_EditorCommit(saved, original?.id));
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {

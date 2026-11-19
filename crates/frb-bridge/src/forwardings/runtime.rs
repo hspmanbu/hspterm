@@ -1,7 +1,7 @@
 //! Per-terminal runtime ownership, separate from encrypted saved rules.
 use anyhow::{Context, Result, bail};
 use hspterm_ssh_core::{
-    ManagedSession, RemoteConnector, RemoteForward, SessionPhase, TcpConnector,
+    ManagedSession, RemoteConnector, RemoteForward, SessionPhase, SshError, TcpConnector,
     forwarding::{ForwardStatus, LocalForward},
     remote_forward::{RemotePhase, RemoteStatus},
 };
@@ -261,12 +261,19 @@ impl ForwardingRegistry {
             Capability::Local(cap) => {
                 // Only an explicit literal SocketAddr bind is awaited while
                 // holding the gate; no DNS/SSH/channel/target IO is done here.
-                let owner = if rule.kind == ForwardKind::Dynamic {
-                    LocalForward::socks5(cap, rule.bind, timeout).await?
+                let bound = if rule.kind == ForwardKind::Dynamic {
+                    LocalForward::socks5(cap, rule.bind, timeout).await
                 } else {
                     let t = target()?;
-                    LocalForward::start(cap, rule.bind, t.address.clone(), t.port, timeout).await?
+                    LocalForward::start(cap, rule.bind, t.address.clone(), t.port, timeout).await
                 };
+                // Bind failures surface verbatim in the forwarding dialog and
+                // restoration notices; the generic IO text hides the real
+                // cause, so phrase the local-listening failure readably.
+                let owner = bound.map_err(|error| match error {
+                    SshError::Io(io) => anyhow::anyhow!(describe_bind_failure(io, rule.bind)),
+                    other => other.into(),
+                })?;
                 rule.bind = owner.local_addr(); // Actual local port, runtime only.
                 Resource::Local {
                     state: owner.subscribe(),
@@ -486,6 +493,19 @@ async fn observe(registry: std::sync::Weak<ForwardingRegistry>, mut updates: For
         if !changed || updates.finished() {
             break;
         }
+    }
+}
+
+/// Local listener bind failures, phrased for direct UI display; the raw OS
+/// text is otherwise hidden behind the generic IO error variant.
+fn describe_bind_failure(io: std::io::Error, bind: std::net::SocketAddr) -> String {
+    match io.kind() {
+        std::io::ErrorKind::AddrInUse => format!("端口被占用：{bind} 无法监听"),
+        std::io::ErrorKind::PermissionDenied => {
+            format!("无权限监听 {bind}；1024 以下端口需要管理员权限")
+        }
+        std::io::ErrorKind::AddrNotAvailable => format!("本机不存在监听地址 {bind}"),
+        _ => format!("无法监听 {bind}：{io}"),
     }
 }
 
