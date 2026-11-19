@@ -230,7 +230,16 @@ class TerminalPaintCache {
 
       final rect = Rect.fromLTWH(x * cell.width, 0, cell.width, cell.height);
 
-      if (c.flags & (64 | 256 | 1024) != 0) continue;
+      // Spacers carry no glyph of their own: a trailing spacer (64) is
+      // covered by its lead cell's wide paint, a wrap marker (1024) is
+      // drawn as the wrapped glyph on the next row, and hidden cells
+      // (256) stay blank. A trailing spacer whose left neighbor lost the
+      // WIDE_CHAR flag is an orphan; degrade it to a plain single cell
+      // so its own text is never swallowed by the skip.
+      if (c.flags & (256 | 1024) != 0) continue;
+      if (c.flags & 64 != 0 && (x == 0 || cells[x - 1].flags & 32 != 0)) {
+        continue;
+      }
       final wide = c.flags & 32 != 0 ? 2 : 1;
       if (batchAscii &&
           c.flags & ~147 == 0 &&
@@ -590,10 +599,20 @@ class TerminalPainter extends CustomPainter {
             c.flags,
             fontSize,
           );
+          // Repaint the glyph on top of the block with the same layout
+          // rule as the row path above: centered inside the cursor rect
+          // and clipped to it, so a wide glyph never bleeds past its own
+          // 2-cell span.
+          canvas.save();
+          canvas.clipRect(rect, doAntiAlias: false);
           glyph.paint(
             canvas,
-            Offset(rect.left, rect.top + (cell.height - glyph.height) / 2),
+            Offset(
+              rect.left + (rect.width - glyph.width) / 2,
+              rect.top + (cell.height - glyph.height) / 2,
+            ),
           );
+          canvas.restore();
         }
       }
     }

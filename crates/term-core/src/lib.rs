@@ -1039,11 +1039,23 @@ impl Terminal {
                 });
             }
         }
+        // Mirror upstream RenderableCursor (vendor/alacritty_terminal
+        // src/term/mod.rs): when the cursor rests on the trailing spacer of
+        // a wide glyph the renderable column snaps back to the glyph's lead
+        // cell, so clients paint the cursor block across both cells instead
+        // of only the right half.
+        let mut cursor_column = grid.cursor.point.column.0;
+        if grid[grid.cursor.point]
+            .flags
+            .contains(Flags::WIDE_CHAR_SPACER)
+        {
+            cursor_column = cursor_column.saturating_sub(1);
+        }
         Snapshot {
             working_directory: self.working_directory(),
             size: self.size,
             cells,
-            cursor_column: grid.cursor.point.column.0,
+            cursor_column,
             cursor_row: i64::from(grid.cursor.point.line.0) + offset as i64,
             cursor_visible: self.term.mode().contains(TermMode::SHOW_CURSOR),
             cursor_shape: match self.term.cursor_style().shape {

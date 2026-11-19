@@ -69,6 +69,8 @@ class TerminalViewState extends State<TerminalView>
   Timer? _blinkTimer;
   bool _active = true, _tickerVisible = true;
   Point<int>? _anchor;
+  Point<int>? _pressCell;
+  bool _pressPlain = false;
   int _button = 3;
   bool _remoteDrag = false;
   int? _dragMouseModifiers;
@@ -108,6 +110,10 @@ class TerminalViewState extends State<TerminalView>
   static int Function() debugNowMs = () =>
       DateTime.now().millisecondsSinceEpoch;
   TerminalController get c => widget.controller;
+
+  /// Grid cell size in logical pixels; tests use it to aim pointer events.
+  @visibleForTesting
+  Size get cellSize => _cell;
 
   void _traceInput(String phase, {int? kind}) {
     if (!traceInput) return;
@@ -737,6 +743,46 @@ class TerminalViewState extends State<TerminalView>
   /// plain-shell proof ready, leftover TUI mouse mode gets no events.
   bool get _forwardRemoteMouse => _capture && !c.shellInputReady;
 
+  /// nyaterm-style caret placement for plain shells: without mouse
+  /// reporting, a plain primary click (no shift, no drag) on the cursor's
+  /// own row replays ArrowLeft/ArrowRight so the remote REPL (bash, zsh,
+  /// hermes CLI, …) walks its caret to the clicked cell. Wide glyphs count
+  /// one step and clicks on their trailing spacer snap to the glyph's
+  /// lead, mirroring how a caret actually moves through CJK text.
+  void _clickToCursor(Point<int> cell) {
+    final frame = c.metadata;
+    if (frame == null || !c.connected || c.id == null) return;
+    if (frame.mouseReporting || frame.alternateScreen) return;
+    final cursorRow = frame.cursorRow;
+    if (cell.y != cursorRow) return;
+    if (cursorRow < 0 || cursorRow >= c.rows.length) return;
+    final cells = c.rows[cursorRow];
+    if (cells.isEmpty) return;
+    // A click or a caret on a wide glyph's trailing half belongs to the
+    // glyph's lead cell; the Rust core already snaps the reported cursor
+    // column, this also defends frames from an older core.
+    int snap(int column) {
+      var c = column;
+      if (c < 0) c = 0;
+      if (c >= cells.length) c = cells.length - 1;
+      return cells[c].flags & 64 != 0 && c > 0 ? c - 1 : c;
+    }
+    final target = snap(cell.x);
+    final cursor = snap(frame.cursorColumn);
+    var steps = 0;
+    for (var x = min(cursor, target); x < max(cursor, target); x++) {
+      // Wide leads are one character; their trailing spacers (64) and
+      // wrap markers (1024) are not characters of their own.
+      if (cells[x].flags & (64 | 1024) == 0) steps++;
+    }
+    if (steps == 0) return;
+    _snapToBottomForInput();
+    final key = target > cursor ? 'ArrowRight' : 'ArrowLeft';
+    for (var i = 0; i < steps; i++) {
+      _run(c.key(rust.KeyboardInput(key: key, modifiers: 0, kind: 0)));
+    }
+  }
+
   void down(PointerDownEvent event) {
     _suppressPassiveMouse = false;
     _suggestions.dismiss();
@@ -797,6 +843,10 @@ class TerminalViewState extends State<TerminalView>
     }
     if (_button == 0) {
       _anchor = _point(event.localPosition);
+      // Remember the plain press for caret placement on release; the
+      // no-shift requirement is captured once, for the whole gesture.
+      _pressCell = _anchor;
+      _pressPlain = _mods & 1 == 0;
       c.clearSelection();
     }
     if (_button == 2) {
@@ -1016,15 +1066,25 @@ class TerminalViewState extends State<TerminalView>
                     _remoteDrag = false;
                     // A finished primary-button drag selects; honor the
                     // select-to-copy preference unless it is all whitespace.
+                    final pressCell = _pressCell;
+                    final plainPress =
+                        _button == 0 && pressCell != null && _pressPlain;
+                    _pressCell = null;
                     final selected = _anchor != null && _button == 0;
                     _anchor = null;
                     _button = 3;
                     if (selected) _copySelectionIfWanted();
+                    // A no-drag plain click on the cursor's row becomes
+                    // caret movement instead of an empty selection.
+                    if (plainPress && pressCell == _point(e.localPosition)) {
+                      _clickToCursor(pressCell);
+                    }
                   },
                   onPointerCancel: (e) {
                     if (_remoteDrag) _mouse(e.localPosition, 1, _button);
                     _remoteDrag = false;
                     _anchor = null;
+                    _pressCell = null;
                     _button = 3;
                   },
                   onPointerMove: (e) {
