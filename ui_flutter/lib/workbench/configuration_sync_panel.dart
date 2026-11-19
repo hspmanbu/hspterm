@@ -272,14 +272,34 @@ class ConfigurationSyncBanner extends StatelessWidget {
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  controller.error ??
-                      (state?.review != null
-                          ? '配置同步需要审阅冲突或认证变化'
-                          : syncFailureLabel(state)),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      // A failed phase wins: the typed syncFailureLabel text is
+                      // the actionable cause; a controller notice only adds
+                      // request-level context in the smaller line below.
+                      state?.phase == 'failed' && state?.review == null
+                          ? syncFailureLabel(state)
+                          : controller.error ??
+                                (state?.review != null
+                                    ? '配置同步需要审阅冲突或认证变化'
+                                    : syncFailureLabel(state)),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    if (state?.phase == 'failed' &&
+                        state?.review == null &&
+                        controller.error != null)
+                      Text(
+                        controller.error!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 10),
+                      ),
+                  ],
                 ),
               ),
               if (state?.review != null)

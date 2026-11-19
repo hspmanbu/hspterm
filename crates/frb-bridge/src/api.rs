@@ -7582,9 +7582,10 @@ pub async fn sftp_directory_size_step(
                 Err(hspterm_ssh_core::SshError::Inspection(
                     hspterm_ssh_core::inspection::InspectionError::Busy,
                 )) => {
-                    // tmux history/resource sampling can temporarily own the
-                    // shared slot. Preserve the fast-path opportunity, not a
-                    // permanent slow-walk downgrade. No totals were added.
+                    // Another long task (DirSize/ServerCopy) owns the long lane;
+                    // short probes run on their own lane. Preserve the
+                    // fast-path opportunity, not a permanent slow-walk
+                    // downgrade. No totals were added.
                     let page = DirectorySizePage {
                         size: job.size,
                         files: job.files,
@@ -7933,6 +7934,10 @@ pub async fn sftp_copy_on_server(
         let marker = format!("{}/.hspterm-copy-{}", parent.trim_end_matches('/'), &nonce[..32]);
         let flags = russh_sftp::protocol::OpenFlags::WRITE | russh_sftp::protocol::OpenFlags::CREATE | russh_sftp::protocol::OpenFlags::EXCLUDE;
         let mut receipt = remote.open_with_flags(marker.clone(), flags).await?;
+        // Bind the copy to this session generation's Transport Root: a close
+        // or reconnect retires the token and aborts the bounded copy instead
+        // of letting it run its full 120s deadline on a dead Root.
+        let inspector = entry(id)?.session.inspector_for(generation).await?;
         let result: Result<()> = async {
             let written: Result<()> = async {
                 receipt.set_metadata(russh_sftp::protocol::FileAttributes {permissions: Some(0o600), ..Default::default()}).await?;
@@ -7941,10 +7946,10 @@ pub async fn sftp_copy_on_server(
             let closed = receipt.close().await;
             written?; closed?;
             check_file_generation(id, generation)?;
-            entry(id)?.session.inspector_for(generation).await?.copy_file(serde_json::json!({
+            inspector.copy_file(serde_json::json!({
                 "source":source, "destination":destination, "marker":marker, "nonce":nonce,
                 "metadata":{"size":metadata.size,"mtime":metadata.mtime,"permissions":metadata.permissions,"uid":metadata.uid,"gid":metadata.gid}
-            }), tokio_util::sync::CancellationToken::new()).await.context("服务器内复制未确认；可能已创建部分目标，请检查后再操作；未自动下载或重试")?;
+            }), inspector.transport_cancel()).await.context("服务器内复制未确认；可能已创建部分目标，请检查后再操作；未自动下载或重试")?;
             Ok(())
         }.await;
         let cleanup = remote.remove_file(marker).await.context("远端复制校验文件清理失败，请刷新并检查目标目录");

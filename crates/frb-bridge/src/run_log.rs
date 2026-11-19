@@ -93,6 +93,15 @@ pub(crate) fn decision(operation: &'static str, reason: &'static str, id: u32, g
         &format!("{reason} terminal={id} generation={generation}"),
     );
 }
+/// Typed configuration-sync failure category: bounded enum names only, never
+/// foreign error text, credentials or endpoints.
+pub(crate) fn sync_failure(code: &'static str, kind: &'static str) {
+    log().lock().push(
+        "ERROR",
+        "configuration_sync",
+        &format!("status={code} kind={kind}"),
+    );
+}
 pub(crate) fn failure(
     error: &anyhow::Error,
     safe_message: &str,

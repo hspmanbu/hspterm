@@ -50,6 +50,15 @@ class _TmuxHistoryScrollbarState extends State<TmuxHistoryScrollbar> {
   int? _terminal;
   bool _busy = false;
   String? _error;
+  // Consecutive native Busy refusals (the bounded inspection channel is still
+  // owned elsewhere). Each doubles the next poll delay from the 1s base up to
+  // 60s; past the limit the tooltip shows a degraded reconnect hint while the
+  // last proven snapshot stays visible.
+  int _busyStreak = 0;
+  static const int _busyStreakLimit = 5;
+  static const int _busyBaseMs = 1000;
+  static const int _busyDelayCapMs = 60000;
+  String? _degradedNotice;
   TerminalController get c => widget.controller;
   bool get _eligible =>
       c.visible &&
@@ -71,25 +80,44 @@ class _TmuxHistoryScrollbarState extends State<TmuxHistoryScrollbar> {
       c.addListener(_sync);
       _snapshot = null;
       _pending = null;
+      _resetBusyState();
       _sync();
     }
+  }
+
+  void _resetBusyState() {
+    _busyStreak = 0;
+    _degradedNotice = null;
+  }
+
+  /// One-shot adaptive poll: base 1s, doubled per consecutive Busy refusal,
+  /// capped at 60s. Never a fixed-period busy loop against a held channel.
+  void _arm() {
+    _timer?.cancel();
+    final delay = _busyStreak == 0
+        ? _busyBaseMs
+        : math.min(
+            _busyBaseMs << math.min(_busyStreak, 6),
+            _busyDelayCapMs,
+          );
+    _timer = Timer(Duration(milliseconds: delay), () {
+      _timer = null;
+      unawaited(_request());
+    });
   }
 
   void _sync() {
     if (_terminal != c.id || _generation != c.generation || !_eligible) {
       _snapshot = null;
       _pending = null;
+      _resetBusyState();
       _terminal = c.id;
       _generation = c.generation;
     }
     if (!_eligible) {
       _timer?.cancel();
       _timer = null;
-    } else if (_timer == null) {
-      _timer = Timer.periodic(
-        const Duration(seconds: 1),
-        (_) => unawaited(_request()),
-      );
+    } else if (_timer == null && !_busy) {
       // No synchronous setState while a parent is building a terminal.
       unawaited(Future<void>.delayed(Duration.zero, _request));
     }
@@ -124,19 +152,26 @@ class _TmuxHistoryScrollbarState extends State<TmuxHistoryScrollbar> {
         setState(() {
           _snapshot = snapshot;
           _error = null;
+          _resetBusyState();
         });
       }
     } catch (error) {
       busyRetry = appMessage(error) == '远端检查正在处理或等待旧通道结束；未开始新请求';
       if (busyRetry) {
-        // Preserve the proven snapshot while metrics owns the exec slot.
-        // Retry a pending seek via the normal timer, never a busy loop.
+        // Preserve the proven snapshot while the channel is owned elsewhere.
+        // Retry a pending seek via the backed-off poll, never a busy loop.
+        _busyStreak += 1;
+        if (_busyStreak >= _busyStreakLimit && mounted) {
+          setState(() => _degradedNotice = '远端检查通道未释放，建议重连会话');
+        }
         if (_pending == null &&
             c.id == id &&
             c.generation == generation &&
             _eligible) {
           _pending = pending;
         }
+      } else {
+        _resetBusyState();
       }
       if (!busyRetry &&
           mounted &&
@@ -153,6 +188,8 @@ class _TmuxHistoryScrollbarState extends State<TmuxHistoryScrollbar> {
       _busy = false;
       if (!busyRetry && mounted && _pending != null && _eligible) {
         unawaited(_request());
+      } else if (_eligible && _timer == null) {
+        _arm();
       }
     }
   }
@@ -192,6 +229,7 @@ class _TmuxHistoryScrollbarState extends State<TmuxHistoryScrollbar> {
       return Tooltip(
         message:
             _error ??
+            _degradedNotice ??
             (s == null ? '读取tmux历史' : 'tmux历史 ${s.history} 行 · 位置 ${s.offset}'),
         child: MouseRegion(
           cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,

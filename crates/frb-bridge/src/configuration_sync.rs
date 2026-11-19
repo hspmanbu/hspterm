@@ -197,6 +197,9 @@ fn failure(error: &anyhow::Error, op: &Operation) -> &'static str {
     if op.cancel.is_cancelled() {
         return "cancelled";
     }
+    if error.is::<FirstReadMismatch>() {
+        return "first_read_decrypt";
+    }
     if let Some(e) = error.downcast_ref::<cloud::SyncError>() {
         return match e {
             cloud::SyncError::Changed => "source_changed",
@@ -468,6 +471,54 @@ fn ensure_source(root: &Owner, op: &Operation, flow: &Workflow) -> Result<()> {
         Ok(())
     })
 }
+/// The first verified read of an existing remote object cannot be decrypted
+/// by this device: the sync password participates in collection derivation,
+/// so it must match the device that originally created the dataset. Distinct
+/// from a generic Invalid so the status panel can state the real cause.
+#[derive(Debug)]
+struct FirstReadMismatch;
+impl std::fmt::Display for FirstReadMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("云端数据解密失败：同步密码与创建该数据集的设备不一致，未应用任何配置")
+    }
+}
+impl std::error::Error for FirstReadMismatch {}
+
+/// Stable, typed run-log category for the configuration sync failure causes
+/// that users can act on. Never formats foreign error payloads.
+pub(crate) fn typed_kind(error: &anyhow::Error) -> Option<&'static str> {
+    if error.is::<FirstReadMismatch>() {
+        return Some("sync.first_read_decrypt");
+    }
+    if let Some(e) = error.downcast_ref::<cloud::SyncError>() {
+        return Some(match e {
+            cloud::SyncError::Invalid => "sync.invalid",
+            cloud::SyncError::Capacity => "sync.capacity",
+            cloud::SyncError::Changed => "sync.changed",
+            cloud::SyncError::Clock => "sync.clock",
+            cloud::SyncError::References => "sync.references",
+            cloud::SyncError::TargetChange => "sync.target_change",
+            cloud::SyncError::KeyChange => "sync.key_change",
+            cloud::SyncError::CredentialTarget => "sync.credential_target",
+            cloud::SyncError::Authorization => "sync.authorization",
+            cloud::SyncError::Storage(_) => "sync.storage",
+        });
+    }
+    if let Some(e) = error.downcast_ref::<webdav::TransportError>() {
+        return Some(match e {
+            webdav::TransportError::Configuration => "webdav.configuration",
+            webdav::TransportError::Cancelled => "webdav.cancelled",
+            webdav::TransportError::Network => "webdav.network",
+            webdav::TransportError::Denied => "webdav.denied",
+            webdav::TransportError::Response => "webdav.response",
+            webdav::TransportError::Directory => "webdav.directory",
+            webdav::TransportError::Capacity => "webdav.capacity",
+            webdav::TransportError::WriteUnknown => "webdav.write_unknown",
+        });
+    }
+    None
+}
+
 async fn read_step(
     root: &Arc<Owner>,
     op: &Arc<Operation>,
@@ -481,15 +532,28 @@ async fn read_step(
     })
     .await?;
     let response = flow.transport.read(&op.cancel).await?;
+    // First contact with an existing remote object: decryption failure here
+    // almost always means this device's sync password differs from the one
+    // that created the dataset (the password participates in collection
+    // derivation). Surface that specific state instead of generic Invalid.
+    let first_contact =
+        flow.baseline.etag().is_none() && matches!(response, cloud::RemoteRead::Present { .. });
     let (r, o) = (root.clone(), op.clone());
     blocking(lease, move || {
         let mut flow = flow;
         r.check(&o)?;
-        flow.step = Some(flow.exchange.accept_read(
+        let step = match flow.exchange.accept_read(
             response,
             flow.target.password(),
             cloud::journal::now_millis()?,
-        )?);
+        ) {
+            Ok(step) => step,
+            Err(cloud::SyncError::Invalid) if first_contact => {
+                return Err(anyhow::Error::new(FirstReadMismatch));
+            }
+            Err(error) => return Err(anyhow::Error::new(error)),
+        };
+        flow.step = Some(step);
         ensure_source(&r, &o, &flow)?;
         Ok(flow)
     })
@@ -673,9 +737,38 @@ pub(crate) async fn prepare(id: String, operation: String) -> Result<String> {
     .await;
     abort.completed = true;
     if let Err(error) = &result {
-        finish(&root, &op, failure(error, &op));
+        let code = failure(error, &op);
+        finish(&root, &op, code);
+        // The run log keeps the typed cause; the status panel and the public
+        // summary below carry the actionable per-cause text.
+        if let Some(kind) = typed_kind(error) {
+            crate::run_log::sync_failure(code, kind);
+        }
     }
-    result.map_err(|_| anyhow::anyhow!("同步准备未完成；请查看同步状态后明确重试"))
+    // Keep the typed cause in the returned public summary as well; the old
+    // blanket message hid password/collection mismatches, MKCOL failures and
+    // authentication errors that the status panel already knew about.
+    result.map_err(|error| {
+        if error.is::<FirstReadMismatch>() {
+            return anyhow::anyhow!(
+                "云端数据解密失败：同步密码与创建该数据集的设备不一致，未应用任何配置"
+            );
+        }
+        match error.downcast_ref::<cloud::SyncError>() {
+            Some(cloud::SyncError::Invalid) => anyhow::anyhow!(
+                "云端数据解密失败：同步密码与创建该数据集的设备不一致，未应用任何配置"
+            ),
+            _ => match error.downcast_ref::<webdav::TransportError>() {
+                Some(webdav::TransportError::Directory) => {
+                    anyhow::anyhow!("同步目录未就绪：请在服务器确认 <根>/hspterm 目录与根地址")
+                }
+                Some(webdav::TransportError::Denied) => {
+                    anyhow::anyhow!("WebDAV 认证被拒绝")
+                }
+                _ => anyhow::anyhow!("同步准备未完成；请查看同步状态后明确重试"),
+            },
+        }
+    })
 }
 
 async fn commit(

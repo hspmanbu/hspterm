@@ -4,17 +4,31 @@
 use crate::{Client, SshError};
 use russh::{Channel, ChannelMsg, client};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 use tokio::sync::{Semaphore, oneshot};
 use tokio_util::sync::CancellationToken;
 
 const SCRIPT: &str = include_str!("inspection/probe.py");
 const OUTPUT_LIMIT: usize = 256 * 1024;
 const DEADLINE: Duration = Duration::from_secs(8);
+/// Bounded CHANNEL_OPEN wait. A peer that never ACKs an open must not pin
+/// admission (and the sampling lane) indefinitely; the pending open request
+/// is abandoned and the permit released. Strictly inside the caller's
+/// `deadline + 2s` receive bound for short actions.
+const OPEN_DEADLINE: Duration = Duration::from_secs(9);
 #[derive(Debug, thiserror::Error)]
 pub enum InspectionError {
     #[error("远端检查正在处理或等待旧通道结束；未开始新请求")]
     Busy,
+    #[error("远端检查通道未释放；已暂停检查，建议重连会话后重试")]
+    Degraded,
     #[error("远端资源检查不可用或响应无效；需要 Linux procfs 与 Python 3")]
     Unavailable,
     #[error("远端检查已取消或超时；原 SSH 不会自动重连，结束进程结果可能未确认")]
@@ -179,9 +193,11 @@ fn command(action: &Action) -> Result<String, InspectionError> {
         SCRIPT.replace('\'', "'\\''")
     ))
 }
-/// Shared one-slot bound across every acquisition from the same Transport.
-/// A timed-out channel-open stays owned until its late ACK or Root closes.
-/// Totals from the fixed server-side size walk.
+/// Two independent one-slot lanes per Transport: short probes (sample,
+/// history, processes, terminate) and long tasks (DirSize/ServerCopy). An
+/// unacknowledged channel-open is abandoned after OPEN_DEADLINE; a channel
+/// whose CLOSE is never acknowledged parks the Inspector degraded instead of
+/// holding its lane. Totals from the fixed server-side size walk.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DirectorySize {
     pub size: u64,
@@ -193,8 +209,17 @@ pub struct DirectorySize {
 pub struct Inspector {
     handle: Arc<client::Handle<Client>>,
     transport: CancellationToken,
+    /// Short probes (sample/history/processes/terminate): one at a time.
     slot: Arc<Semaphore>,
+    /// Long tasks (DirSize/ServerCopy): one at a time on their own lane so a
+    /// 120s walk cannot starve periodic sampling and tmux history reads.
+    long_slot: Arc<Semaphore>,
     sample_waiter: Arc<Semaphore>,
+    /// Set when a completed action's channel never acknowledged CLOSE. Later
+    /// actions report the definite Degraded error instead of endless Busy;
+    /// only a recovery probe fully retiring its channel (or a rebuilt Root)
+    /// clears it. Shared by every clone of this Root's inspector.
+    degraded: Arc<AtomicBool>,
     tmux: Arc<parking_lot::Mutex<Option<crate::tmux::Identity>>>,
     readonly: bool,
 }
@@ -209,7 +234,9 @@ impl Inspector {
             handle,
             transport,
             slot: Arc::new(Semaphore::new(1)),
+            long_slot: Arc::new(Semaphore::new(1)),
             sample_waiter: Arc::new(Semaphore::new(1)),
+            degraded: Arc::new(AtomicBool::new(false)),
             tmux: Arc::new(parking_lot::Mutex::new(tmux)),
             readonly,
         }
@@ -217,19 +244,28 @@ impl Inspector {
     pub(crate) fn clear_tmux(&self) {
         self.tmux.lock().take();
     }
+    /// A caller-owned cancellation bound to this inspector's original
+    /// Transport Root: it fires when the session retires that generation
+    /// (close or reconnect), aborting bound long actions instead of letting
+    /// them run to their full deadline on a dead Root.
+    pub fn transport_cancel(&self) -> CancellationToken {
+        self.transport.child_token()
+    }
     pub(crate) async fn wait_closed(&self) {
         // Called only AFTER original Root cancellation. Pending open workers
         // then retire; this does not wait for a peer that can no longer reply.
-        if let Ok(permit) = self.slot.acquire().await {
-            drop(permit);
-        }
+        let (short, long) = (self.slot.acquire(), self.long_slot.acquire());
+        tokio::pin!(short, long);
+        let _ = (&mut short).await;
+        let _ = (&mut long).await;
     }
     async fn execute(
         &self,
         action: Action,
         cancel: CancellationToken,
     ) -> Result<Vec<u8>, SshError> {
-        let deadline = if matches!(action, Action::ServerCopy(_) | Action::DirSize(_)) {
+        let long = matches!(action, Action::ServerCopy(_) | Action::DirSize(_));
+        let deadline = if long {
             Duration::from_secs(120)
         } else {
             DEADLINE
@@ -241,19 +277,29 @@ impl Inspector {
         if cancel.is_cancelled() {
             return Err(InspectionError::Unconfirmed.into());
         }
-        let permit = acquire_slot(
-            &self.slot,
-            &self.sample_waiter,
-            matches!(action, Action::Sample | Action::DirSize(_)),
-            &cancel,
-            &self.transport,
-        )
-        .await?;
+        // A channel whose CLOSE was never acknowledged parks this Inspector:
+        // every later action reports the definite Degraded state instead of
+        // endless Busy retries. A sample is still admitted as the explicit
+        // recovery probe; only its fully retired channel (or a rebuilt Root)
+        // clears the state.
+        if self.degraded.load(Ordering::Acquire) && !matches!(action, Action::Sample) {
+            return Err(InspectionError::Degraded.into());
+        }
+        // Short probes and long walks take separate one-slot lanes so a long
+        // DirSize/ServerCopy can never starve sampling or history reads.
+        let (slot, queued) = if long {
+            (&self.long_slot, false)
+        } else {
+            (&self.slot, matches!(action, Action::Sample))
+        };
+        let permit =
+            acquire_slot(slot, &self.sample_waiter, queued, &cancel, &self.transport).await?;
         let local = cancel.child_token();
         let _lifetime = crate::transport::Lifetime(local.clone());
         let worker_cancel = local.clone();
         let root = self.transport.clone();
         let handle = self.handle.clone();
+        let degraded = self.degraded.clone();
         let (send, receive) = oneshot::channel();
         tokio::spawn(async move {
             let _permit = permit;
@@ -261,10 +307,20 @@ impl Inspector {
                 let mut channel = tokio::select! {
                     biased;
                     _ = root.cancelled() => return Err(SshError::Disconnected),
-                    result = handle.channel_open_session_flow_controlled() => result?,
+                    // Local cancellation abandons the pending open too: the
+                    // permit is released instead of waiting for a late ACK.
+                    _ = worker_cancel.cancelled() => return Err(InspectionError::Unconfirmed.into()),
+                    // Bounded CHANNEL_OPEN: an unacknowledged open is abandoned
+                    // (dropping the reply receiver) and admission released.
+                    opened = tokio::time::timeout(OPEN_DEADLINE, handle.channel_open_session_flow_controlled()) => {
+                        match opened {
+                            Ok(result) => result?,
+                            Err(_unacknowledged) => return Err(InspectionError::Unconfirmed.into()),
+                        }
+                    }
                 };
-                // Never abandon a pending russh channel-open on local timeout.
-                // Once owned, cancellation drops only this operation/channel.
+                // Never abandon an owned channel on local timeout: once the
+                // open is confirmed, cancellation drops only this channel.
                 let mut peer_closed = false;
                 let result = tokio::select! {
                     biased;
@@ -281,11 +337,19 @@ impl Inspector {
                     };
                     if !closed {
                         drop(channel.into_stream());
-                        // A blocked close sender must not accumulate across
-                        // manual retries. Keep the sole slot until Root retires.
-                        root.cancelled().await;
+                        // The peer never acknowledged CLOSE. Release admission
+                        // immediately and park this Inspector degraded: later
+                        // actions get a definite Degraded error (never Busy)
+                        // until a recovery probe retires its channel cleanly
+                        // or the Root is rebuilt. Never hold the permit waiting
+                        // for root.cancelled() here.
+                        degraded.store(true, Ordering::Release);
                         return Err(InspectionError::Unconfirmed.into());
                     }
+                    // A fully retired channel proves the inspection path works
+                    // again; this also clears a previous degraded state when
+                    // the admitted action was the recovery probe.
+                    degraded.store(false, Ordering::Release);
                 }
                 result
             }.await;
@@ -624,6 +688,30 @@ mod tests {
             Err(SshError::Inspection(InspectionError::Unconfirmed))
         ));
         assert_eq!(slot.available_permits(), 1);
+    }
+    #[tokio::test]
+    async fn long_tasks_and_short_probes_have_independent_lanes() {
+        let slot = Arc::new(Semaphore::new(1));
+        let long_slot = Arc::new(Semaphore::new(1));
+        let waiter = Arc::new(Semaphore::new(1));
+        let cancel = CancellationToken::new();
+        let root = CancellationToken::new();
+        let _short_held = slot.clone().try_acquire_owned().unwrap();
+        // DirSize/ServerCopy admission uses its own lane: a held short lane
+        // (sample/tmux history) must not turn a long task into Busy.
+        let long_permit = acquire_slot(&long_slot, &waiter, false, &cancel, &root)
+            .await
+            .unwrap();
+        assert_eq!(slot.available_permits(), 0);
+        assert_eq!(long_slot.available_permits(), 0);
+        // A second long task is still refused while one walk owns the lane.
+        assert!(matches!(
+            acquire_slot(&long_slot, &waiter, false, &cancel, &root).await,
+            Err(SshError::Inspection(InspectionError::Busy))
+        ));
+        drop(long_permit);
+        assert_eq!(long_slot.available_permits(), 1);
+        assert_eq!(slot.available_permits(), 0);
     }
     const BOOT: &str = "01234567-89ab-cdef-0123-456789abcdef";
     #[test]

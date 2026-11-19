@@ -499,14 +499,21 @@ class ConfigurationSyncController extends ChangeNotifier {
       try {
         await action();
       } catch (_) {
-        error = '同步请求未完成；请查看状态后明确重试。';
+        // Refresh the authoritative status first: when it already carries a
+        // typed error code (phase failed), its specific syncFailureLabel text
+        // must stay primary and must not be covered by a generic notice.
+        var typedFailure = false;
         final owner = _owner;
         if (owner != null && !_closing) {
           try {
             _accept(await gateway.status(owner));
+            typedFailure = state?.phase == 'failed';
           } catch (_) {
             error = '无法读取同步结果；请保留本机数据并重新打开配置库。';
           }
+        }
+        if (error == null && !typedFailure) {
+          error = '同步请求未完成；请查看状态后明确重试。';
         }
         if (state?.phase == 'cancelled') error = null;
       } finally {
@@ -743,6 +750,8 @@ String syncFailureLabel(ConfigurationSyncState? state) {
     'references' => '两端的分组或跳板引用冲突；请调整相关配置后重新同步。',
     'clock' => '设备时钟异常，请校准后重试。',
     'capacity' => '同步数据超过容量限制，两端数据均保留。',
+    'first_read_decrypt' =>
+      '本地没有同步基线且云端对象解密失败：同步密码必须与最初创建数据集的设备一致（密码参与派生集合）。',
     'data' => '同步密码、集合标识或数据版本不匹配，未应用。',
     'denied' => '同步服务器拒绝访问，请检查已保存认证。',
     'directory' => '同步目录未就绪：请在服务器上准备 hspterm 目录或核对 WebDAV 根目录地址。',

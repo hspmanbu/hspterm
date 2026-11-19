@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
@@ -330,6 +331,13 @@ class RemoteInspectionController extends ChangeNotifier {
   bool metrics = false, processesAllowed = false, active = false;
   bool _closing = false, _disposed = false;
   int _epoch = 0;
+  // Consecutive native Busy refusals (the bounded inspection channel is still
+  // owned). Each one doubles the next poll delay up to 60s; past the limit the
+  // controller stops polling with an explicit reconnect hint instead of
+  // silently retrying at the base period forever.
+  int _busyStreak = 0;
+  static const int _busyStreakLimit = 5;
+  static const int _busyDelayCapMs = 60000;
   Timer? _timer;
   Future<void>? _work, _configuration;
   RemoteResourceSummary? summary;
@@ -361,6 +369,7 @@ class RemoteInspectionController extends ChangeNotifier {
     _source = null;
     metrics = false;
     processesAllowed = false;
+    _busyStreak = 0;
     summary = null;
     processList = null;
     result = null;
@@ -394,7 +403,19 @@ class RemoteInspectionController extends ChangeNotifier {
         !_current(_source!)) {
       return;
     }
-    _timer = Timer(immediate ? Duration.zero : interval, () {
+    // Exponential backoff on consecutive Busy refusals: base period, then
+    // doubled each refusal, capped at 60s.
+    final delay = immediate
+        ? Duration.zero
+        : (_busyStreak == 0
+              ? interval
+              : Duration(
+                  milliseconds: math.min(
+                    interval.inMilliseconds << math.min(_busyStreak, 6),
+                    _busyDelayCapMs,
+                  ),
+                ));
+    _timer = Timer(delay, () {
       _timer = null;
       unawaited(refreshMetrics().catchError((Object _) {}));
     });
@@ -430,6 +451,8 @@ class RemoteInspectionController extends ChangeNotifier {
         if (_current(source) && epoch == _epoch && !_closing) {
           this.metrics = metrics;
           processesAllowed = processes;
+          // A fresh consent round starts a clean polling cadence.
+          _busyStreak = 0;
           if (persist) {
             await preference?.save(metrics);
             _desiredMetrics = metrics;
@@ -467,12 +490,21 @@ class RemoteInspectionController extends ChangeNotifier {
     unawaited(() async {
       try {
         await action(source, epoch);
+        _busyStreak = 0;
         done.complete();
       } catch (e, stack) {
         if (_current(source) && epoch == _epoch) {
           // tmux metadata and resource requests share a bounded native channel.
-          // Busy is a definite refusal before execution, never an unknown ACK.
-          if (appMessage(e) != '远端检查正在处理或等待旧通道结束；未开始新请求') {
+          // Busy is a definite refusal before execution, never an unknown ACK:
+          // back off exponentially instead of a fixed-period silent retry, and
+          // degrade to an explicit reconnect hint once the channel stays owned.
+          if (appMessage(e) == '远端检查正在处理或等待旧通道结束；未开始新请求') {
+            _busyStreak += 1;
+            if (_busyStreak >= _busyStreakLimit) {
+              error = '远端检查通道未释放，建议重连会话';
+            }
+          } else {
+            _busyStreak = 0;
             error = '资源采样失败，已暂停；请检查连接、procfs 和 Python 3。';
           }
         }
