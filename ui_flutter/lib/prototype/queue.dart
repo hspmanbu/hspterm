@@ -277,7 +277,9 @@ class _TransferQueueState extends State<TransferQueue> {
 
   @override
   Widget build(BuildContext context) {
-    final tasks = m.visibleTransfers;
+    // Newest task first: demo transfers are appended oldest→newest, so the
+    // queue renders the reversed list; a transfer added later shows on top.
+    final tasks = m.visibleTransfers.reversed.toList();
     selected.removeWhere((id) => !tasks.any((t) => t.id == id));
     final activity = tasks
         .where(

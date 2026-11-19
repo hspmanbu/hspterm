@@ -186,16 +186,29 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.text('本地编辑 · 1'), findsOneWidget);
+    expect(find.textContaining('本地编辑 · 1'), findsOneWidget);
     expect(find.text('notes.md'), findsOneWidget);
-    // Lifecycle text, never a normal-download label.
-    expect(find.textContaining('正在本地编辑'), findsOneWidget);
+    // Subtitle shows only host + remote path, with the same string as the
+    // hover Tooltip for the truncated case; no lifecycle status text.
+    expect(find.text('fixture · /dir/notes.md'), findsOneWidget);
+    expect(find.byTooltip('fixture · /dir/notes.md'), findsOneWidget);
+    expect(find.textContaining('正在本地编辑'), findsNothing);
     // The remote path is visible from the tile.
     expect(find.textContaining('/dir/notes.md'), findsOneWidget);
     expect(find.byTooltip('打开本地文件'), findsOneWidget);
     expect(find.byTooltip('打开所在文件夹'), findsOneWidget);
+    // The overflow menu is gone; ending the session is a direct icon.
+    expect(find.byTooltip('本地编辑任务'), findsNothing);
+    expect(find.byTooltip('结束编辑会话'), findsOneWidget);
     // No retry button while healthy.
     expect(find.byTooltip('重试上传'), findsNothing);
+    // The group heading collapses and re-expands the edit tiles.
+    await tester.tap(find.textContaining('本地编辑 ·'));
+    await tester.pump();
+    expect(find.text('notes.md'), findsNothing);
+    await tester.tap(find.textContaining('本地编辑 ·'));
+    await tester.pump();
+    expect(find.text('notes.md'), findsOneWidget);
     s.controller.dispose();
   });
 
@@ -218,7 +231,9 @@ void main() {
     );
     await tester.pump();
     expect(find.byTooltip('重试上传'), findsOneWidget);
-    expect(find.textContaining('上传失败'), findsOneWidget);
+    // Status text no longer lives in the subtitle; failure is actionable
+    // through the retry button and the session can still be ended directly.
+    expect(find.byTooltip('结束编辑会话'), findsOneWidget);
 
     gateway.failUpload = false;
     // Retrying through the tile would start real file IO inside the fake

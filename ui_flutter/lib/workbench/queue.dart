@@ -33,7 +33,7 @@ class LiveTransferQueue extends StatefulWidget {
 class _LiveTransferQueueState extends State<LiveTransferQueue> {
   final selected = <String>{};
   String? expanded, anchor;
-  bool completedOpen = false, imagesOpen = true;
+  bool completedOpen = false, imagesOpen = true, editsOpen = true;
   LiveWorkbenchModel get m => widget.model;
 
   @override
@@ -141,14 +141,6 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   }
 
   Widget _editTile(LocalEditSession edit) {
-    final statusText = switch (edit.status) {
-      LocalEditStatus.downloading => '下载中',
-      LocalEditStatus.editing => '正在本地编辑 · 保存后自动回传',
-      LocalEditStatus.uploading => '正在上传',
-      LocalEditStatus.conflicted => '远端已变化 · 未覆盖，请处理后重试',
-      LocalEditStatus.failed => '上传失败 · 修改已保留，可重试',
-      LocalEditStatus.closed => '已关闭',
-    };
     final transferring =
         edit.status == LocalEditStatus.downloading ||
         edit.status == LocalEditStatus.uploading;
@@ -161,6 +153,10 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
     final failed =
         edit.status == LocalEditStatus.failed ||
         edit.status == LocalEditStatus.conflicted;
+    // Subtitle carries only host + full remote path (task 3a); the same
+    // string doubles as the hover Tooltip so a truncated address stays
+    // readable (task 3b).
+    final subtitle = '${edit.hostLabel} · ${edit.remotePath}';
     return ListTile(
       dense: true,
       leading: const Icon(Icons.edit_document, size: 18),
@@ -174,11 +170,14 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            '${edit.hostLabel} · $statusText · 远端 ${edit.remotePath}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10),
+          Tooltip(
+            message: subtitle,
+            child: Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10),
+            ),
           ),
           if (transferring) ...[
             const SizedBox(height: 5),
@@ -208,28 +207,10 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
             '打开所在文件夹',
             () => run(_revealFile(edit.localFile)),
           ),
-          PopupMenuButton<String>(
-            tooltip: '本地编辑任务',
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'open', child: Text('打开本地文件')),
-              PopupMenuItem(value: 'folder', child: Text('打开所在文件夹')),
-              PopupMenuItem(value: 'close', child: Text('结束编辑会话')),
-            ],
-            onSelected: (action) {
-              switch (action) {
-                case 'open':
-                  run(_launchLocal(localFileUri(edit.localFile.path)));
-                case 'folder':
-                  run(_revealFile(edit.localFile));
-                case 'close':
-                  run(
-                    Future<void>(() async {
-                      await edit.dispose();
-                    }),
-                  );
-              }
-            },
-          ),
+          // Direct "end session" action (task 3c): the old overflow menu only
+          // repeated the two open actions above plus this close, so it is
+          // merged into a single icon reusing the same dispose path.
+          Tool(Icons.power_settings_new, '结束编辑会话', () => run(edit.dispose())),
         ],
       ),
     );
@@ -294,7 +275,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   bool _autoPromptRunning = false;
   List<jobs.TransferTaskView> get tasks {
     final native = (m.focus as LiveTerminalSession?)?.controller.id;
-    return m.transferTasks
+    final mine = m.transferTasks
         .where(
           (t) =>
               m.allTasks ||
@@ -302,6 +283,11 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
                   (t.terminalId == native || t.sourceTerminalId == native)),
         )
         .toList();
+    // Newest task first (task 1): the engine reports jobs oldest→newest, so
+    // the queue renders the reversed list — a task enqueued later shows on
+    // top within every section. Reversal is deterministic per snapshot, so
+    // ordering stays stable across refreshes.
+    return mine.reversed.toList();
   }
 
   bool ended(jobs.TransferTaskView t) =>
@@ -947,9 +933,13 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
     final done = list.where(ended).toList();
     final edits = m.localEdits.sessions
         .where((s) => s.status != LocalEditStatus.closed)
+        .toList()
+        .reversed
         .toList();
     final images = m.imageUploads
         .where((t) => m.allTasks || t.session == m.focus?.id)
+        .toList()
+        .reversed
         .toList();
     final rows = <Object>[
       if (images.isNotEmpty) ...[
@@ -968,16 +958,21 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         if (imagesOpen) ...images,
       ],
       if (edits.isNotEmpty) ...[
-        SectionHeading(
-          '本地编辑 · ${edits.length}',
-          trailing: Tool(
-            Icons.layers_clear,
-            '关闭所有本地编辑会话',
-            () => run(_closeAllEdits(edits)),
-            size: 14,
+        // Collapsible group (task 2), expanded by default; the open/closed
+        // choice lives in this run's widget state only.
+        InkWell(
+          onTap: () => setState(() => editsOpen = !editsOpen),
+          child: SectionHeading(
+            '${editsOpen ? '▾' : '▸'} 本地编辑 · ${edits.length}',
+            trailing: Tool(
+              Icons.layers_clear,
+              '关闭所有本地编辑会话',
+              () => run(_closeAllEdits(edits)),
+              size: 14,
+            ),
           ),
         ),
-        ...edits,
+        if (editsOpen) ...edits,
       ],
       if (activity.isNotEmpty) ...[
         SectionHeading('活动与等待 · ${activity.length}'),

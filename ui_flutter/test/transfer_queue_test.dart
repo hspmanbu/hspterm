@@ -368,20 +368,22 @@ void main() {
           ),
         ),
       );
-      expect(find.text('item-1999.txt'), findsNothing);
+      // Newest task first: task-1999 (enqueued last) is the top visible row
+      // and task-0 is far offscreen, so only the head of the queue builds.
+      expect(find.text('item-0.txt'), findsNothing);
       expect(
-        find.byKey(const ValueKey('live-transfer-task-0')),
+        find.byKey(const ValueKey('live-transfer-task-1999')),
         findsOneWidget,
       );
       expect(find.byType(Text).evaluate().length, lessThan(100));
-      await tester.tap(find.byKey(const ValueKey('live-transfer-task-0')));
+      await tester.tap(find.byKey(const ValueKey('live-transfer-task-1999')));
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.tap(find.byKey(const ValueKey('live-transfer-task-1')));
+      await tester.tap(find.byKey(const ValueKey('live-transfer-task-1998')));
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pump();
       await tester.tap(find.byTooltip('批量暂停'));
       await tester.pump();
-      expect(m.actions, ['task-0:pause', 'task-1:pause']);
+      expect(m.actions, ['task-1999:pause', 'task-1998:pause']);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       m.dispose();
