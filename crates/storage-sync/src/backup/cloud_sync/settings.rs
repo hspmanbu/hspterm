@@ -175,6 +175,11 @@ pub struct View {
     pub webdav_credential_set: bool,
     pub proxy_credential_set: bool,
     pub suggested_collection: String,
+    /// The stored WebDAV target's collection equals the derivation from its
+    /// own endpoint root and the stored password. `false` marks a dataset from
+    /// the manual/random collection era: re-saving derives a new collection,
+    /// which routes through the explicit target-switch confirmation.
+    pub collection_derived: bool,
 }
 fn revision(vault: &Vault, config: Option<&[u8]>, secret: Option<&[u8]>) -> String {
     let mut tag = vault.revision(b"local sync target v1");
@@ -276,7 +281,24 @@ fn view(vault: &Vault, value: &Read) -> View {
             .as_ref()
             .map(|t| t.collection.clone())
             .unwrap_or_else(|| format!("{:032x}", rand::random::<u128>())),
+        collection_derived: value
+            .target
+            .as_ref()
+            .is_none_or(|t| collection_is_derived(t, value.secrets.sync_password.as_bytes())),
     }
+}
+/// Whether the stored target's collection is the one the frozen derivation
+/// produces from the target's own endpoint root and the stored password.
+fn collection_is_derived(target: &Target, password: &[u8]) -> bool {
+    if target.drive.is_some() {
+        return false;
+    }
+    target
+        .endpoint
+        .strip_suffix(webdav::DERIVED_OBJECT_PATH)
+        .is_some_and(|root| {
+            derived_collection(root, password).is_ok_and(|c| c == target.collection)
+        })
 }
 pub fn load(vault: &Vault) -> Result<View> {
     Ok(view(vault, &read(vault)?))
@@ -449,6 +471,15 @@ fn save_inner(
     if view(vault, &before).revision != proposal.revision {
         return Err(SyncError::Changed);
     }
+    // Entry normalization (single choke point for every settings entry):
+    // surrounding whitespace is never part of the E2E sync password, so every
+    // device derives the collection and decrypts with the same bytes. The
+    // untrimmed original is zeroized immediately.
+    let proposed_password = proposal.secrets.sync_password.take().map(|mut raw| {
+        let trimmed = raw.trim().to_owned();
+        raw.zeroize();
+        Zeroizing::new(trimmed)
+    });
     let mut target = proposal.target.checked()?;
     if let Some(root) = proposal.derive_collection.as_deref() {
         // Derivation is WebDAV-only and must agree with the endpoint the form
@@ -460,10 +491,9 @@ fn save_inner(
         if webdav::derive_object(root).map_err(|_| SyncError::Invalid)? != target.endpoint {
             return Err(SyncError::Invalid);
         }
-        let effective = proposal
-            .secrets
-            .sync_password
-            .as_deref()
+        let effective = proposed_password
+            .as_ref()
+            .map(|p| p.as_str())
             .unwrap_or(before.secrets.sync_password.as_str());
         target.collection = derived_collection(root, effective.as_bytes())?;
     }
@@ -513,17 +543,15 @@ fn save_inner(
     let ledger = vault.get_bounded(LEDGER, MAX_PLAIN)?;
     if !switching
         && ledger.is_some()
-        && proposal
-            .secrets
-            .sync_password
+        && proposed_password
             .as_ref()
-            .is_some_and(|p| p != &before.secrets.sync_password)
+            .is_some_and(|p| p.as_str() != before.secrets.sync_password)
     {
         return Err(SyncError::KeyChange);
     }
-    if let Some(password) = proposal.secrets.sync_password.take() {
+    if let Some(password) = proposed_password {
         before.secrets.sync_password.zeroize();
-        before.secrets.sync_password = password;
+        before.secrets.sync_password = password.as_str().to_owned();
     }
     proposal.secrets.webdav.apply(&mut before.secrets.webdav);
     proposal.secrets.proxy.apply(&mut before.secrets.proxy);
@@ -611,7 +639,8 @@ fn save_inner(
         sync_password_set: true,
         webdav_credential_set: before.secrets.webdav.is_some(),
         proxy_credential_set: before.secrets.proxy.is_some(),
-        suggested_collection: target.collection,
+        suggested_collection: target.collection.clone(),
+        collection_derived: collection_is_derived(&target, before.secrets.sync_password.as_bytes()),
     };
     let mut expected = vec![
         (CONFIG, before.config.as_deref().map(Vec::as_slice)),

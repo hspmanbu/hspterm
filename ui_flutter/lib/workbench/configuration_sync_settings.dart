@@ -19,8 +19,9 @@ class ConfigurationSyncSettings {
       passwordSet = value['sync_password_set'] as bool,
       authSet = value['webdav_credential_set'] as bool,
       proxyAuthSet = value['proxy_credential_set'] as bool,
-      suggestedCollection = value['suggested_collection'] as String {
-    if (value.length != 7 ||
+      suggestedCollection = value['suggested_collection'] as String,
+      collectionDerived = value['collection_derived'] as bool {
+    if (value.length != 8 ||
         !value.keys.toSet().containsAll({
           'vault_scope',
           'revision',
@@ -29,6 +30,7 @@ class ConfigurationSyncSettings {
           'webdav_credential_set',
           'proxy_credential_set',
           'suggested_collection',
+          'collection_derived',
         })) {
       throw const FormatException('同步设置元数据字段不支持');
     }
@@ -101,7 +103,7 @@ class ConfigurationSyncSettings {
     }
   }
   final String scope, revision, suggestedCollection;
-  final bool passwordSet, authSet, proxyAuthSet;
+  final bool passwordSet, authSet, proxyAuthSet, collectionDerived;
   final Map<String, dynamic>? target;
 }
 
@@ -341,7 +343,7 @@ class _ConfigurationSyncSettingsPanelState
           title: const Text('更换同步目标'),
           content: const SingleChildScrollView(
             child: Text(
-              '原云端数据不会删除。本机将归档原目标的同步基线，并把当前配置作为新目标的一次本机修改。返回旧目标时恢复该目标基线。\n\n新设备须使用相同根目录和同步密码（同一数据集）。确认更换根目录或密码？',
+              '原云端数据不会删除。本机将归档原目标的同步基线，并把当前配置作为新目标的一次本机修改。返回旧目标时恢复该目标基线。\n\n新设备须使用相同根目录和同步密码（同一数据集）。旧版标识的数据集会在下次同步时以新派生集合重新上传，云端数据合并保留。确认更换根目录、密码或集合标识？',
             ),
           ),
           actions: [
@@ -368,18 +370,17 @@ class _ConfigurationSyncSettingsPanelState
       return;
     }
     final old = source.target;
-    // WebDAV roots derive the single object URL and (for new or edited
-    // targets) the collection from the root + effective sync password. A
-    // stored target whose form was left untouched re-saves its exact
-    // endpoint/collection, never re-deriving a different dataset silently.
+    // WebDAV roots ALWAYS derive the single object URL and the collection from
+    // the root + effective sync password on this version. A stored target the
+    // form left untouched re-derives the SAME endpoint/collection (no switch,
+    // no dialog) — unless its stored collection is a legacy (manual/random)
+    // identifier, which the explicit target-switch confirmation then migrates
+    // to the derived identifier; the next sync rewrites the cloud object with
+    // the derived collection and the old local baseline stays archived.
     final priorWebDav = old != null && old['drive'] == null;
-    final rootChanged = _root.text != _loadedRoot;
-    final deriving =
-        _editingWebDav && (!priorWebDav || rootChanged || _replacePassword);
-    final endpoint = _editingWebDav
-        ? (deriving
-              ? deriveWebDavObject(_root.text)
-              : old!['endpoint'] as String)
+    final deriving = _editingWebDav;
+    final endpoint = deriving
+        ? deriveWebDavObject(_root.text)
         : old!['endpoint'] as String;
     final collection = _editingWebDav
         ? (old?['collection'] as String? ?? source.suggestedCollection)
@@ -424,7 +425,8 @@ class _ConfigurationSyncSettingsPanelState
         source.target != null &&
         (source.target!['endpoint'] != target['endpoint'] ||
             source.target!['drive'] != null && _editingWebDav ||
-            deriving && _replacePassword && priorWebDav);
+            deriving && _replacePassword && priorWebDav ||
+            deriving && priorWebDav && !source.collectionDerived);
     setState(() {
       _saving = true;
       _error = null;
@@ -440,8 +442,10 @@ class _ConfigurationSyncSettingsPanelState
       }
       // Freeze exactly the confirmed form. The form is disabled while the
       // dialog/native write is pending; target cannot follow another page.
+      // Secrets are trimmed here exactly once; the native side normalizes
+      // every remaining entry with the same rule.
       final secretChanges = <String, dynamic>{
-        'sync_password': _replacePassword ? _password.text : null,
+        'sync_password': _replacePassword ? _password.text.trim() : null,
         'webdav': _authenticate
             ? (_replaceAuth
                   ? {
@@ -687,10 +691,12 @@ class _ConfigurationSyncSettingsPanelState
                   '同步密码',
                   _password,
                   secret: true,
-                  help: '成功同步过的集合不能仅改本机密码；更换密码请明确使用新集合',
+                  help: '成功同步过的集合不能仅改本机密码；更换密码请明确使用新集合。首尾空格不计入密码',
                   validator: (v) =>
-                      v == null || v.isEmpty || utf8.encode(v).length > 4096
-                      ? '需要 1–4096 字节的同步密码'
+                      v == null ||
+                      v.trim().isEmpty ||
+                      utf8.encode(v).length > 4096
+                      ? '需要 1–4096 字节的同步密码（首尾空格不计入）'
                       : null,
                 ),
               if (_editingWebDav)

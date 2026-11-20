@@ -6,8 +6,9 @@ import 'package:hspterm/workbench/configuration_sync_settings.dart';
 
 Map<String, dynamic> _metadata({
   bool configured = true,
-  String endpoint = 'https://fixture.invalid/object',
+  String endpoint = 'https://fixture.invalid/dav/hspterm/config.hspterm',
   String revision = 'a',
+  bool collectionDerived = true,
 }) => {
   'vault_scope': 'synthetic-sync-vault',
   'revision': revision * 64,
@@ -25,6 +26,7 @@ Map<String, dynamic> _metadata({
   'webdav_credential_set': false,
   'proxy_credential_set': false,
   'suggested_collection': '0123456789abcdef0123456789abcdef',
+  'collection_derived': configured && collectionDerived,
 };
 
 class _Gateway implements ConfigurationSyncSettingsGateway {
@@ -277,6 +279,57 @@ void main() {
       expect(gateway.writes, hasLength(1));
       expect(gateway.writes.single['confirm_target_change'], isTrue);
       expect(gateway.writes.single['revision'], 'a' * 64);
+    },
+  );
+  testWidgets(
+    'a legacy stored collection re-derives through one explicit switch confirmation',
+    (tester) async {
+      // Old-version target: derived object URL but a manual/random collection
+      // that is not the derivation of root + password.
+      final gateway = _Gateway(
+        value: _metadata(collectionDerived: false, revision: 'a'),
+      );
+      await tester.pumpWidget(_app(gateway));
+      await tester.pumpAndSettle();
+      // Untouched form: endpoint stays identical, but the legacy collection
+      // identifier must not be silently replaced — one confirmation migrates.
+      await _save(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('更换同步目标'), findsOneWidget);
+      expect(gateway.writes, isEmpty);
+      await tester.tap(find.text('确认更换'));
+      await tester.pumpAndSettle();
+      expect(gateway.writes, hasLength(1));
+      final proposal = gateway.writes.single;
+      expect(proposal['confirm_target_change'], isTrue);
+      expect(
+        proposal['derive_collection'],
+        'https://fixture.invalid/dav/',
+      );
+      expect(
+        proposal['target'],
+        containsPair(
+          'endpoint',
+          'https://fixture.invalid/dav/hspterm/config.hspterm',
+        ),
+      );
+    },
+  );
+  testWidgets(
+    'an already derived collection re-saves untouched without a switch dialog',
+    (tester) async {
+      final gateway = _Gateway();
+      await tester.pumpWidget(_app(gateway));
+      await tester.pumpAndSettle();
+      await _save(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('更换同步目标'), findsNothing);
+      expect(gateway.writes, hasLength(1));
+      expect(gateway.writes.single['confirm_target_change'], isFalse);
+      expect(
+        gateway.writes.single['derive_collection'],
+        'https://fixture.invalid/dav/',
+      );
     },
   );
   testWidgets(

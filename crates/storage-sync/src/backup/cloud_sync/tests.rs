@@ -645,7 +645,7 @@ fn conditional_exchange_uses_frozen_local_changes_and_never_acknowledges_conflic
     let proposal = baseline.capture_local(&v, NOW).unwrap();
     let mut exchange = Exchange::new(&proposal, baseline.document());
     let ExchangeStep::Upload(pending) = exchange
-        .accept_read(RemoteRead::Missing, b"synthetic-sync-key", NOW)
+        .accept_read(RemoteRead::Missing, b"synthetic-sync-key", NOW, false)
         .unwrap()
     else {
         panic!("new target requires create-only upload")
@@ -666,6 +666,7 @@ fn conditional_exchange_uses_frozen_local_changes_and_never_acknowledges_conflic
             },
             b"synthetic-sync-key",
             NOW + 1,
+            false,
         )
         .unwrap()
     else {
@@ -684,10 +685,82 @@ fn conditional_exchange_uses_frozen_local_changes_and_never_acknowledges_conflic
     assert!(v.get(LEDGER).unwrap().is_some());
     // The original bounded operation can perform at most three GET rounds.
     let _third = exchange
-        .accept_read(RemoteRead::Missing, b"synthetic-sync-key", NOW + 2)
+        .accept_read(RemoteRead::Missing, b"synthetic-sync-key", NOW + 2, false)
         .unwrap();
     assert!(matches!(
-        exchange.accept_read(RemoteRead::Missing, b"synthetic-sync-key", NOW + 3),
+        exchange.accept_read(RemoteRead::Missing, b"synthetic-sync-key", NOW + 3, false),
         Err(SyncError::Changed)
     ));
+}
+
+#[test]
+fn legacy_identifier_first_contact_is_distinguished_adopted_or_reported_by_ownership() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = vault(dir.path(), "legacy.vault");
+    host(&mut v, "Legacy fixture");
+    // A dataset the OLD (manual/random collection) era encrypted under a
+    // different identifier with the SAME password, stored at this device's
+    // endpoint.
+    let legacy_collection = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let legacy = Document::empty(legacy_collection)
+        .unwrap()
+        .capture(&v, ACTOR_B, NOW)
+        .unwrap();
+    let ciphertext = legacy
+        .encrypt(b"synthetic-independent-sync-passphrase", NOW)
+        .unwrap();
+    assert_eq!(
+        Document::header_collection(&ciphertext).as_deref(),
+        Some(legacy_collection)
+    );
+    let read = || RemoteRead::Present {
+        etag: EntityTag::parse("\"legacy-revision\"").unwrap(),
+        ciphertext: ciphertext.clone(),
+    };
+    let proposal_exchange = |adopt: bool| {
+        let baseline = Baseline::load(&v, COLLECTION, NOW).unwrap();
+        let proposal = baseline.capture_local(&v, NOW).unwrap();
+        (
+            Exchange::new(&proposal, baseline.document()),
+            b"synthetic-independent-sync-passphrase",
+            adopt,
+        )
+    };
+    // A device that never synchronized that identifier gets the dedicated
+    // state instead of a misleading wrong-password Invalid...
+    let (mut exchange, password, _) = proposal_exchange(false);
+    assert!(matches!(
+        exchange.accept_read(read(), password, NOW, false),
+        Err(SyncError::LegacyCollection)
+    ));
+    // ...a genuinely different password still fails plainly under both
+    // identifiers, adopted or not.
+    for adopt in [false, true] {
+        let (mut exchange, _, _) = proposal_exchange(adopt);
+        assert!(matches!(
+            exchange.accept_read(read(), b"synthetic-wrong-password", NOW, adopt),
+            Err(SyncError::Invalid)
+        ));
+    }
+    // The original device (post target-switch) ADOPTS the legacy dataset: the
+    // merge is rebuilt under the derived identifier and the next publication
+    // conditionally REPLACES the object in place, never deleting archives.
+    let (mut exchange, password, _) = proposal_exchange(true);
+    let ExchangeStep::Upload(pending) = exchange.accept_read(read(), password, NOW, true).unwrap()
+    else {
+        panic!("legacy adoption must publish under the derived identifier")
+    };
+    assert_eq!(pending.collection(), COLLECTION);
+    assert!(matches!(
+        pending.condition(),
+        PublicationCondition::Match(_)
+    ));
+    let migrated = Document::decrypt(
+        pending.ciphertext(),
+        b"synthetic-independent-sync-passphrase",
+        COLLECTION,
+        NOW,
+    )
+    .unwrap();
+    assert_eq!(migrated.items.len(), legacy.items.len());
 }

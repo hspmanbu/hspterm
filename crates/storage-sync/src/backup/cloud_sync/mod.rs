@@ -47,6 +47,8 @@ pub enum SyncError {
     TargetChange,
     #[error("该集合已完成同步，不能只修改本机同步密码；请保留原密码或明确改用新的集合")]
     KeyChange,
+    #[error("云端数据集由旧版本标识创建；需在原设备重新保存同步目标迁移后再接入")]
+    LegacyCollection,
     #[error("更换服务器或代理时不能把旧认证自动发往新地址，请明确填写新认证或关闭认证")]
     CredentialTarget,
     #[error("Google Drive本机授权缺失或已改变；请重新授权并明确绑定目标")]
@@ -538,6 +540,34 @@ impl Document {
             collection,
             now,
         )
+    }
+    /// Opaque dataset identifier in the stored object's plaintext header; no
+    /// key derivation runs. `None` for absent/garbage headers.
+    pub fn header_collection(bytes: &[u8]) -> Option<String> {
+        envelope::header_collection(bytes)
+    }
+    /// Decrypt a first-contact object whose header carries a DIFFERENT
+    /// collection than this device expects, using the header's own identifier.
+    /// Success proves the password matches the dataset's creator while the
+    /// identifier predates derivation (manual/random collection era); the
+    /// document comes back still addressed under that legacy identifier.
+    pub fn decrypt_legacy(bytes: &[u8], password: &[u8], now: u64) -> Result<Self> {
+        let (plain, collection) = envelope::open_legacy(bytes, password)?;
+        Self::decode(&plain, &collection, now)
+    }
+    /// Same items, addressed under this device's expected collection. Only a
+    /// caller that just proved the password (decrypt_legacy) may adopt: the
+    /// next conditional publication rewrites the object under the derived
+    /// identifier, migrating the dataset without deleting any archive.
+    fn rekey(&self, collection: &str) -> Result<Self> {
+        if !opaque(collection) || !opaque(&self.collection) {
+            return Err(SyncError::Invalid);
+        }
+        Ok(Self {
+            version: 1,
+            collection: collection.into(),
+            items: self.items.clone(),
+        })
     }
 }
 

@@ -83,11 +83,19 @@ impl Exchange {
     /// A 412 retries from a fresh GET, with the ORIGINAL frozen local changes.
     /// Three attempts bound one operation. A conflict never changes an ETag,
     /// writes local data, creates a new change stamp or starts another request.
+    ///
+    /// `adopt_legacy`: a first-contact object that fails decryption under the
+    /// expected collection but succeeds under its own header collection (same
+    /// password, pre-derivation identifier) is either ADOPTED — re-keyed to
+    /// this device's collection so the next conditional publication migrates
+    /// the dataset in place — or reported as [`SyncError::LegacyCollection`]
+    /// when this device cannot prove it ever synchronized that identifier.
     pub fn accept_read(
         &mut self,
         read: RemoteRead,
         password: &[u8],
         now: u64,
+        adopt_legacy: bool,
     ) -> Result<ExchangeStep> {
         if self.reads >= 3 {
             return Err(SyncError::Changed);
@@ -107,7 +115,20 @@ impl Exchange {
             }
             RemoteRead::Present { etag, ciphertext } => {
                 let remote =
-                    Document::decrypt(&ciphertext, password, self.local.collection(), now)?;
+                    match Document::decrypt(&ciphertext, password, self.local.collection(), now) {
+                        Ok(remote) => remote,
+                        Err(SyncError::Invalid) => {
+                            // Same password under a legacy identifier? AEAD success
+                            // with the header as AAD is the proof; a failure keeps
+                            // the plain wrong-password outcome.
+                            let legacy = Document::decrypt_legacy(&ciphertext, password, now)?;
+                            if !adopt_legacy {
+                                return Err(SyncError::LegacyCollection);
+                            }
+                            legacy.rekey(self.local.collection())?
+                        }
+                        Err(error) => return Err(error),
+                    };
                 self.remote = Some(remote.clone());
                 self.etag = Some(etag);
                 let etag = self.etag.clone().expect("etag stored before rebuild");

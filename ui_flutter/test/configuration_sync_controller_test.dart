@@ -349,6 +349,23 @@ void main() {
       expect(syncFailureLabel(state), isNot(contains('集合标识')));
     },
   );
+  test('first-read failures distinguish a wrong password from a legacy dataset id', () {
+    final gateway = _Gateway()..error = 'first_read_decrypt';
+    final value = jsonDecode(gateway.snapshot()) as Map<String, dynamic>;
+    value['phase'] = 'failed';
+    final password = ConfigurationSyncState(value);
+    expect(password.error, 'first_read_decrypt');
+    expect(syncFailureLabel(password), contains('同步密码不一致'));
+    expect(syncFailureLabel(password), isNot(contains('旧版标识')));
+    gateway.error = 'first_read_legacy_collection';
+    final legacy = ConfigurationSyncState(
+      jsonDecode(gateway.snapshot()) as Map<String, dynamic>,
+    );
+    expect(legacy.error, 'first_read_legacy_collection');
+    expect(syncFailureLabel(legacy), contains('旧版标识'));
+    expect(syncFailureLabel(legacy), contains('原创建设备'));
+    expect(syncFailureLabel(legacy), isNot(contains('同步密码不一致')));
+  });
   testWidgets(
     'startup and an idle clock never synchronize persisted state without a check interval',
     (tester) async {

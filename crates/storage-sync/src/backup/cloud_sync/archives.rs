@@ -119,6 +119,50 @@ fn read(vault: &Vault) -> Result<Snapshot> {
 pub fn load(vault: &Vault) -> Result<View> {
     Ok(read(vault)?.view())
 }
+/// Whether this device holds a baseline (active ledger or an archived target
+/// baseline) whose document was created under the given collection — proof it
+/// previously synchronized that dataset identifier. Used to gate first-contact
+/// adoption of a legacy-identifier cloud object; any read/parse problem means
+/// `false` (no adoption, the caller reports the legacy state instead).
+pub fn known_collection(vault: &Vault, collection: &str) -> bool {
+    if !opaque(collection) {
+        return false;
+    }
+    let matches = |raw: Option<Zeroizing<Vec<u8>>>| {
+        raw.as_deref().is_some_and(|bytes| {
+            serde_json::from_slice::<Ledger>(bytes)
+                .is_ok_and(|ledger| ledger.document.collection == collection)
+        })
+    };
+    if vault
+        .get_bounded(LEDGER, MAX_PLAIN)
+        .map(matches)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let Ok(ids) = (|| {
+        let mut query = vault
+            .db
+            .prepare(
+                "SELECT id FROM records WHERE id GLOB 'local-cloud-sync-ledger-archive-*' ORDER BY id LIMIT 8",
+            )
+            .map_err(crate::StorageError::from)?;
+        query
+            .query_map([], |r| r.get::<_, String>(0))
+            .map(|rows| rows.collect::<std::result::Result<Vec<_>, _>>())
+            .map_err(crate::StorageError::from)?
+            .map_err(crate::StorageError::from)
+    })() else {
+        return false;
+    };
+    ids.iter().any(|id| {
+        vault
+            .get_bounded(id, MAX_PLAIN)
+            .map(matches)
+            .unwrap_or(false)
+    })
+}
 pub fn remove(vault: &mut Vault, removal: Removal) -> Result<View> {
     if !removal.confirm_local_baseline_loss
         || removal.ids.is_empty()

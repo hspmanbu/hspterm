@@ -124,6 +124,14 @@ pub fn stage(
     confirm_switch: bool,
 ) -> Result<Creation> {
     let version = version(v)?;
+    // Same entry normalization as the settings form: surrounding whitespace is
+    // never part of the E2E password, and the first-publication body this
+    // function encrypts must use exactly the bytes the target will store.
+    let password = Zeroizing::new({
+        let trimmed = password.trim().to_owned();
+        drop(password); // zeroizes the untrimmed original
+        trimmed
+    });
     if read(v)?.is_some() || password.is_empty() || password.len() > 4096 {
         return Err(SyncError::Invalid);
     }

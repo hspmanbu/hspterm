@@ -491,3 +491,89 @@ fn derived_collections_are_deterministic_password_bound_and_replace_explicit_ids
     p.secrets.sync_password = None;
     assert!(matches!(save(&mut v, p), Err(SyncError::Invalid)));
 }
+
+#[test]
+fn root_normalization_covers_trailing_slashes_host_case_and_default_ports_across_devices() {
+    // Two devices entering the same root in different spellings must derive
+    // the SAME dataset identifier (and the same derived object endpoint).
+    let canonical = derived_collection("https://dav.invalid/dav", b"synthetic-first").unwrap();
+    for equivalent in [
+        "https://dav.invalid/dav/",
+        "HTTPS://DAV.Invalid/dav",
+        "https://DAV.invalid:443/dav/",
+        "https://dav.invalid:443/dav",
+        "https://dav.invalid/dav/",
+    ] {
+        assert_eq!(
+            derived_collection(equivalent, b"synthetic-first").unwrap(),
+            canonical,
+            "spelling {equivalent} must not fork the dataset"
+        );
+        assert_eq!(
+            webdav::derive_object(equivalent).unwrap(),
+            webdav::derive_object("https://dav.invalid/dav/").unwrap()
+        );
+    }
+    // http vs https is a genuinely different object address: a distinct
+    // dataset identifier is intentional, and the derived endpoints differ.
+    assert_ne!(
+        derived_collection("http://dav.invalid/dav", b"synthetic-first").unwrap(),
+        canonical
+    );
+    assert_ne!(
+        webdav::derive_object("http://dav.invalid/dav/").unwrap(),
+        webdav::derive_object("https://dav.invalid/dav/").unwrap()
+    );
+}
+
+#[test]
+fn view_reports_whether_the_stored_collection_is_the_derived_one() {
+    let root = tempfile::tempdir().unwrap();
+    let mut v = vault(root.path());
+    // Old-era target: manual collection that is not the derivation of its own
+    // endpoint root + password.
+    let mut legacy = target();
+    legacy.endpoint = webdav::derive_object("https://dav.invalid/dav/").unwrap();
+    legacy.collection = "cccccccccccccccccccccccccccccccc".into();
+    let mut p = proposal(&load(&v).unwrap(), legacy);
+    p.secrets.sync_password = Some("synthetic-legacy-password".into());
+    let saved = save(&mut v, p).unwrap();
+    assert!(!saved.collection_derived);
+    assert!(!load(&v).unwrap().collection_derived);
+    // Re-saving with derivation archives the legacy dataset (explicit switch)
+    // and stores the derived identifier, which the view then confirms.
+    let mut p = proposal(&saved, target());
+    p.target.endpoint = webdav::derive_object("https://dav.invalid/dav/").unwrap();
+    p.target.collection = saved.target.as_ref().unwrap().collection.clone();
+    p.derive_collection = Some("https://dav.invalid/dav/".into());
+    p.confirm_target_change = true;
+    let migrated = save(&mut v, p).unwrap();
+    assert_eq!(
+        migrated.target.as_ref().unwrap().collection,
+        derived_collection("https://dav.invalid/dav/", b"synthetic-legacy-password").unwrap()
+    );
+    assert!(migrated.collection_derived);
+    assert!(load(&v).unwrap().collection_derived);
+}
+
+#[test]
+fn sync_passwords_are_trimmed_once_at_every_entry_before_derivation_and_storage() {
+    let root = tempfile::tempdir().unwrap();
+    let mut v = vault(root.path());
+    let mut derived_target = target();
+    derived_target.endpoint = webdav::derive_object("https://dav.invalid/dav/").unwrap();
+    let mut p = proposal(&load(&v).unwrap(), derived_target);
+    p.derive_collection = Some("https://dav.invalid/dav/".into());
+    p.secrets.sync_password = Some("  synthetic-derived-password \u{3000}".into());
+    let saved = save(&mut v, p).unwrap();
+    assert_eq!(
+        saved.target.as_ref().unwrap().collection,
+        derived_collection("https://dav.invalid/dav/", b"synthetic-derived-password").unwrap()
+    );
+    assert_eq!(
+        capture(&v, &saved.vault_scope, &saved.revision)
+            .unwrap()
+            .password(),
+        b"synthetic-derived-password"
+    );
+}

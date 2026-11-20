@@ -65,7 +65,12 @@ fn independently_valid_jump_edits_get_metadata_only_repair_and_full_validation_b
         Err(SyncError::References)
     ));
     let step = exchange
-        .accept_read(read(&remote, "\"original\""), b"synthetic-e2e", NOW + 10)
+        .accept_read(
+            read(&remote, "\"original\""),
+            b"synthetic-e2e",
+            NOW + 10,
+            false,
+        )
         .unwrap();
     assert!(!step.uploads());
     let choices = exchange.reference_choices(&step).unwrap();
@@ -144,7 +149,12 @@ fn unavailable_duplicate_unknown_or_history_choices_cannot_mutate_proposal() {
     remote.items.sort_by(|a, b| a.id.cmp(&b.id));
     remote.validate(NOW + 10).unwrap();
     let ExchangeStep::References(pending) = exchange
-        .accept_read(read(&remote, "\"original\""), b"synthetic-e2e", NOW + 10)
+        .accept_read(
+            read(&remote, "\"original\""),
+            b"synthetic-e2e",
+            NOW + 10,
+            false,
+        )
         .unwrap()
     else {
         panic!("expected repair");
@@ -188,7 +198,12 @@ fn a_412_reread_keeps_original_local_security_summary_and_requires_new_condition
     let mut v = Vault::create(&dir.path().join("retry.vault"), b"synthetic-master").unwrap();
     let (mut exchange, _, remote, _, b) = broken(&mut v);
     let ExchangeStep::References(pending) = exchange
-        .accept_read(read(&remote, "\"etag-1\""), b"synthetic-e2e", NOW + 10)
+        .accept_read(
+            read(&remote, "\"etag-1\""),
+            b"synthetic-e2e",
+            NOW + 10,
+            false,
+        )
         .unwrap()
     else {
         panic!("expected repair");
@@ -205,7 +220,12 @@ fn a_412_reread_keeps_original_local_security_summary_and_requires_new_condition
         )
         .unwrap();
     let retry = exchange
-        .accept_read(read(&remote, "\"etag-2\""), b"synthetic-e2e", NOW + 11)
+        .accept_read(
+            read(&remote, "\"etag-2\""),
+            b"synthetic-e2e",
+            NOW + 11,
+            false,
+        )
         .unwrap();
     assert_eq!(first.summary().credential_changes, 2);
     assert_eq!(retry.summary().credential_changes, 2);

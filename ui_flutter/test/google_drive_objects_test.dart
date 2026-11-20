@@ -21,6 +21,7 @@ Map<String, dynamic> settings({Map<String, dynamic>? target}) => {
   'webdav_credential_set': false,
   'proxy_credential_set': false,
   'suggested_collection': 'd' * 32,
+  'collection_derived': true,
 };
 const operation = 'drive-authorization-0123456789abcdef0123456789abcdef';
 Map<String, dynamic> discovery() => {

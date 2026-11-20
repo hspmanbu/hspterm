@@ -200,6 +200,9 @@ fn failure(error: &anyhow::Error, op: &Operation) -> &'static str {
     if error.is::<FirstReadMismatch>() {
         return "first_read_decrypt";
     }
+    if error.is::<LegacyCollectionDataset>() {
+        return "first_read_legacy_collection";
+    }
     if let Some(e) = error.downcast_ref::<cloud::SyncError>() {
         return match e {
             cloud::SyncError::Changed => "source_changed",
@@ -484,11 +487,31 @@ impl std::fmt::Display for FirstReadMismatch {
 }
 impl std::error::Error for FirstReadMismatch {}
 
+/// The remote object decrypts under this device's password but carries a
+/// different collection identifier: a dataset created by an OLD (manual or
+/// random collection) version. This device never synchronized that
+/// identifier, so it must not silently adopt it — the original device
+/// re-saves its sync target to migrate the dataset to the derived
+/// identifier first. Distinct from a password mismatch.
+#[derive(Debug)]
+struct LegacyCollectionDataset;
+impl std::fmt::Display for LegacyCollectionDataset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "云端数据集由旧版本标识创建：需在原设备重新保存同步目标迁移后再接入，未应用任何配置",
+        )
+    }
+}
+impl std::error::Error for LegacyCollectionDataset {}
+
 /// Stable, typed run-log category for the configuration sync failure causes
 /// that users can act on. Never formats foreign error payloads.
 pub(crate) fn typed_kind(error: &anyhow::Error) -> Option<&'static str> {
     if error.is::<FirstReadMismatch>() {
         return Some("sync.first_read_decrypt");
+    }
+    if error.is::<LegacyCollectionDataset>() {
+        return Some("sync.first_read_legacy_collection");
     }
     if let Some(e) = error.downcast_ref::<cloud::SyncError>() {
         return Some(match e {
@@ -499,6 +522,7 @@ pub(crate) fn typed_kind(error: &anyhow::Error) -> Option<&'static str> {
             cloud::SyncError::References => "sync.references",
             cloud::SyncError::TargetChange => "sync.target_change",
             cloud::SyncError::KeyChange => "sync.key_change",
+            cloud::SyncError::LegacyCollection => "sync.first_read_legacy_collection",
             cloud::SyncError::CredentialTarget => "sync.credential_target",
             cloud::SyncError::Authorization => "sync.authorization",
             cloud::SyncError::Storage(_) => "sync.storage",
@@ -532,22 +556,44 @@ async fn read_step(
     })
     .await?;
     let response = flow.transport.read(&op.cancel).await?;
-    // First contact with an existing remote object: decryption failure here
-    // almost always means this device's sync password differs from the one
-    // that created the dataset (the password participates in collection
-    // derivation). Surface that specific state instead of generic Invalid.
+    // First contact with an existing remote object whose decryption under the
+    // expected collection fails: the plaintext header separates a genuinely
+    // different password from a dataset still addressed by a LEGACY
+    // (pre-derivation, manual/random) collection identifier. Only a device
+    // that previously synchronized that identifier (archived or active local
+    // baseline) may ADOPT the object, migrating it in place under the derived
+    // identifier via the next conditional publication; every other device is
+    // told to re-save the target on the ORIGINAL device instead of a
+    // misleading "password does not match".
+    let legacy_collection = match &response {
+        cloud::RemoteRead::Present { ciphertext, .. } => {
+            cloud::Document::header_collection(ciphertext)
+                .filter(|c| *c != flow.target.target().collection)
+        }
+        _ => None,
+    };
     let first_contact =
         flow.baseline.etag().is_none() && matches!(response, cloud::RemoteRead::Present { .. });
     let (r, o) = (root.clone(), op.clone());
     blocking(lease, move || {
         let mut flow = flow;
         r.check(&o)?;
+        let adopt_legacy = match legacy_collection {
+            Some(collection) => {
+                crate::api::with_vault(|v| Ok(cloud::archives::known_collection(v, &collection)))?
+            }
+            None => false,
+        };
         let step = match flow.exchange.accept_read(
             response,
             flow.target.password(),
             cloud::journal::now_millis()?,
+            adopt_legacy,
         ) {
             Ok(step) => step,
+            Err(cloud::SyncError::LegacyCollection) => {
+                return Err(anyhow::Error::new(LegacyCollectionDataset));
+            }
             Err(cloud::SyncError::Invalid) if first_contact => {
                 return Err(anyhow::Error::new(FirstReadMismatch));
             }
@@ -751,7 +797,12 @@ pub(crate) async fn prepare(id: String, operation: String) -> Result<String> {
     result.map_err(|error| {
         if error.is::<FirstReadMismatch>() {
             return anyhow::anyhow!(
-                "云端数据解密失败：同步密码与创建该数据集的设备不一致，未应用任何配置"
+                "云端数据解密失败：本机同步密码与创建该数据集时的密码不一致，未应用任何配置"
+            );
+        }
+        if error.is::<LegacyCollectionDataset>() {
+            return anyhow::anyhow!(
+                "云端数据集由旧版本标识创建：请先在原设备重新保存同步目标（迁移为新派生标识），未应用任何配置"
             );
         }
         match error.downcast_ref::<cloud::SyncError>() {

@@ -283,7 +283,7 @@ class GoogleDriveObjectsController extends ChangeNotifier {
       final input = <String, dynamic>{
         'id': object.id,
         'enabled': enabled,
-        'sync_password': password,
+        'sync_password': password?.trim(),
         'confirm_target_change': confirmTargetChange,
       };
       late String value;
@@ -333,7 +333,7 @@ class GoogleDriveObjectsController extends ChangeNotifier {
     if (!identical(source, discovery) ||
         !selecting ||
         creation != null ||
-        password.isEmpty ||
+        password.trim().isEmpty ||
         utf8.encode(password).length > 4096 ||
         !confirmSensitiveUpload ||
         accounts.account?.scope != source.account.scope ||
@@ -342,7 +342,7 @@ class GoogleDriveObjectsController extends ChangeNotifier {
     }
     return _run(() async {
       final input = <String, dynamic>{
-        'password': password,
+        'password': password.trim(),
         'enabled': enabled,
         'confirm_target_change': confirmTargetChange,
         'confirm_sensitive_upload': confirmSensitiveUpload,
