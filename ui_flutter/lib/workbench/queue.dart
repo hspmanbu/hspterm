@@ -36,21 +36,36 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   bool completedOpen = false, imagesOpen = true, editsOpen = true;
   LiveWorkbenchModel get m => widget.model;
 
+  /// Last-activity stamps (microseconds) driving the dynamic section order:
+  /// whichever category (image uploads / local edits / transfer tasks) most
+  /// recently gained a new item, progress or state change renders first.
+  /// Equal stamps keep the default order below.
+  int _imagesTouched = 0, _editsTouched = 0, _transfersTouched = 0;
+  String? _transferSignature;
+
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now().microsecondsSinceEpoch;
+    _imagesTouched = _editsTouched = _transfersTouched = now;
     m.localEdits.addListener(_editsChanged);
-    m.imageUploadRevision.addListener(_editsChanged);
+    m.imageUploadRevision.addListener(_imagesChanged);
   }
 
   @override
   void dispose() {
     m.localEdits.removeListener(_editsChanged);
-    m.imageUploadRevision.removeListener(_editsChanged);
+    m.imageUploadRevision.removeListener(_imagesChanged);
     super.dispose();
   }
 
   void _editsChanged() {
+    _editsTouched = DateTime.now().microsecondsSinceEpoch;
+    if (mounted) setState(() {});
+  }
+
+  void _imagesChanged() {
+    _imagesTouched = DateTime.now().microsecondsSinceEpoch;
     if (mounted) setState(() {});
   }
 
@@ -106,8 +121,11 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         ? 1.0
         : (task.done / total).clamp(0.0, 1.0);
     final detail = '${task.host} · ${task.state}\n${task.path ?? '等待远端安全临时目录'}';
+    final kept = task.succeeded && task.localPath != null;
     return ListTile(
       dense: true,
+      visualDensity: VisualDensity.compact,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10),
       leading: const Icon(Icons.image_outlined, size: 18),
       title: Text(
         '${task.path?.split('/').last ?? '剪贴板图片'} · ${task.state}',
@@ -124,12 +142,12 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 10),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 3),
             LinearProgressIndicator(
               value: task.ended ? (task.succeeded ? 1 : 0) : progress,
               minHeight: 3,
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 3),
             Text(
               '${progress == null ? '—' : '${(progress * 100).round()}%'} · ${bytes(task.done)} / ${total == null ? '未知大小' : bytes(total)}',
               style: const TextStyle(fontSize: 10),
@@ -137,6 +155,26 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
           ],
         ),
       ),
+      // Finished uploads keep their local copy: reveal reuses the runner's
+      // shell selection, delete removes only this app's temp file (the model
+      // refuses anything outside the hspterm-clipboard-image-* directory).
+      trailing: kept
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Tool(
+                  Icons.folder_open,
+                  '定位文件',
+                  () => run(_revealFile(File(task.localPath!))),
+                ),
+                Tool(
+                  Icons.delete_outline,
+                  '删除图片',
+                  () => run(m.deleteImageUploadLocal(task)),
+                ),
+              ],
+            )
+          : null,
     );
   }
 
@@ -159,6 +197,8 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
     final subtitle = '${edit.hostLabel} · ${edit.remotePath}';
     return ListTile(
       dense: true,
+      visualDensity: VisualDensity.compact,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10),
       leading: const Icon(Icons.edit_document, size: 18),
       title: Text(
         edit.displayName,
@@ -180,9 +220,9 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
             ),
           ),
           if (transferring) ...[
-            const SizedBox(height: 5),
+            const SizedBox(height: 3),
             LinearProgressIndicator(value: progress, minHeight: 3),
-            const SizedBox(height: 4),
+            const SizedBox(height: 3),
             Text(
               '${progress == null ? '进度 —' : '${(progress * 100).round()}%'} · '
               '${bytes(edit.progressDone)} / ${total == null ? '未知大小' : bytes(total)}',
@@ -616,7 +656,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
   }
 
   Widget details(jobs.TransferTaskView t) => Padding(
-    padding: const EdgeInsets.fromLTRB(35, 4, 8, 9),
+    padding: const EdgeInsets.fromLTRB(35, 3, 8, 7),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -732,7 +772,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
           onSecondaryTapDown: (d) => run(menu(d.globalPosition, t)),
           child: Container(
             constraints: BoxConstraints(
-              minHeight: 42 + MediaQuery.textScalerOf(context).scale(16),
+              minHeight: 38 + MediaQuery.textScalerOf(context).scale(14),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 5),
             color: selected.contains(t.id)
@@ -848,7 +888,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       LinearProgressIndicator(
                         value: t.state == 'RetiringSource'
                             ? (t.sourceDeletionsTotal == null ||
@@ -941,7 +981,21 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         .toList()
         .reversed
         .toList();
-    final rows = <Object>[
+    // Any visible change in the transfer snapshot (new task, progress or
+    // state movement) refreshes this category's activity stamp.
+    final signature = [
+      for (final t in list)
+        '${t.id}|${t.state}|${t.busy}|${t.acknowledged}|${t.completed}'
+            '|${t.failed}|${t.conflicts}|${t.skipped}'
+            '|${t.sourceDeletionsConfirmed}',
+    ].join();
+    if (signature != _transferSignature) {
+      _transferSignature = signature;
+      if (list.isNotEmpty) {
+        _transfersTouched = DateTime.now().microsecondsSinceEpoch;
+      }
+    }
+    final imageRows = <Object>[
       if (images.isNotEmpty) ...[
         InkWell(
           onTap: () => setState(() => imagesOpen = !imagesOpen),
@@ -957,6 +1011,8 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         ),
         if (imagesOpen) ...images,
       ],
+    ];
+    final editRows = <Object>[
       if (edits.isNotEmpty) ...[
         // Collapsible group (task 2), expanded by default; the open/closed
         // choice lives in this run's widget state only.
@@ -974,6 +1030,8 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         ),
         if (editsOpen) ...edits,
       ],
+    ];
+    final transferRows = <Object>[
       if (activity.isNotEmpty) ...[
         SectionHeading('活动与等待 · ${activity.length}'),
         ...activity,
@@ -998,10 +1056,19 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         if (completedOpen) ...done,
       ],
     ];
+    // Most recently active category first; ties keep the default order
+    // (images, edits, transfers) so the panel never flickers on equal stamps.
+    final groups = [imageRows, editRows, transferRows];
+    final stamps = [_imagesTouched, _editsTouched, _transfersTouched];
+    final order = [0, 1, 2]..sort((a, b) {
+      final difference = stamps[b].compareTo(stamps[a]);
+      return difference != 0 ? difference : a.compareTo(b);
+    });
+    final rows = <Object>[for (final index in order) ...groups[index]];
     return Column(
       children: [
         SizedBox(
-          height: 33,
+          height: 30,
           child: Row(
             children: [
               const SizedBox(width: 8),
@@ -1045,7 +1112,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
           ),
         ),
         SizedBox(
-          height: 28,
+          height: 26,
           child: Row(
             children: [
               TextButton(

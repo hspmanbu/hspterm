@@ -192,7 +192,11 @@ class ConfigurationSyncRuntimePanel extends StatelessWidget {
         'committed' => '同步已完成',
         'cancelled' => syncFailureLabel(state),
         'failed' => syncFailureLabel(state),
-        _ => state?.eligible == true ? '等待配置变更、定时检查或手动同步' : '请先保存并启用一个同步目标',
+        _ => state?.eligible == true
+              ? (controller.pendingEdits
+                    ? '有未同步的本地修改，等待下一次检查或手动同步'
+                    : '等待配置变更、定时检查或手动同步')
+              : '请先保存并启用一个同步目标',
       };
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

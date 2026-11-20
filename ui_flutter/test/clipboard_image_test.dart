@@ -275,7 +275,7 @@ void main() {
     },
   );
   testWidgets(
-    'upload completion never redirects an image to a newly focused terminal and deletes local temp',
+    'upload completion never redirects an image and keeps the local copy for reveal/delete',
     (tester) async {
       final original = session('Original', 1, 4),
           other = session('Other', 2, 7);
@@ -296,6 +296,7 @@ void main() {
       );
       final pasted = <String>[];
       String? local;
+      ImageUploadTask? published;
       await tester.runAsync(
         () => pasteClipboardImage(
           context,
@@ -314,12 +315,67 @@ void main() {
           paste: (_, _, path) async {
             pasted.add(path);
           },
-        ),
+        ).then((_) {
+          for (final task in model.imageUploads) {
+            if (task.session == original.id) published = task;
+          }
+        }),
       );
       await tester.pumpAndSettle();
       expect(pasted, isEmpty);
-      expect(File(local!).existsSync(), false);
+      // The finished upload keeps its local temp file so the queue actions
+      // (reveal / delete) have something to point at.
+      expect(File(local!).existsSync(), true);
+      expect(published?.localPath, local);
       expect(find.textContaining('未输入路径'), findsOneWidget);
+      // Deleting through the model removes only this app's temp file and the
+      // finished tile; a path outside the temp dirs is refused.
+      final kept = published!;
+      await model.deleteImageUploadLocal(kept);
+      expect(File(local!).existsSync(), false);
+      expect(model.imageUploads, isNot(contains(kept)));
+      final foreign = ImageUploadTask(original.id, 'Original')
+        ..localPath = '/definitely/not/a/hspterm/clipboard.png';
+      await expectLater(model.deleteImageUploadLocal(foreign), throwsStateError);
+      expect(model.beginImagePaste(original.id), true);
+      model.endImagePaste(original.id);
+      await tester.pumpWidget(const SizedBox());
+      await drainAsync(tester, model.shutdown());
+      model.dispose();
+    },
+  );
+  testWidgets(
+    'an empty clipboard never enqueues an upload tile and explains itself once',
+    (tester) async {
+      final original = session('Original', 1, 4);
+      final model = ImageModel([original])..selected = original;
+      late BuildContext context;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (c) {
+                context = c;
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.runAsync(
+        () => pasteClipboardImage(
+          context,
+          model,
+          original,
+          read: (file, current) async => false,
+          upload: (id, generation, path) async {
+            throw StateError('must not upload without a readable image');
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(model.imageUploads, isEmpty);
+      expect(find.textContaining('剪贴板中没有图片'), findsOneWidget);
       expect(model.beginImagePaste(original.id), true);
       model.endImagePaste(original.id);
       await tester.pumpWidget(const SizedBox());

@@ -220,10 +220,13 @@ class NativeConfigurationSyncGateway implements ConfigurationSyncGateway {
 }
 
 /// Owned by the application, independent of a settings route or terminal view.
-/// One-shot debounce only after an actual edit event, plus the user-configured
-/// periodic check interval (default 10 minutes, 0 disables). The periodic tick
-/// only starts an exchange when eligible and idle; a pending review that needs
-/// consent stops it and is never auto-confirmed.
+/// Local edit events only mark the device dirty — they never start an
+/// exchange. Exchanges run on the user-configured check interval (default 10
+/// minutes, 0 disables) or on an explicit manual sync. The periodic tick only
+/// starts an exchange when eligible and idle; a pending review that needs
+/// consent stops it and is never auto-confirmed. An unconfirmed cloud write
+/// (writeUnknown) re-reads the remote state automatically after a short
+/// backoff instead of waiting for a manual retry.
 class ConfigurationSyncController extends ChangeNotifier {
   ConfigurationSyncController({
     this.gateway = const NativeConfigurationSyncGateway(),
@@ -237,14 +240,18 @@ class ConfigurationSyncController extends ChangeNotifier {
   StreamSubscription<String>? _subscription;
   Completer<void>? _streamDone;
   Future<void>? _starting, _work, _cancellation, _refresh, _shutdown;
-  Timer? _debounce;
   Timer? _checkTimer;
+  Timer? _writeUnknownRetry;
   int _checkIntervalMinutes = 0;
   bool _checkIntervalLoaded = false;
 
   /// Minutes between periodic checks; 0 disables. Device-local, default 10.
   int get checkIntervalMinutes => _checkIntervalMinutes;
   bool get checkIntervalLoaded => _checkIntervalLoaded;
+
+  /// Local edits happened but no exchange has picked them up yet. The next
+  /// periodic check (or a manual sync) publishes them; nothing fires early.
+  bool get pendingEdits => _pendingAuto;
 
   /// Whether the periodic check timer is armed right now. A disabled target
   /// never keeps it armed; enabling a target re-arms it.
@@ -282,8 +289,6 @@ class ConfigurationSyncController extends ChangeNotifier {
     }
     if (!next.eligible) {
       _pendingAuto = false;
-      _debounce?.cancel();
-      _debounce = null;
       if (disabled) {
         // The disabled target owns nothing anymore: residual failure notices
         // must not keep a banner alive and the periodic timer must stop.
@@ -291,6 +296,8 @@ class ConfigurationSyncController extends ChangeNotifier {
         _editEpoch++;
         _checkTimer?.cancel();
         _checkTimer = null;
+        _writeUnknownRetry?.cancel();
+        _writeUnknownRetry = null;
         if (_operation != null) {
           unawaited(
             _cancelNative().catchError((Object _) {
@@ -304,6 +311,16 @@ class ConfigurationSyncController extends ChangeNotifier {
       // Re-enabling the target restores the periodic schedule from the
       // already-loaded device-local interval.
       _restartCheckTimer();
+    }
+    if (!next.active && next.writeUnknown && next.eligible) {
+      // The last PUT result is unknown. Re-read the remote state after a
+      // short backoff instead of asking for a manual retry; the exchange
+      // protocol converges from a fresh verified read and never blindly
+      // republishes the unconfirmed write.
+      _armWriteUnknownRetry();
+    } else if (!next.active && !next.writeUnknown) {
+      _writeUnknownRetry?.cancel();
+      _writeUnknownRetry = null;
     }
     if (next.configurationUpdates > _commits) {
       _commits = next.configurationUpdates;
@@ -337,6 +354,9 @@ class ConfigurationSyncController extends ChangeNotifier {
           value['owner'] == _owner &&
           value['vault_scope'] == state?.scope) {
         _editEpoch++;
+        // Only mark the device dirty. The exchange itself waits for the next
+        // periodic check or an explicit manual sync — the check interval, not
+        // the edit, decides when cloud traffic happens.
         _pendingAuto = true;
         if (_operation != null) {
           unawaited(
@@ -346,12 +366,11 @@ class ConfigurationSyncController extends ChangeNotifier {
             }),
           );
         }
-        _schedule();
+        _notify();
       }
     } catch (_) {
       _faulted = true;
       error = '同步事件格式不支持，已停止自动同步；请重新打开配置库。';
-      _debounce?.cancel();
       _pendingAuto = false;
       unawaited(_cancelNative().catchError((Object _) {}));
       _notify();
@@ -381,7 +400,6 @@ class ConfigurationSyncController extends ChangeNotifier {
               _faulted = true;
               error = '同步状态通道中断；请重新打开配置库。';
               _pendingAuto = false;
-              _debounce?.cancel();
               unawaited(_cancelNative().catchError((Object _) {}));
               _notify();
             },
@@ -412,7 +430,6 @@ class ConfigurationSyncController extends ChangeNotifier {
     } finally {
       _opening = false;
       _notify();
-      _schedule();
       if (_owner != null && !_checkIntervalLoaded) {
         unawaited(refreshCheckInterval());
       }
@@ -429,27 +446,22 @@ class ConfigurationSyncController extends ChangeNotifier {
     return start();
   }
 
-  void _schedule() {
-    _debounce?.cancel();
-    _debounce = null;
-    if (_closing ||
-        _disposed ||
-        _faulted ||
-        busy ||
-        !_pendingAuto ||
-        state?.eligible != true) {
-      return;
-    }
-    _debounce = Timer(const Duration(milliseconds: 750), () {
-      _debounce = null;
-      if (!_closing &&
-          !_disposed &&
-          !_faulted &&
-          !busy &&
-          _pendingAuto &&
-          state?.eligible == true) {
-        unawaited(_synchronize(automatic: true));
+  /// Short backoff before the automatic re-read after an unconfirmed cloud
+  /// write. Long enough to let a flaky connection settle, short enough that
+  /// the user never has to click retry for the state to converge.
+  static const _writeUnknownRetryDelay = Duration(seconds: 30);
+  void _armWriteUnknownRetry() {
+    _writeUnknownRetry?.cancel();
+    _writeUnknownRetry = Timer(_writeUnknownRetryDelay, () {
+      _writeUnknownRetry = null;
+      if (_closing || _disposed || _faulted || busy) return;
+      final current = state;
+      if (current?.eligible != true ||
+          current!.active ||
+          !current.writeUnknown) {
+        return;
       }
+      unawaited(_synchronize(automatic: true));
     });
   }
 
@@ -546,7 +558,6 @@ class ConfigurationSyncController extends ChangeNotifier {
         _work = null;
         _notify();
         done.complete();
-        _schedule();
       }
     }());
     return done.future;
@@ -557,9 +568,12 @@ class ConfigurationSyncController extends ChangeNotifier {
     if (automatic && state?.eligible != true) return;
     final owner = _owner!;
     final epoch = _editEpoch;
+    // An exchange that reaches the review phase clears the dirty marker: the
+    // local edits are part of the running candidate now. A failed or cancelled
+    // exchange leaves it set for the next check to pick up.
     _pendingAuto = false;
-    _debounce?.cancel();
-    _debounce = null;
+    _writeUnknownRetry?.cancel();
+    _writeUnknownRetry = null;
     final existing = _operation;
     if (existing != null) {
       await gateway.cancel(owner, existing);
@@ -692,7 +706,6 @@ class ConfigurationSyncController extends ChangeNotifier {
       } finally {
         _cancellation = null;
         _notify();
-        if (_work == null) _schedule();
       }
     }());
     return done.future;
@@ -700,8 +713,8 @@ class ConfigurationSyncController extends ChangeNotifier {
 
   Future<void> cancel() async {
     _pendingAuto = false;
-    _debounce?.cancel();
-    _debounce = null;
+    _writeUnknownRetry?.cancel();
+    _writeUnknownRetry = null;
     await _cancelNative();
     await _work;
     final owner = _owner;
@@ -718,10 +731,10 @@ class ConfigurationSyncController extends ChangeNotifier {
   Future<void> shutdown() => _shutdown ??= () async {
     _closing = true;
     _pendingAuto = false;
-    _debounce?.cancel();
-    _debounce = null;
     _checkTimer?.cancel();
     _checkTimer = null;
+    _writeUnknownRetry?.cancel();
+    _writeUnknownRetry = null;
     _notify();
     await _starting;
     await _cancelNative();
@@ -759,7 +772,9 @@ class ConfigurationSyncController extends ChangeNotifier {
 }
 
 String syncFailureLabel(ConfigurationSyncState? state) {
-  if (state?.writeUnknown == true) return '云端写入结果未确认；下次必须重新读取，不能盲目重发。';
+  if (state?.writeUnknown == true) {
+    return '云端写入结果未确认；将自动重新读取云端收敛，不会盲目重发。';
+  }
   if (state?.authorizationUnknown == true) {
     return 'Google 令牌刷新结果未确认；本机凭据保留，若已失效请重新授权。配置同步未确认完成。';
   }

@@ -18,9 +18,11 @@ import '../src/rust/history_controls.dart' as history;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart' show listEquals;
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../prototype/model.dart';
@@ -288,6 +290,40 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     }
     imageUploadRevision.value++;
     if (added) notifyListeners();
+  }
+
+  /// Deletes the kept local copy of a finished clipboard-image upload.
+  /// Safety: only a `clipboard.png` living directly inside one of this app's
+  /// own `hspterm-clipboard-image-*` temp directories is ever removed —
+  /// anything else is refused without touching the queue tile. The emptied
+  /// directory goes away with the file, then the finished tile is dropped.
+  Future<void> deleteImageUploadLocal(ImageUploadTask task) async {
+    if (isClosing) return;
+    final path = task.localPath;
+    if (path == null) return;
+    final file = File(path);
+    final parent = file.parent.path;
+    final safe =
+        p.basename(parent).startsWith('hspterm-clipboard-image-') &&
+        p.basename(path) == 'clipboard.png' &&
+        p.isWithin(Directory.systemTemp.path, parent);
+    if (!safe) {
+      throw StateError('图片不在本项目生成的临时目录内，已拒绝删除');
+    }
+    try {
+      if (await file.exists()) await file.delete();
+    } on FileSystemException {
+      // Already gone — removing the stale tile below is still the right end.
+    }
+    try {
+      if (await Directory(parent).exists()) await Directory(parent).delete();
+    } on FileSystemException {
+      // Non-empty or already removed; the kept file itself is gone either way.
+    }
+    task.localPath = null;
+    imageUploads.remove(task);
+    imageUploadRevision.value++;
+    notifyListeners();
   }
 
   final _imagePastes = <String>{};

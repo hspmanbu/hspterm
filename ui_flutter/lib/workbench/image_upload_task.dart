@@ -3,6 +3,7 @@ class ImageUploadTask {
   ImageUploadTask(this.session, this.host);
   final String session, host;
   String? path;
+  String? localPath;
   int done = 0;
   int? total;
   String state = '读取剪贴板', error = '';

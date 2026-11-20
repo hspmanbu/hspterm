@@ -14,6 +14,8 @@ pub const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 pub enum ImageUploadError {
     #[error("剪贴板图片须为不超过64MiB的普通PNG文件")]
     InvalidImage,
+    #[error("剪贴板中没有图片，未上传")]
+    EmptyClipboard,
     #[error("远端临时目录不安全，未上传图片")]
     UnsafeDirectory,
     #[error("图片上传已取消")]
@@ -63,7 +65,15 @@ pub async fn upload_observed(
         return Err(ImageUploadError::InvalidImage);
     }
     cancelled(stop)?;
-    let metadata = tokio::fs::symlink_metadata(source).await?;
+    // A vanished source file is an empty clipboard read, not an IO failure:
+    // report it as such so the caller can show the "no image" notice.
+    let metadata = match tokio::fs::symlink_metadata(source).await {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ImageUploadError::EmptyClipboard);
+        }
+        Err(error) => return Err(error.into()),
+    };
     if !metadata.is_file()
         || metadata.is_symlink()
         || !(8..=MAX_IMAGE_BYTES).contains(&metadata.len())

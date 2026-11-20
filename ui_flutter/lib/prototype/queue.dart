@@ -106,8 +106,8 @@ class _TransferQueueState extends State<TransferQueue> {
             onSecondaryTapDown: (d) => menu(d.globalPosition, t),
             child: Container(
               key: ValueKey('transfer-${t.name}'),
-              height: 57,
-              padding: const EdgeInsets.fromLTRB(7, 3, 6, 4),
+              height: 50,
+              padding: const EdgeInsets.fromLTRB(7, 2, 6, 3),
               color: active
                   ? Theme.of(context).colorScheme.primary.withValues(alpha: .09)
                   : null,
@@ -194,7 +194,7 @@ class _TransferQueueState extends State<TransferQueue> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 3),
                         LinearProgressIndicator(
                           value: t.state == TransferState.waiting
                               ? 0
@@ -214,7 +214,7 @@ class _TransferQueueState extends State<TransferQueue> {
         if (expanded == t.id)
           Container(
             key: ValueKey('details-${t.id}'),
-            margin: const EdgeInsets.fromLTRB(37, 0, 10, 8),
+            margin: const EdgeInsets.fromLTRB(37, 0, 10, 6),
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: Theme.of(context).scaffoldBackgroundColor,
@@ -307,7 +307,7 @@ class _TransferQueueState extends State<TransferQueue> {
     return Column(
       children: [
         SizedBox(
-          height: 33,
+          height: 30,
           child: Row(
             children: [
               const SizedBox(width: 10),
@@ -333,7 +333,7 @@ class _TransferQueueState extends State<TransferQueue> {
           ),
         ),
         SizedBox(
-          height: 28,
+          height: 26,
           child: Row(
             children: [
               const SizedBox(width: 8),

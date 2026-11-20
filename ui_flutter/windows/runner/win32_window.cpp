@@ -208,7 +208,14 @@ Win32Window::MessageHandler(HWND hwnd,
     }
 
     case WM_ACTIVATE:
-      if (child_content_ != nullptr) {
+      // Deactivation must leave focus untouched: SetFocus on the child view
+      // here reactivates this window (SetFocus activates the focused child's
+      // parent) and pulls it back to the top of the z-order, stealing the
+      // activation Windows just handed to another window. The shell then
+      // treats this app as if it still owned the foreground, so later taskbar
+      // clicks no longer raise the window. Only redirect focus on actual
+      // activation (same policy as the engine's HostWindow::HandleWindowActivation).
+      if (LOWORD(wparam) != WA_INACTIVE && child_content_ != nullptr) {
         SetFocus(child_content_);
       }
       return 0;

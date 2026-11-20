@@ -38,7 +38,11 @@ class _Gateway implements ConfigurationSyncGateway {
       intervalSaves = 0;
   String phase = 'idle', operation = '', review = 'review-1';
   String? error;
-  bool risky = false, eligible = true, retry = false, references = false;
+  bool risky = false,
+      eligible = true,
+      retry = false,
+      references = false,
+      writeUnknown = false;
   int checkInterval = 0;
   final List<String> diverged = [], directions = [], savedIntervals = [];
   int referenceReads = 0, resolutions = 0;
@@ -55,7 +59,7 @@ class _Gateway implements ConfigurationSyncGateway {
     'commits': commits,
     'configuration_updates': updates,
     'remote_published': false,
-    'write_unknown': false,
+    'write_unknown': writeUnknown,
     'review': {'review', 'references'}.contains(phase)
         ? {
             'token': review,
@@ -98,6 +102,9 @@ class _Gateway implements ConfigurationSyncGateway {
   Future<String> reserve(String owner) async {
     reserves++;
     operation = 'operation-$reserves';
+    // Mirrors the native gate: a fresh reservation clears the sticky
+    // unconfirmed-write marker until a new failure sets it again.
+    writeUnknown = false;
     publish('reserved');
     await reserveGate?.future;
     return operation;
@@ -413,27 +420,64 @@ void main() {
     },
   );
   testWidgets(
-    'actual edits debounce to one exchange while a foreign scope is ignored',
+    'edits only mark the device dirty; the exchange waits for the check interval or a manual sync',
     (tester) async {
-      final gateway = _Gateway();
+      final gateway = _Gateway()..checkInterval = 10;
       final controller = ConfigurationSyncController(gateway: gateway);
       await controller.start();
       gateway.edit(scope: 'foreign-scope');
       await tester.pump(const Duration(seconds: 2));
       expect(gateway.prepares, 0);
+      expect(controller.pendingEdits, isFalse);
       for (var i = 0; i < 20; i++) {
         gateway.edit();
         await tester.pump(const Duration(milliseconds: 10));
       }
-      await tester.pump(const Duration(milliseconds: 739));
+      expect(controller.pendingEdits, isTrue);
+      // No 750ms debounce chain anymore: minutes of idle edits never start an
+      // exchange by themselves.
+      await tester.pump(const Duration(minutes: 2));
       expect(gateway.prepares, 0);
-      await tester.pump(const Duration(milliseconds: 2));
+      expect(gateway.reserves, 0);
+      expect(controller.pendingEdits, isTrue);
+      // The next periodic check picks the dirty state up and completes it.
+      await tester.pump(const Duration(minutes: 8));
       await tester.pump();
       expect(gateway.prepares, 1);
       expect(gateway.confirms, 1);
       expect(controller.state?.phase, 'committed');
+      expect(controller.pendingEdits, isFalse);
       await tester.pump(const Duration(minutes: 5));
       expect(gateway.prepares, 1);
+      await drainAsync(tester, controller.shutdown());
+      controller.dispose();
+    },
+  );
+  testWidgets(
+    'an unconfirmed cloud write re-reads automatically instead of waiting for a manual retry',
+    (tester) async {
+      final gateway = _Gateway();
+      final controller = ConfigurationSyncController(gateway: gateway);
+      await controller.start();
+      // Finish marks the failed state with write_unknown set.
+      gateway.writeUnknown = true;
+      gateway.error = 'write_unknown';
+      gateway.publish('failed');
+      await tester.pump();
+      expect(controller.state?.writeUnknown, isTrue);
+      expect(
+        controller.state == null ? '' : syncFailureLabel(controller.state),
+        contains('自动重新读取'),
+      );
+      // Before the short backoff elapses nothing is re-sent.
+      await tester.pump(const Duration(seconds: 29));
+      expect(gateway.reserves, 0);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump();
+      expect(gateway.reserves, 1);
+      expect(gateway.confirms, 1);
+      expect(controller.state?.phase, 'committed');
+      expect(controller.state?.writeUnknown, isFalse);
       await drainAsync(tester, controller.shutdown());
       controller.dispose();
     },
@@ -444,8 +488,7 @@ void main() {
       final gateway = _Gateway()..risky = true;
       final controller = ConfigurationSyncController(gateway: gateway);
       await controller.start();
-      gateway.edit();
-      await tester.pump(const Duration(seconds: 1));
+      await controller.synchronize();
       await tester.pump();
       expect(gateway.confirms, 0);
       expect(controller.state?.review?.needsConsent, isTrue);
@@ -512,14 +555,17 @@ void main() {
   testWidgets(
     'disabling the target cancels pending automatic work and does not start HTTP',
     (tester) async {
-      final gateway = _Gateway();
+      final gateway = _Gateway()..checkInterval = 1;
       final controller = ConfigurationSyncController(gateway: gateway);
       await controller.start();
       gateway.edit();
+      expect(controller.pendingEdits, isTrue);
       gateway.eligible = false;
       gateway.publish('idle');
-      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(minutes: 2));
       expect(gateway.prepares, 0);
+      expect(gateway.reserves, 0);
+      expect(controller.checkTimerArmed, isFalse);
       await drainAsync(tester, controller.shutdown());
       controller.dispose();
     },
@@ -530,8 +576,8 @@ void main() {
       final gateway = _Gateway()..reserveGate = Completer<void>();
       final controller = ConfigurationSyncController(gateway: gateway);
       await controller.start();
-      gateway.edit();
-      await tester.pump(const Duration(seconds: 1));
+      final work = controller.synchronize();
+      await tester.pump();
       await tester.pump();
       expect(gateway.reserves, 1);
       expect(gateway.prepares, 0);
@@ -539,6 +585,7 @@ void main() {
       gateway.publish('reserved');
       gateway.reserveGate!.complete();
       await tester.pump();
+      await work;
       await drainAsync(tester, controller.shutdown());
       expect(gateway.prepares, 0);
       expect(gateway.cancels, greaterThanOrEqualTo(1));

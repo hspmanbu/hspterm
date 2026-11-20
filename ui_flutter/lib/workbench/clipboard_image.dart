@@ -155,8 +155,10 @@ Future<void> pasteClipboardImage(
       final file = File(
         '${directory!.path}${Platform.pathSeparator}clipboard.png',
       );
+      // Probe the clipboard BEFORE publishing a queue tile: with no readable
+      // image the paste stops here with a notice and nothing is enqueued.
       if (!await (read ?? readClipboardPng)(file, current)) {
-        if (context.mounted) showAppNotice(context, '剪贴板中没有可读取的图片');
+        if (context.mounted) showAppNotice(context, '剪贴板中没有图片');
         return;
       }
       if (!current()) throw StateError('原终端已改变，未上传图片');
@@ -184,6 +186,9 @@ Future<void> pasteClipboardImage(
         throw StateError('远端返回的图片路径无效，未输入');
       }
       task.path = path;
+      // The finished upload keeps its local copy (queue actions can reveal
+      // or delete it); failure paths below still clean the temp directory.
+      task.localPath = file.path;
       task.done = task.total ?? 0;
       task.state = '已上传';
       task.ended = true;
@@ -230,11 +235,16 @@ Future<void> pasteClipboardImage(
     observing = false;
     progressTimer?.cancel();
     await progressWork;
-    task.ended = true;
-    if (task.path == null && task.error.isEmpty) task.state = '无图片';
-    model.publishImageUpload(task);
+    if (localImage != null) {
+      task.ended = true;
+      model.publishImageUpload(task);
+    }
     try {
-      if (directory != null) await directory!.delete(recursive: true);
+      // A finished upload keeps its local file for reveal/delete; every
+      // other outcome removes the temp directory this paste created.
+      if (directory != null && task.localPath == null) {
+        await directory!.delete(recursive: true);
+      }
     } finally {
       model.endImagePaste(source.id);
     }

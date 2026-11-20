@@ -365,12 +365,14 @@ class SectionHeading extends StatelessWidget {
   final Widget? trailing;
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+    // Compact transfer-queue category heading: enough air to stay readable,
+    // without the old generous vertical padding between sections.
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
     child: Row(
       children: [
         Text(
           title,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11),
         ),
         if (trailing != null) ...[const Spacer(), trailing!],
       ],
