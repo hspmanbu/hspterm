@@ -514,15 +514,116 @@ fn root_normalization_covers_trailing_slashes_host_case_and_default_ports_across
             webdav::derive_object("https://dav.invalid/dav/").unwrap()
         );
     }
-    // http vs https is a genuinely different object address: a distinct
-    // dataset identifier is intentional, and the derived endpoints differ.
-    assert_ne!(
+    // http vs https is a genuinely different object address, but the v2
+    // derivation is path-only: the same layout over either scheme is ONE
+    // dataset, while the derived endpoints (what is actually fetched) differ.
+    assert_eq!(
         derived_collection("http://dav.invalid/dav", b"synthetic-first").unwrap(),
         canonical
     );
     assert_ne!(
         webdav::derive_object("http://dav.invalid/dav/").unwrap(),
         webdav::derive_object("https://dav.invalid/dav/").unwrap()
+    );
+}
+
+#[test]
+fn path_only_derivation_shares_one_dataset_across_intranet_and_public_addresses() {
+    // v2 derivation participates on the normalized root's PATH only: the
+    // same WebDAV layout reached through different addresses (intranet host,
+    // public host, other port, http vs https) is one dataset; a different
+    // path or password still forks it.
+    let password = b"synthetic-shared-password";
+    let intranet = derived_collection("https://192.168.1.10:5006/dav", password).unwrap();
+    for same_layout in [
+        "https://dav.example.com/dav",
+        "http://10.0.0.8/dav/",
+        "HTTPS://DAV.Example.com:8443/dav/",
+        "https://[2001:db8::1]:443/dav",
+    ] {
+        assert_eq!(
+            derived_collection(same_layout, password).unwrap(),
+            intranet,
+            "address {same_layout} must not fork the dataset"
+        );
+    }
+    assert_ne!(
+        derived_collection("https://192.168.1.10:5006/private/", password).unwrap(),
+        intranet
+    );
+    assert_ne!(
+        derived_collection("https://192.168.1.10:5006/dav", b"synthetic-other").unwrap(),
+        intranet
+    );
+    // Root-only roots: an empty path and an explicit "/" are the same layout
+    // and differ from any deeper path, whatever the host is.
+    let root_only = derived_collection("https://dav.example.com", password).unwrap();
+    assert_eq!(
+        root_only,
+        derived_collection("https://other.invalid/", password).unwrap()
+    );
+    assert_ne!(root_only, intranet);
+}
+
+/// The frozen v1 derivation (full normalized root URL), kept in tests only to
+/// prove datasets saved by it — including the ones e32c259 just migrated to
+/// it — re-derive to the v2 path-only spec on the next target save.
+fn legacy_v1_collection(root: &str, password: &[u8]) -> String {
+    let root = webdav::checked_root(root).unwrap();
+    let mut hash = Sha256::new();
+    hash.update(b"HSPTerm collection v1\0");
+    hash.update(root.as_bytes());
+    hash.update([0]);
+    hash.update(password);
+    hash.finalize()
+        .iter()
+        .take(16)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+#[test]
+fn v1_full_root_derived_collections_migrate_to_the_path_only_derivation_on_re_save() {
+    let root = tempfile::tempdir().unwrap();
+    let mut v = vault(root.path());
+    let root_url = "https://dav.invalid/dav/";
+    let v1 = legacy_v1_collection(root_url, b"synthetic-v1-password");
+    let mut stored = target();
+    stored.endpoint = webdav::derive_object(root_url).unwrap();
+    stored.collection = v1.clone();
+    let mut p = proposal(&load(&v).unwrap(), stored);
+    p.secrets.sync_password = Some("synthetic-v1-password".into());
+    let saved = save(&mut v, p).unwrap();
+    // The v1 value no longer counts as derived under the v2 (path-only) rule.
+    assert!(!saved.collection_derived);
+    assert!(!load(&v).unwrap().collection_derived);
+    acknowledge(&mut v);
+    let original_ledger = v.get(LEDGER).unwrap().unwrap();
+    // Re-saving the untouched form exactly as the settings UI sends it (the
+    // form always re-derives; the non-derived flag routes through the one
+    // explicit switch confirmation) migrates the dataset to the v2 value and
+    // archives the v1 baseline instead of deleting it.
+    let fresh = load(&v).unwrap();
+    let mut p = proposal(&fresh, target());
+    p.target.endpoint = webdav::derive_object(root_url).unwrap();
+    p.target.collection = v1.clone();
+    p.derive_collection = Some(root_url.into());
+    p.confirm_target_change = true;
+    let migrated = save(&mut v, p).unwrap();
+    assert_eq!(
+        migrated.target.as_ref().unwrap().collection,
+        derived_collection(root_url, b"synthetic-v1-password").unwrap()
+    );
+    assert_ne!(migrated.target.as_ref().unwrap().collection, v1);
+    assert!(migrated.collection_derived);
+    assert!(load(&v).unwrap().collection_derived);
+    assert!(v.get(LEDGER).unwrap().is_none());
+    assert!(
+        v.get(&archive(fresh.target.as_ref().unwrap()))
+            .unwrap()
+            .unwrap()
+            .as_slice()
+            == original_ledger.as_slice()
     );
 }
 

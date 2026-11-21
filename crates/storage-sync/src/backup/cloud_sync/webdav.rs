@@ -120,6 +120,18 @@ pub(super) fn checked_root(value: &str) -> Result<String> {
     }
     Ok(url.to_string())
 }
+/// Path-only projection of a user-entered WebDAV ROOT after `checked_root`
+/// normalization: the URL's path component, always slash-terminated. The url
+/// crate folds an empty path into "/" for http/https, so a bare host, "/"
+/// and "" all normalize to the same "/" path. Collection derivation hashes
+/// exactly this string: scheme, host and port never influence the dataset id.
+pub(super) fn checked_root_path(value: &str) -> Result<String> {
+    let root = checked_root(value)?;
+    Ok(Url::parse(&root)
+        .map_err(|_| TransportError::Configuration)?
+        .path()
+        .to_owned())
+}
 /// Pure derivation: normalized root + the frozen single object path. The
 /// result must still pass the existing exact-object validation that every
 /// stored endpoint is checked against.

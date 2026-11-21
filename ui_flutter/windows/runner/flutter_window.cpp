@@ -4,6 +4,7 @@
 #include <set>
 #include <algorithm>
 #include <cmath>
+#include <dbt.h>
 #include <dwmapi.h>
 #include <windowsx.h>
 #include <shlobj.h>
@@ -19,6 +20,11 @@ struct FontCatalog {
   std::set<std::string> families;
   bool invalid = false;
 };
+
+// WM_TIMER id and timeout for the render-health watchdog armed by
+// ArmRenderHealthCheck when the GPU/display environment changes.
+constexpr UINT_PTR kRenderHealthTimerId = 0x48535054;  // "HSPT"
+constexpr UINT kRenderHealthTimeoutMs = 10000;
 
 // Reveals |path| in Explorer via the documented shell API: opens the parent
 // folder with the item preselected, reusing the shell's own window. This is
@@ -144,6 +150,35 @@ void FlutterWindow::SavePlacement() {
                    reinterpret_cast<const BYTE*>(&placement), sizeof(placement));
     RegCloseKey(key);
   }
+}
+
+// GPU driver updates while the app runs remove the D3D device the Flutter
+// Windows engine renders through; the engine then stops presenting forever
+// (Dart logic and timers keep running, but no frame is ever drawn again), so
+// the window stays blank. The runner cannot safely rebuild the engine's GPU
+// stack from outside, so on the broadcast device/display notifications it
+// asks the engine for one fresh frame and watches whether it presents within
+// kRenderHealthTimeoutMs. When no frame arrives, the Flutter view cannot
+// display anything any more — including any Dart-side dialog — so a NATIVE
+// message box is the only visible channel left; it tells the user to restart.
+// Healthy systems never see it: the next-frame callback fires promptly and
+// disarms the watchdog.
+// [UNVERIFIED native/platform] authored and statically checked on Linux;
+// needs a real Windows 11 GPU driver update to validate end to end.
+void FlutterWindow::ArmRenderHealthCheck() {
+  if (render_check_armed_ || !flutter_controller_) return;
+  render_check_armed_ = true;
+  render_frame_seen_ = false;
+  flutter_controller_->engine()->SetNextFrameCallback([this]() {
+    render_frame_seen_ = true;
+    if (render_check_armed_) {
+      render_check_armed_ = false;
+      KillTimer(GetHandle(), kRenderHealthTimerId);
+    }
+  });
+  // Nudge one raster even when Dart would schedule no frame by itself.
+  flutter_controller_->ForceRedraw();
+  SetTimer(GetHandle(), kRenderHealthTimerId, kRenderHealthTimeoutMs, nullptr);
 }
 
 bool FlutterWindow::OnCreate() {
@@ -406,6 +441,9 @@ bool FlutterWindow::OnCreate() {
 void FlutterWindow::OnDestroy() {
   // WM_DESTROY follows the framework's accepted close, never a cancelled close.
   SavePlacement();
+  // Disarm the render-health watchdog before the engine (and its pending
+  // next-frame callback) goes away.
+  render_check_armed_ = false;
   if (child_subclassed_ && flutter_controller_) {
     RemoveWindowSubclass(flutter_controller_->view()->GetNativeWindow(), ChildWindowProc, 1);
     child_subclassed_ = false;
@@ -438,7 +476,13 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
   // The base WM_DESTROY handler clears its HWND before calling OnDestroy.
   // Capture accepted-close geometry while this handle still exists.
-  if (message == WM_DESTROY) SavePlacement();
+  if (message == WM_DESTROY) {
+    SavePlacement();
+    if (render_check_armed_) {
+      KillTimer(hwnd, kRenderHealthTimerId);
+      render_check_armed_ = false;
+    }
+  }
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =
@@ -480,6 +524,36 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       break;
     case WM_FONTCHANGE:
       if (flutter_controller_) flutter_controller_->engine()->ReloadSystemFonts();
+      break;
+    case WM_DISPLAYCHANGE:
+      // Display-mode changes accompany GPU driver updates; verify the render
+      // pipeline still presents (no-op when it does).
+      ArmRenderHealthCheck();
+      break;
+    case WM_DEVICECHANGE:
+      // DBT_DEVNODES_CHANGED (device re-enumeration during a driver install)
+      // is broadcast to every top-level window; no RegisterDeviceNotification
+      // needed. Other device events are ignored.
+      if (wparam == DBT_DEVNODES_CHANGED) ArmRenderHealthCheck();
+      break;
+    case WM_TIMER:
+      if (wparam == kRenderHealthTimerId) {
+        KillTimer(hwnd, kRenderHealthTimerId);
+        render_check_armed_ = false;
+        // The engine did not present the requested frame within the timeout:
+        // the D3D device was most likely removed by the driver update and the
+        // Flutter view will never draw again. Only a native dialog is visible
+        // in that state. Skip hidden/minimized windows (nothing blank to see,
+        // and minimized views legitimately present no frames).
+        if (!render_frame_seen_ && flutter_controller_ &&
+            IsWindowVisible(hwnd) && !IsIconic(hwnd)) {
+          MessageBoxW(hwnd,
+              L"检测到显卡驱动或显示配置已更新，本窗口的画面渲染可能已停止（内容空白）。\n\n"
+              L"应用逻辑与后台 SSH 会话仍在运行，但界面需要重启应用才能恢复。\n\n"
+              L"请在任务栏正常关闭本应用后重新启动；请先确认没有正在进行且不可中断的传输。",
+              L"HSPTerm 显示恢复提示", MB_OK | MB_ICONWARNING);
+        }
+      }
       break;
   }
 

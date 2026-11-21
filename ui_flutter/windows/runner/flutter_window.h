@@ -41,9 +41,14 @@ class FlutterWindow : public Win32Window {
   RECT maximize_button_ = {};
   bool child_subclassed_ = false;
   bool startup_maximized_ = false;
+  // Render-health watchdog state; see ArmRenderHealthCheck in the .cpp for
+  // the GPU-driver-removal scenario these track.
+  bool render_check_armed_ = false;
+  bool render_frame_seen_ = false;
   LRESULT FrameHitTest(POINT screen) const;
   void RestorePlacement();
   void SavePlacement();
+  void ArmRenderHealthCheck();
   static LRESULT CALLBACK ChildWindowProc(HWND, UINT, WPARAM, LPARAM,
                                           UINT_PTR, DWORD_PTR);
 };

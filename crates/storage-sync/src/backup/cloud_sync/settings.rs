@@ -175,10 +175,12 @@ pub struct View {
     pub webdav_credential_set: bool,
     pub proxy_credential_set: bool,
     pub suggested_collection: String,
-    /// The stored WebDAV target's collection equals the derivation from its
-    /// own endpoint root and the stored password. `false` marks a dataset from
-    /// the manual/random collection era: re-saving derives a new collection,
-    /// which routes through the explicit target-switch confirmation.
+    /// The stored WebDAV target's collection equals the derivation (v2:
+    /// path-only) from its own endpoint root and the stored password.
+    /// `false` marks a dataset from the manual/random collection era or one
+    /// derived by the older full-root (v1) spec: re-saving derives the new
+    /// collection, which routes through the explicit target-switch
+    /// confirmation (the e32c259 legacy adoption path).
     pub collection_derived: bool,
 }
 fn revision(vault: &Vault, config: Option<&[u8]>, secret: Option<&[u8]>) -> String {
@@ -288,7 +290,8 @@ fn view(vault: &Vault, value: &Read) -> View {
     }
 }
 /// Whether the stored target's collection is the one the frozen derivation
-/// produces from the target's own endpoint root and the stored password.
+/// (v2: path-only) produces from the target's own endpoint root and the
+/// stored password.
 fn collection_is_derived(target: &Target, password: &[u8]) -> bool {
     if target.drive.is_some() {
         return false;
@@ -420,16 +423,25 @@ pub(super) fn archive(target: &Target) -> String {
     )
 }
 /// Frozen derivation spec (never change once released): the collection is the
-/// first 16 bytes of SHA-256("HSPTerm collection v1\0" + normalized_root +
-/// "\0" + sync_password) as 32 lowercase hex characters. The same root with
-/// the same password always addresses the same dataset; changing either
+/// first 16 bytes of SHA-256("HSPTerm collection v2\0" + path of the
+/// normalized root + "\0" + sync_password) as 32 lowercase hex characters.
+/// Only the normalized root's PATH participates (trailing slash appended;
+/// empty path and root "/" are the same), never the scheme, host or port:
+/// the same WebDAV layout (same path) with the same password is one dataset,
+/// so devices that reach it through different intranet/public addresses (or
+/// http vs https) sync with each other. Changing the path or the password
 /// routes through the existing explicit target-switch/archive confirmation.
-pub(in crate::backup) const COLLECTION_DERIVATION_LABEL: &[u8] = b"HSPTerm collection v1\0";
+/// Collections derived by the frozen v1 spec (full normalized root URL) no
+/// longer match this derivation: the settings view reports them as
+/// non-derived and the next target save re-derives them through that same
+/// explicit switch path (the e32c259 legacy-collection adoption mechanism),
+/// after which the next sync adopts and rewrites the cloud object in place.
+pub(in crate::backup) const COLLECTION_DERIVATION_LABEL: &[u8] = b"HSPTerm collection v2\0";
 pub(in crate::backup) fn derived_collection(root: &str, password: &[u8]) -> Result<String> {
-    let root = webdav::checked_root(root).map_err(|_| SyncError::Invalid)?;
+    let path = webdav::checked_root_path(root).map_err(|_| SyncError::Invalid)?;
     let mut hash = Sha256::new();
     hash.update(COLLECTION_DERIVATION_LABEL);
-    hash.update(root.as_bytes());
+    hash.update(path.as_bytes());
     hash.update([0]);
     hash.update(password);
     let derived: String = hash
