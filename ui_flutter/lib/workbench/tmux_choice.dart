@@ -250,7 +250,9 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
                       setState(() => ensureLocale = value == true),
                 ),
               const SizedBox(height: 8),
-              const Text('取消不会启动普通Shell或新建其他连接。断线后始终需要手动重连；未启用恢复或身份发生变化时重新选择。'),
+              const Text(
+                '取消不会启动普通Shell或新建其他连接。恢复选项不改变重连触发方式；未启用恢复或身份发生变化时重新选择。',
+              ),
             ],
           ),
         ),

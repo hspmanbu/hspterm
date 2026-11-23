@@ -13,6 +13,82 @@ import 'support/tmux_fixture.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(initializeRust);
+  for (final remember in [false, true]) {
+    test(
+      'ordinary Shell reconnect keeps its per-terminal choice only when enabled ($remember)',
+      () async {
+        final f = await TmuxFixture.start();
+        var choices = 0;
+        f.model.requestTmuxChoice = (_, _) async {
+          choices++;
+          return tmx.TmuxSelection(
+            kind: 1,
+            restoreOnReconnect: remember,
+            readonly: false,
+            takeoverConfirmed: false,
+            lockSize: false,
+          );
+        };
+        try {
+          f.model.openHost(f.host);
+          final c = (f.model.focus! as LiveTerminalSession).controller;
+          await waitFor(() => c.connected, 'ordinary Shell connects');
+          await c.setVisible(true);
+          await c.text("printf '%s%s\\n' ORDINARY_ SHELL_READY");
+          await c.key(
+            const rust.KeyboardInput(key: 'Enter', modifiers: 0, kind: 0),
+          );
+          await waitFor(
+            () => screen(c).contains('ORDINARY_SHELL_READY'),
+            'ordinary Shell output',
+          );
+          expect(
+            await rust.terminalTmuxRestoreEnabled(
+              id: c.id!,
+              generation: c.generation,
+            ),
+            remember,
+          );
+          final id = c.id, previous = c.generation;
+          await rust.disconnectTerminal(id: id!);
+          await waitFor(
+            () => c.phase == 'Disconnected',
+            'ordinary Shell disconnects',
+          );
+          await c.reconnect();
+          await waitFor(
+            () => c.connected && c.generation > previous,
+            'ordinary Shell reconnects',
+          );
+          expect(choices, remember ? 1 : 2);
+          expect(c.id, id);
+          expect(c.tmuxReadonly, null);
+          expect(
+            (await rust.listHosts()).single.tmuxEnabled,
+            true,
+            reason: 'the saved host preference is unchanged',
+          );
+          if (remember) {
+            await rust.forgetTerminalTmuxRestore(
+              id: id,
+              generation: c.generation,
+            );
+            await rust.disconnectTerminal(id: id);
+            await waitFor(
+              () => c.phase == 'Disconnected',
+              'forget Shell restore disconnects',
+            );
+            await c.reconnect();
+            await waitFor(() => c.connected, 'forget Shell restore reconnects');
+            expect(choices, 2);
+          }
+        } finally {
+          await f.close();
+        }
+      },
+      skip: !Platform.isLinux,
+    );
+  }
   test(
     'layout changed during tmux choice reaches unlocked PTY after connect',
     () async {
