@@ -103,6 +103,41 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
   Timer? _memorySampler;
   late final RuntimeDiagnostics _diagnostics = RuntimeDiagnostics(() => m);
 
+  bool _syncDialogOpen = false;
+  String? _shownSyncReview;
+  void _syncChanged() {
+    final state = m.configurationSync.state;
+    final review = state?.review;
+    if (!mounted ||
+        !_unlocked ||
+        _syncDialogOpen ||
+        m.configurationSync.busy ||
+        review?.needsConsent != true ||
+        _shownSyncReview == review!.token) {
+      return;
+    }
+    _shownSyncReview = review.token;
+    _syncDialogOpen = true;
+    _confirmTail = _confirmTail.catchError((Object _) {}).then((_) async {
+      try {
+        if (!mounted ||
+            !_unlocked ||
+            m.configurationSync.state?.review?.token != review.token) {
+          return;
+        }
+        final context = _navigator.currentContext;
+        if (context != null && context.mounted) {
+          await showConfigurationSyncReview(context, m.configurationSync);
+        }
+      } finally {
+        _syncDialogOpen = false;
+        if (mounted) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => _syncChanged());
+        }
+      }
+    });
+  }
+
   void _sampleMemory() {
     AppRunLog.instance.event(
       AppLogEvent.memorySample,
@@ -164,6 +199,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
     _resumeNotices = _noticeHub.resume;
     m.retireTerminalNotifications = _retireNotices;
     m.resumeTerminalNotifications = _resumeNotices;
+    m.configurationSync.addListener(_syncChanged);
     m.addListener(_bindNotices);
     _lastPaletteBinding = m.paletteBinding;
     m.addListener(_paletteChanged);
@@ -516,6 +552,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
   void dispose() {
     _memorySampler?.cancel();
     _diagnostics.stop();
+    m.configurationSync.removeListener(_syncChanged);
     m.removeListener(_bindNotices);
     m.removeListener(_paletteChanged);
     m.removeListener(_bindForwardingMonitors);

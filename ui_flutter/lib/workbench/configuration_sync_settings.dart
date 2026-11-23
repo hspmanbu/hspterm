@@ -343,7 +343,7 @@ class _ConfigurationSyncSettingsPanelState
           title: const Text('更换同步目标'),
           content: const SingleChildScrollView(
             child: Text(
-              '原云端数据不会删除。本机将归档原目标的同步基线，并把当前配置作为新目标的一次本机修改。返回旧目标时恢复该目标基线。\n\n新设备须使用相同根目录和同步密码（同一数据集）。旧版标识的数据集会在下次同步时以新派生集合重新上传，云端数据合并保留。确认更换根目录、密码或集合标识？',
+              '原云端数据不会删除。本机将归档原目标的同步基线，并把当前配置作为新目标的一次本机修改。返回旧目标时恢复该目标基线。\n\n新设备须使用相同目录路径和同步密码（同一数据集）。旧版标识的数据集会在下次同步时以新派生集合重新上传，云端数据合并保留。确认更换根目录、密码或集合标识？',
             ),
           ),
           actions: [
@@ -485,7 +485,7 @@ class _ConfigurationSyncSettingsPanelState
       }
       setState(() {
         _adopt(saved);
-        _notice = '同步设置已加密保存；启用后配置变更会合并触发同步。';
+        _notice = '同步设置已保存；将按检查间隔同步，也可立即同步。';
       });
     } catch (_) {
       if (mounted &&
@@ -592,10 +592,12 @@ class _ConfigurationSyncSettingsPanelState
             ),
             const SizedBox(height: 8),
             const Text(
-              '保存正式主机、凭据、书签、允许的设置及合格单行命令历史；不包含画面、滚动历史、任务、草稿或字体。同步密码与主密码独立；相同根目录与相同同步密码即同一数据集，请在各设备保持一致。',
+              '保存正式主机、凭据、书签、允许的设置及合格单行命令历史；不包含画面、滚动历史、任务、草稿或字体。同步密码与主密码独立；相同目录路径与同步密码对应同一数据集，请在各设备保持一致。',
             ),
             const SizedBox(height: 8),
-            const Text('启用后在配置变更、定时检查或手动操作时同步。冲突及凭据变化需审阅。Drive 对象通过下方明确发现与选择。'),
+            const Text(
+              '启用后按检查间隔或手动同步。可确定方向时静默合并；无法确定时直接弹窗选择覆盖方向，网络失败自动重试 3 次。云端保留最近 3 个历史快照。',
+            ),
             if (_loading)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
@@ -694,8 +696,8 @@ class _ConfigurationSyncSettingsPanelState
                   help: '成功同步过的集合不能仅改本机密码；更换密码请明确使用新集合。首尾空格不计入密码',
                   validator: (v) =>
                       v == null ||
-                      v.trim().isEmpty ||
-                      utf8.encode(v).length > 4096
+                          v.trim().isEmpty ||
+                          utf8.encode(v).length > 4096
                       ? '需要 1–4096 字节的同步密码（首尾空格不计入）'
                       : null,
                 ),

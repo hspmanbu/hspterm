@@ -37,6 +37,7 @@ class _Gateway implements ConfigurationSyncGateway {
       intervalLoads = 0,
       intervalSaves = 0;
   String phase = 'idle', operation = '', review = 'review-1';
+  int networkFailures = 0;
   String? error;
   bool risky = false,
       eligible = true,
@@ -113,6 +114,13 @@ class _Gateway implements ConfigurationSyncGateway {
   @override
   Future<String> prepare(String owner, String operation) async {
     prepares++;
+    if (networkFailures > 0) {
+      networkFailures--;
+      error = 'network';
+      publish('failed');
+      throw StateError('synthetic network failure');
+    }
+    error = null;
     publish('reading');
     await prepareGate?.future;
     if (phase != 'cancelled') publish(references ? 'references' : 'review');
@@ -176,6 +184,7 @@ class _Gateway implements ConfigurationSyncGateway {
     String direction,
   ) async {
     directions.add(direction);
+    references = false;
     diverged.clear();
     risky = direction == 'remote';
     this.review = 'direction-review-${directions.length}';
@@ -349,23 +358,26 @@ void main() {
       expect(syncFailureLabel(state), isNot(contains('集合标识')));
     },
   );
-  test('first-read failures distinguish a wrong password from a legacy dataset id', () {
-    final gateway = _Gateway()..error = 'first_read_decrypt';
-    final value = jsonDecode(gateway.snapshot()) as Map<String, dynamic>;
-    value['phase'] = 'failed';
-    final password = ConfigurationSyncState(value);
-    expect(password.error, 'first_read_decrypt');
-    expect(syncFailureLabel(password), contains('同步密码不一致'));
-    expect(syncFailureLabel(password), isNot(contains('旧版标识')));
-    gateway.error = 'first_read_legacy_collection';
-    final legacy = ConfigurationSyncState(
-      jsonDecode(gateway.snapshot()) as Map<String, dynamic>,
-    );
-    expect(legacy.error, 'first_read_legacy_collection');
-    expect(syncFailureLabel(legacy), contains('旧版标识'));
-    expect(syncFailureLabel(legacy), contains('原创建设备'));
-    expect(syncFailureLabel(legacy), isNot(contains('同步密码不一致')));
-  });
+  test(
+    'first-read failures distinguish a wrong password from a legacy dataset id',
+    () {
+      final gateway = _Gateway()..error = 'first_read_decrypt';
+      final value = jsonDecode(gateway.snapshot()) as Map<String, dynamic>;
+      value['phase'] = 'failed';
+      final password = ConfigurationSyncState(value);
+      expect(password.error, 'first_read_decrypt');
+      expect(syncFailureLabel(password), contains('无法读取云端配置'));
+      expect(syncFailureLabel(password), isNot(contains('旧版标识')));
+      gateway.error = 'first_read_legacy_collection';
+      final legacy = ConfigurationSyncState(
+        jsonDecode(gateway.snapshot()) as Map<String, dynamic>,
+      );
+      expect(legacy.error, 'first_read_legacy_collection');
+      expect(syncFailureLabel(legacy), contains('旧版标识'));
+      expect(syncFailureLabel(legacy), contains('原创建设备'));
+      expect(syncFailureLabel(legacy), isNot(contains('同步密码不一致')));
+    },
+  );
   testWidgets(
     'startup and an idle clock never synchronize persisted state without a check interval',
     (tester) async {
@@ -413,29 +425,26 @@ void main() {
       controller.dispose();
     },
   );
-  testWidgets(
-    'divergence direction resolution publishes the choice and a fresh review token',
-    (tester) async {
-      final gateway = _Gateway()..risky = true;
-      gateway.diverged.add('host-${'a' * 32}');
-      final controller = ConfigurationSyncController(gateway: gateway);
-      await controller.start();
-      await controller.synchronize();
-      final original = controller.state!;
-      expect(original.review!.needsDirection, isTrue);
-      await controller.confirm(original);
-      expect(gateway.confirms, 0);
-      await controller.resolveDirection(original, 'local');
-      expect(gateway.directions, ['local']);
-      expect(controller.state!.review!.token, isNot(original.review!.token));
-      expect(controller.state!.review!.needsDirection, isFalse);
-      await controller.confirm(controller.state!);
-      expect(gateway.confirms, 1);
-      expect(controller.state?.phase, 'committed');
-      await drainAsync(tester, controller.shutdown());
-      controller.dispose();
-    },
-  );
+  testWidgets('divergence direction finishes without a second review', (
+    tester,
+  ) async {
+    final gateway = _Gateway()..risky = true;
+    gateway.diverged.add('host-${'a' * 32}');
+    final controller = ConfigurationSyncController(gateway: gateway);
+    await controller.start();
+    await controller.synchronize();
+    final original = controller.state!;
+    expect(original.review!.needsDirection, isTrue);
+    await controller.confirm(original);
+    expect(gateway.confirms, 0);
+    await controller.resolveDirection(original, 'local');
+    expect(gateway.directions, ['local']);
+    expect(controller.state?.review, isNull);
+    expect(gateway.confirms, 1);
+    expect(controller.state?.phase, 'committed');
+    await drainAsync(tester, controller.shutdown());
+    controller.dispose();
+  });
   testWidgets(
     'edits only mark the device dirty; the exchange waits for the check interval or a manual sync',
     (tester) async {
@@ -500,47 +509,144 @@ void main() {
     },
   );
   testWidgets(
-    'consent reviews stop the flow, and manual sync without them never pops a review',
+    'credential-only incoming updates are silent; real divergence needs one direction',
     (tester) async {
       final gateway = _Gateway()..risky = true;
       final controller = ConfigurationSyncController(gateway: gateway);
       await controller.start();
       await controller.synchronize();
-      await tester.pump();
-      expect(gateway.confirms, 0);
-      expect(controller.state?.review?.needsConsent, isTrue);
-      await controller.confirm(controller.state!);
       expect(gateway.confirms, 1);
-      // No divergence, conflict, credential change or deletion: the manual
-      // exchange completes itself instead of parking at a zero-count review.
-      gateway.risky = false;
+      expect(controller.state?.phase, 'committed');
+      gateway.diverged.add('host-${'a' * 32}');
       await controller.synchronize();
+      expect(controller.state?.review?.needsConsent, true);
+      expect(gateway.confirms, 1);
+      await controller.resolveDirection(controller.state!, 'remote');
+      expect(gateway.directions, ['remote']);
       expect(gateway.confirms, 2);
       expect(controller.state?.phase, 'committed');
+      await drainAsync(tester, controller.shutdown());
+      controller.dispose();
+    },
+  );
+  testWidgets('a stale direction cannot overwrite a newer candidate', (
+    tester,
+  ) async {
+    final gateway = _Gateway()..diverged.add('host-${'a' * 32}');
+    final controller = ConfigurationSyncController(gateway: gateway);
+    await controller.start();
+    await controller.synchronize();
+    final old = controller.state!;
+    gateway.review = 'new-candidate';
+    gateway.publish('review');
+    await controller.resolveDirection(old, 'local');
+    expect(gateway.directions, isEmpty);
+    await controller.resolveDirection(controller.state!, 'local');
+    expect(gateway.directions, ['local']);
+    expect(controller.state?.phase, 'committed');
+    await drainAsync(tester, controller.shutdown());
+    controller.dispose();
+  });
+  testWidgets('network failures retry from fresh reads at most three times', (
+    tester,
+  ) async {
+    final gateway = _Gateway()..networkFailures = 2;
+    final controller = ConfigurationSyncController(gateway: gateway);
+    await controller.start();
+    final work = controller.synchronize();
+    await tester.pump();
+    expect(controller.retrying, true);
+    expect(gateway.prepares, 1);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(gateway.prepares, 2);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    await work;
+    expect(gateway.prepares, 3);
+    expect(controller.state?.phase, 'committed');
+    expect(controller.retrying, false);
+    gateway.networkFailures = 3;
+    final failing = controller.synchronize();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    await failing;
+    expect(gateway.prepares, 6);
+    expect(controller.state?.phase, 'failed');
+    expect(controller.retrying, false);
+    await tester.pump(const Duration(seconds: 10));
+    expect(gateway.prepares, 6);
+    await drainAsync(tester, controller.shutdown());
+    controller.dispose();
+  });
+  testWidgets('cancelling retry backoff never starts another request', (
+    tester,
+  ) async {
+    final gateway = _Gateway()..networkFailures = 3;
+    final controller = ConfigurationSyncController(gateway: gateway);
+    await controller.start();
+    final work = controller.synchronize();
+    await tester.pump();
+    expect(gateway.prepares, 1);
+    expect(controller.retrying, true);
+    final cancel = controller.cancel();
+    await tester.pump();
+    await cancel;
+    await work;
+    await tester.pump(const Duration(seconds: 10));
+    expect(gateway.prepares, 1);
+    expect(controller.retrying, false);
+    await drainAsync(tester, controller.shutdown());
+    controller.dispose();
+  });
+  testWidgets(
+    'reading cloud history never confirms or uploads a local candidate',
+    (tester) async {
+      final gateway = _Gateway()..diverged.add('host-${'a' * 32}');
+      final controller = ConfigurationSyncController(gateway: gateway);
+      await controller.start();
+      expect(await controller.refreshHistory(), true);
+      expect(gateway.prepares, 1);
+      expect(gateway.confirms, 0);
+      expect(gateway.commits, 0);
+      expect(gateway.cancels, 1);
       expect(controller.state?.review, isNull);
+      expect(controller.historyRead, true);
       await drainAsync(tester, controller.shutdown());
       controller.dispose();
     },
   );
   testWidgets(
-    'a changed server review cannot reuse a previously captured confirmation',
+    'direction dialog has three choices and no second review confirmation',
     (tester) async {
-      // risky keeps the manual exchange parked at a consent review so the
-      // stale-token guards below are exercised through explicit confirms.
-      final gateway = _Gateway()
-        ..risky = true
-        ..retry = true;
+      final gateway = _Gateway()..diverged.add('host-${'a' * 32}');
       final controller = ConfigurationSyncController(gateway: gateway);
       await controller.start();
       await controller.synchronize();
-      final old = controller.state!;
-      await controller.confirm(old);
-      expect(controller.state?.review?.token, 'review-2');
-      await controller.confirm(old);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showConfigurationSyncReview(context, controller),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text('取消同步'), findsOneWidget);
+      expect(find.text('本地覆盖云端'), findsOneWidget);
+      await tester.tap(find.text('云端覆盖本地'));
+      await tester.pumpAndSettle();
+      expect(gateway.directions, ['remote']);
       expect(gateway.confirms, 1);
-      await controller.confirm(controller.state!);
-      expect(gateway.confirms, 2);
       expect(controller.state?.phase, 'committed');
+      expect(find.text('确认同步'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
       await drainAsync(tester, controller.shutdown());
       controller.dispose();
     },
@@ -621,11 +727,11 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.text('手动重试'), findsNothing);
+      expect(find.text('立即同步'), findsNothing);
       gateway.publish('failed');
       await tester.pump();
       expect(find.textContaining('同步密码或数据版本不匹配'), findsOneWidget);
-      expect(find.text('手动重试'), findsOneWidget);
+      expect(find.text('立即同步'), findsOneWidget);
       // A stale request-level notice rides along in the smaller line.
       controller.error = '同步请求未完成；请查看状态后明确重试。';
       controller.notifyListeners();
@@ -638,14 +744,14 @@ void main() {
       await tester.pump();
       expect(controller.state?.eligible, false);
       expect(controller.error, isNull);
-      expect(find.text('手动重试'), findsNothing);
+      expect(find.text('立即同步'), findsNothing);
       expect(find.textContaining('同步密码或数据版本不匹配'), findsNothing);
       // Re-enabling restores the banner from the still-failed state.
       gateway.eligible = true;
       gateway.publish('failed');
       await tester.pump();
       expect(find.textContaining('同步密码或数据版本不匹配'), findsOneWidget);
-      expect(find.text('手动重试'), findsOneWidget);
+      expect(find.text('立即同步'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       await drainAsync(tester, controller.shutdown());
       controller.dispose();

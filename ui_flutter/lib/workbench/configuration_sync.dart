@@ -57,12 +57,7 @@ class SyncReview {
   /// Units modified on both sides since the shared baseline need one explicit
   /// whole-direction choice before anything may be published or applied.
   bool get needsDirection => divergedUnits.isNotEmpty;
-  bool get needsConsent =>
-      references ||
-      needsDirection ||
-      counts['conflicts']! > 0 ||
-      counts['credential_changes']! > 0 ||
-      counts['incoming_deletions']! > 0;
+  bool get needsConsent => references || needsDirection;
 }
 
 class ConfigurationSyncState {
@@ -79,6 +74,11 @@ class ConfigurationSyncState {
       remotePublished = value['remote_published'] as bool,
       writeUnknown = value['write_unknown'] as bool,
       authorizationUnknown = value['authorization_unknown'] as bool? ?? false,
+      snapshots = List.unmodifiable(
+        ((value['snapshots'] as List?) ?? const []).map(
+          (v) => CloudConfigurationSnapshot(v as Map<String, dynamic>),
+        ),
+      ),
       review = value['review'] == null
           ? null
           : SyncReview(value['review'] as Map<String, dynamic>) {
@@ -110,6 +110,7 @@ class ConfigurationSyncState {
   final int sequence, commits, configurationUpdates;
   final bool eligible, remotePublished, writeUnknown, authorizationUnknown;
   final SyncReview? review;
+  final List<CloudConfigurationSnapshot> snapshots;
   bool get active => {
     'reserved',
     'reading',
@@ -150,8 +151,42 @@ abstract interface class ConfigurationSyncGateway {
   Future<void> saveCheckInterval(int minutes);
 }
 
-class NativeConfigurationSyncGateway implements ConfigurationSyncGateway {
+abstract interface class ConfigurationSyncSnapshotGateway {
+  Future<String> prepareSnapshot(
+    String owner,
+    String operation,
+    String snapshot,
+  );
+}
+
+class CloudConfigurationSnapshot {
+  CloudConfigurationSnapshot(Map<String, dynamic> value)
+    : id = value['id'] as String,
+      time = DateTime.fromMillisecondsSinceEpoch(value['unix_ms'] as int),
+      hosts = value['hosts'] as int,
+      bookmarks = value['bookmarks'] as int {
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(id) || hosts < 0 || bookmarks < 0) {
+      throw const FormatException('云端历史无效');
+    }
+  }
+  final String id;
+  final DateTime time;
+  final int hosts, bookmarks;
+}
+
+class NativeConfigurationSyncGateway
+    implements ConfigurationSyncGateway, ConfigurationSyncSnapshotGateway {
   const NativeConfigurationSyncGateway();
+  @override
+  Future<String> prepareSnapshot(
+    String owner,
+    String operation,
+    String snapshot,
+  ) => rust.prepareConfigurationSyncSnapshot(
+    owner: owner,
+    operation: operation,
+    snapshot: snapshot,
+  );
   @override
   Future<String> open() => rust.openConfigurationSync();
   @override
@@ -242,6 +277,32 @@ class ConfigurationSyncController extends ChangeNotifier {
   Future<void>? _starting, _work, _cancellation, _refresh, _shutdown;
   Timer? _checkTimer;
   Timer? _writeUnknownRetry;
+  Timer? _backoffTimer;
+  Completer<void>? _backoffDone;
+  void _interruptBackoff() {
+    _backoffTimer?.cancel();
+    _backoffTimer = null;
+    final done = _backoffDone;
+    if (done != null && !done.isCompleted) done.complete();
+  }
+
+  Future<void> _backoff(int attempt) async {
+    _interruptBackoff();
+    final done = Completer<void>();
+    _backoffDone = done;
+    _backoffTimer = Timer(
+      Duration(seconds: attempt * 2),
+      () => done.complete(),
+    );
+    try {
+      await done.future;
+    } finally {
+      _backoffTimer?.cancel();
+      _backoffTimer = null;
+      if (identical(_backoffDone, done)) _backoffDone = null;
+    }
+  }
+
   int _checkIntervalMinutes = 0;
   bool _checkIntervalLoaded = false;
 
@@ -263,6 +324,17 @@ class ConfigurationSyncController extends ChangeNotifier {
       _reloadWanted = false;
   bool _opening = false;
   int _editEpoch = 0, _commits = 0;
+  bool historyRead = false;
+  bool _retrying = false;
+  bool get retrying => _retrying;
+  int _dismissedNotice = -1;
+  bool get noticeDismissed => _dismissedNotice == state?.sequence;
+  void dismissNotice() {
+    _dismissedNotice = state?.sequence ?? -1;
+    error = null;
+    _notify();
+  }
+
   bool get busy => _work != null || _cancellation != null || _opening;
   bool get available => !_closing && !_disposed && !_faulted && _owner != null;
   bool get canRetryStart => !_closing && !_disposed && !busy && _owner == null;
@@ -294,6 +366,7 @@ class ConfigurationSyncController extends ChangeNotifier {
         // must not keep a banner alive and the periodic timer must stop.
         error = null;
         _editEpoch++;
+        _interruptBackoff();
         _checkTimer?.cancel();
         _checkTimer = null;
         _writeUnknownRetry?.cancel();
@@ -354,6 +427,7 @@ class ConfigurationSyncController extends ChangeNotifier {
           value['owner'] == _owner &&
           value['vault_scope'] == state?.scope) {
         _editEpoch++;
+        _interruptBackoff();
         // Only mark the device dirty. The exchange itself waits for the next
         // periodic check or an explicit manual sync — the check interval, not
         // the edit, decides when cloud traffic happens.
@@ -546,7 +620,7 @@ class ConfigurationSyncController extends ChangeNotifier {
           }
         }
         if (error == null && !typedFailure) {
-          error = '同步请求未完成；请查看状态后明确重试。';
+          error = '同步未完成，请检查连接或同步设置。';
         }
         if (state?.phase == 'cancelled') error = null;
       } finally {
@@ -565,42 +639,179 @@ class ConfigurationSyncController extends ChangeNotifier {
 
   Future<void> synchronize() => _synchronize(automatic: false);
   Future<void> _synchronize({required bool automatic}) => _run(() async {
-    if (automatic && state?.eligible != true) return;
+    if (state?.eligible != true) return;
+    historyRead = false;
     final owner = _owner!;
     final epoch = _editEpoch;
-    // An exchange that reaches the review phase clears the dirty marker: the
-    // local edits are part of the running candidate now. A failed or cancelled
-    // exchange leaves it set for the next check to pick up.
-    _pendingAuto = false;
-    _writeUnknownRetry?.cancel();
-    _writeUnknownRetry = null;
-    final existing = _operation;
-    if (existing != null) {
-      await gateway.cancel(owner, existing);
-      _operation = null;
+    _retrying = true;
+    _notify();
+    try {
+      for (var attempt = 1; attempt <= 3; attempt++) {
+        if (_closing || epoch != _editEpoch) return;
+        _writeUnknownRetry?.cancel();
+        _writeUnknownRetry = null;
+        try {
+          final existing = _operation;
+          if (existing != null) {
+            await gateway.cancel(owner, existing);
+            _operation = null;
+          }
+          final operation = await gateway.reserve(owner);
+          _operation = operation;
+          if (_closing || epoch != _editEpoch) {
+            await gateway.cancel(owner, operation);
+            return;
+          }
+          _accept(await gateway.prepare(owner, operation));
+          await _completeSafeCandidate(owner, operation, epoch);
+          if (state?.phase == 'failed') throw StateError('同步未完成');
+          if (epoch == _editEpoch) _pendingAuto = false;
+          return;
+        } catch (_) {
+          if (_closing || epoch != _editEpoch) return;
+          _accept(await gateway.status(owner));
+          final current = state;
+          final retryable =
+              current?.writeUnknown == true ||
+              {'network', 'source_changed'}.contains(current?.error);
+          if (attempt == 3 || !retryable || current?.phase == 'cancelled') {
+            rethrow;
+          }
+          await _backoff(attempt);
+        }
+      }
+    } finally {
+      _retrying = false;
+      _notify();
     }
-    final operation = await gateway.reserve(owner);
-    _operation = operation;
-    if (_closing || epoch != _editEpoch) {
-      await gateway.cancel(owner, operation);
-      return;
+  });
+  bool get _canRetry =>
+      state?.writeUnknown == true ||
+      {'network', 'source_changed'}.contains(state?.error);
+  Future<void> _decisionWithRetries(Future<void> Function() decision) async {
+    final owner = _owner!, epoch = _editEpoch;
+    _retrying = true;
+    _notify();
+    try {
+      for (var attempt = 1; attempt <= 3; attempt++) {
+        if (_closing || epoch != _editEpoch) return;
+        try {
+          if (attempt == 1) {
+            await decision();
+          } else {
+            if (_operation != null) await gateway.cancel(owner, _operation!);
+            final operation = await gateway.reserve(owner);
+            _operation = operation;
+            if (_closing || epoch != _editEpoch) {
+              await gateway.cancel(owner, operation);
+              return;
+            }
+            _accept(await gateway.prepare(owner, operation));
+          }
+          if (_operation != null) {
+            await _completeSafeCandidate(owner, _operation!, epoch);
+          }
+          return;
+        } catch (_) {
+          if (_closing || epoch != _editEpoch) return;
+          _accept(await gateway.status(owner));
+          if (attempt == 3 || !_canRetry || state?.phase == 'cancelled') {
+            rethrow;
+          }
+          await _backoff(attempt);
+        }
+      }
+    } finally {
+      _retrying = false;
+      _notify();
     }
-    _accept(await gateway.prepare(owner, operation));
-    // Any candidate that needs no explicit consent — no references, no
-    // unresolved divergence, no conflicts, no credential changes and no
-    // incoming deletions (this includes a no-op exchange where both sides
-    // equal the baseline, and single-sided auto-merges) — confirms itself
-    // for manual syncs too. Only a genuinely risky candidate parks in the
-    // review phase and raises the review banner/dialog.
+  }
+
+  Future<void> _completeSafeCandidate(
+    String owner,
+    String operation,
+    int epoch,
+  ) async {
     while (!_closing &&
         epoch == _editEpoch &&
         state?.phase == 'review' &&
         state?.operation == operation &&
         !state!.review!.needsConsent) {
-      final review = state!.review!.token;
-      _accept(await gateway.confirm(owner, operation, review));
+      _accept(await gateway.confirm(owner, operation, state!.review!.token));
     }
-  });
+    if (state?.phase == 'failed') throw StateError('同步未完成');
+  }
+
+  /// Reuse the verified read/prepare flow, then discard the candidate. Never
+  /// confirm/publish it: opening history must not upload unsynced local edits.
+  Future<bool> refreshHistory() async {
+    var success = false;
+    if (state?.active == true) return false;
+    await _run(() async {
+      final owner = _owner!, epoch = _editEpoch;
+      if (state?.eligible != true) return;
+      _retrying = true;
+      historyRead = false;
+      _notify();
+      try {
+        for (var attempt = 1; attempt <= 3; attempt++) {
+          if (_closing || epoch != _editEpoch) return;
+          try {
+            if (_operation != null) await gateway.cancel(owner, _operation!);
+            final operation = await gateway.reserve(owner);
+            _operation = operation;
+            if (_closing || epoch != _editEpoch) {
+              await gateway.cancel(owner, operation);
+              return;
+            }
+            _accept(await gateway.prepare(owner, operation));
+            if (state?.phase == 'failed') throw StateError('读取历史失败');
+            await gateway.cancel(owner, operation);
+            _accept(await gateway.status(owner));
+            success = epoch == _editEpoch && !_closing;
+            historyRead = success;
+            return;
+          } catch (_) {
+            if (_closing || epoch != _editEpoch) return;
+            _accept(await gateway.status(owner));
+            if (attempt == 3 || !_canRetry) rethrow;
+            await _backoff(attempt);
+          }
+        }
+      } finally {
+        _retrying = false;
+        _notify();
+      }
+    });
+    return success;
+  }
+
+  Future<void> restoreSnapshot(CloudConfigurationSnapshot snapshot) =>
+      _run(() async {
+        historyRead = false;
+        final g = gateway;
+        if (g is! ConfigurationSyncSnapshotGateway ||
+            state?.eligible != true ||
+            !(state?.snapshots.any((s) => s.id == snapshot.id) ?? false)) {
+          return;
+        }
+        final owner = _owner!, epoch = _editEpoch;
+        if (_operation != null) await gateway.cancel(owner, _operation!);
+        final operation = await gateway.reserve(owner);
+        _operation = operation;
+        if (_closing || epoch != _editEpoch) {
+          await gateway.cancel(owner, operation);
+          return;
+        }
+        _accept(
+          await (g as ConfigurationSyncSnapshotGateway).prepareSnapshot(
+            owner,
+            operation,
+            snapshot.id,
+          ),
+        );
+        await _completeSafeCandidate(owner, operation, epoch);
+      });
   Future<void> confirm(ConfigurationSyncState original) => _run(() async {
     if (state?.owner != original.owner ||
         state?.operation != original.operation ||
@@ -665,8 +876,8 @@ class ConfigurationSyncController extends ChangeNotifier {
     );
   });
 
-  /// Applies the user's whole-direction choice for units modified on both
-  /// sides since the baseline; a fresh review token replaces the old one.
+  /// Applies the complete-configuration overwrite choice, then finishes safe
+  /// publication without a second summary dialog.
   Future<void> resolveDirection(
     ConfigurationSyncState original,
     String direction,
@@ -675,19 +886,21 @@ class ConfigurationSyncController extends ChangeNotifier {
         state?.operation != original.operation ||
         state?.review?.token != original.review?.token ||
         original.review == null ||
-        original.review!.references ||
-        original.review!.divergedUnits.isEmpty ||
+        (!original.review!.references &&
+            original.review!.divergedUnits.isEmpty) ||
         !{'local', 'remote'}.contains(direction)) {
       return;
     }
-    _accept(
-      await gateway.resolveDirection(
-        original.owner,
-        original.operation!,
-        original.review!.token,
-        direction,
-      ),
-    );
+    await _decisionWithRetries(() async {
+      _accept(
+        await gateway.resolveDirection(
+          original.owner,
+          original.operation!,
+          original.review!.token,
+          direction,
+        ),
+      );
+    });
   });
   Future<void> _cancelNative() {
     final current = _cancellation;
@@ -712,6 +925,9 @@ class ConfigurationSyncController extends ChangeNotifier {
   }
 
   Future<void> cancel() async {
+    _editEpoch++;
+    _interruptBackoff();
+    _dismissedNotice = state?.sequence ?? -1;
     _pendingAuto = false;
     _writeUnknownRetry?.cancel();
     _writeUnknownRetry = null;
@@ -730,6 +946,7 @@ class ConfigurationSyncController extends ChangeNotifier {
 
   Future<void> shutdown() => _shutdown ??= () async {
     _closing = true;
+    _interruptBackoff();
     _pendingAuto = false;
     _checkTimer?.cancel();
     _checkTimer = null;
@@ -786,8 +1003,9 @@ String syncFailureLabel(ConfigurationSyncState? state) {
     'references' => '两端的分组或跳板引用冲突；请调整相关配置后重新同步。',
     'clock' => '设备时钟异常，请校准后重试。',
     'capacity' => '同步数据超过容量限制，两端数据均保留。',
-    'first_read_decrypt' => '同步密码不一致：本机密码与创建该云端数据集时使用的密码不同（密码参与集合派生）。请统一两台设备的同步密码后重试。',
-    'first_read_legacy_collection' => '云端数据集由旧版标识创建：请先在原创建设备打开同步设置重新保存目标（迁移为新派生标识，数据不删），再在本设备接入。',
+    'first_read_decrypt' => '无法读取云端配置，请检查同步密码、应用版本和云端文件。',
+    'first_read_legacy_collection' =>
+      '云端数据集由旧版标识创建：请先在原创建设备打开同步设置重新保存目标（迁移为新派生标识，数据不删），再在本设备接入。',
     'data' => '同步密码或数据版本不匹配，未应用；新设备接入请使用与创建该数据集时一致的同步密码。',
     'denied' => '同步服务器拒绝访问，请检查已保存认证。',
     'directory' => '同步目录未就绪：请在服务器上准备 hspterm 目录或核对 WebDAV 根目录地址。',
@@ -795,6 +1013,6 @@ String syncFailureLabel(ConfigurationSyncState? state) {
     'authorization_busy' => '另一个 Google Drive 账号操作尚未结束；结束后请手动重试同步。',
     'network' => '同步网络、TLS 或服务器响应失败。',
     'cancelled' => '本次同步已取消。',
-    _ => '同步未完成，请检查配置后手动重试。',
+    _ => '同步未完成，请检查同步设置。',
   };
 }
