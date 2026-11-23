@@ -8,6 +8,7 @@ import 'package:hspterm/prototype/model.dart';
 import 'package:hspterm/prototype/hosts.dart';
 import 'package:hspterm/src/rust/api.dart' as rust;
 import 'package:hspterm/workbench/model.dart';
+import 'package:hspterm/workbench/directory_reader.dart';
 import 'package:hspterm/workbench/store.dart';
 
 import 'support/fake_backend.dart';
@@ -102,11 +103,22 @@ void main() {
       await model.load();
       model.openHost(model.hosts.single);
       await Future<void>.delayed(Duration.zero);
+      final source = model.focus! as LiveTerminalSession;
+      source.directoryCache.store(
+        LoadedDirectory('/fixture', [DemoFile('/fixture/file', 'file')], 100),
+      );
+      expect(model.directoryCacheBudget.directories, 1);
       model.closeTab(model.tabs.single.id);
       await Future<void>.delayed(Duration.zero);
       expect(model.sessions, isEmpty);
       expect(model.hasRetiringSessions, true);
       expect(model.hasActiveSessions, true);
+      expect(model.directoryCacheBudget.directories, 0);
+      expect(
+        source.directories,
+        isEmpty,
+        reason: 'an uncertain protocol close must not retain UI-only metadata',
+      );
       await model.retryRetiringSessions();
       expect(model.hasRetiringSessions, false);
       expect(backend.closes, 2);

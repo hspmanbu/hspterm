@@ -4,6 +4,65 @@ import 'package:hspterm/workbench/directory_cache.dart';
 import 'package:hspterm/workbench/directory_reader.dart';
 
 void main() {
+  test('shared budget evicts old listings across sessions without truncating current ones', () {
+    final budget = DirectoryCacheBudget(maxEstimatedBytes: 100);
+    final a = DirectoryCache({}, sharedBudget: budget);
+    final b = DirectoryCache({}, sharedBudget: budget);
+    a.store(LoadedDirectory('/old', [], 35));
+    final current = [DemoFile('/current/file', 'file')];
+    a.store(LoadedDirectory('/current', current, 35));
+    b.store(LoadedDirectory('/current', [], 35));
+    expect(a.files.keys, ['/current']);
+    expect(identical(a.files['/current'], current), true);
+    expect(b.files.keys, ['/current']);
+    expect(budget.estimatedBytes, 70);
+    expect(budget.directories, 2);
+    a.clear();
+    expect(budget.estimatedBytes, 35);
+    b.clear();
+    expect(budget.estimatedBytes, 0);
+    expect(budget.directories, 0);
+  });
+
+  test(
+    'cache-hit navigation pins the selected directory and updates global LRU',
+    () {
+      final budget = DirectoryCacheBudget(maxEstimatedBytes: 90);
+      final a = DirectoryCache({}, sharedBudget: budget);
+      final b = DirectoryCache({}, sharedBudget: budget);
+      a.store(LoadedDirectory('/a1', [], 20));
+      a.store(LoadedDirectory('/a2', [], 20));
+      b.store(LoadedDirectory('/b1', [], 20));
+      expect(a.activate('/a1'), true);
+      b.store(LoadedDirectory('/b2', [], 40));
+      expect(a.files.keys, ['/a1']);
+      expect(a.activate('/a2'), false);
+      expect(budget.estimatedBytes, 80);
+    },
+  );
+
+  test('oversized current listings survive and yield after navigation', () {
+    final budget = DirectoryCacheBudget(maxEstimatedBytes: 100);
+    final a = DirectoryCache({}, sharedBudget: budget);
+    final b = DirectoryCache({}, sharedBudget: budget);
+    a.store(
+      LoadedDirectory(
+        '/large-a',
+        List.generate(100, (i) => DemoFile('$i', '$i')),
+        75,
+      ),
+    );
+    b.store(LoadedDirectory('/large-b', [], 75));
+    expect(budget.estimatedBytes, 150);
+    expect(a.files['/large-a'], hasLength(100));
+    a.store(LoadedDirectory('/small', [], 5));
+    expect(a.files.keys, ['/small']);
+    expect(b.files.keys, ['/large-b']);
+    expect(budget.estimatedBytes, 80);
+    b.remove('/large-b');
+    b.remove('/large-b');
+    expect(budget.estimatedBytes, 5);
+  });
   test('metadata weight evicts old directories before the count ceiling', () {
     final files = <String, List<DemoFile>>{};
     final cache = DirectoryCache(files, maxEstimatedBytes: 100);

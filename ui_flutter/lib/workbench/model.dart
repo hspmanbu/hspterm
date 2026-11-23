@@ -118,6 +118,7 @@ class LiveTerminalSession extends TerminalSession {
     super.host,
     TerminalBackend backend, {
     this.preferenceScope,
+    this.directoryCacheBudget,
   }) : controller = TerminalController(backend),
        super(disconnected: true) {
     path = '.';
@@ -127,6 +128,7 @@ class LiveTerminalSession extends TerminalSession {
   }
   final TerminalController controller;
   final String? preferenceScope;
+  final DirectoryCacheBudget? directoryCacheBudget;
   RemoteInspectionController? _inspection;
   RemoteInspectionController get inspection =>
       _inspection ??= RemoteInspectionController(
@@ -176,7 +178,10 @@ class LiveTerminalSession extends TerminalSession {
   // be observed by in-flight locate/follow requests.
   int directoryPublishVersion = 0;
   int followedDirectoryVersion = -1;
-  late final directoryCache = DirectoryCache(directories);
+  late final directoryCache = DirectoryCache(
+    directories,
+    sharedBudget: directoryCacheBudget,
+  );
   @override
   bool get isMock => false;
   @override
@@ -272,6 +277,7 @@ Future<void> _persistSftpColumns(String hostId, SftpColumnLayout layout) =>
     );
 
 class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
+  final directoryCacheBudget = DirectoryCacheBudget();
   final imageUploads = <ImageUploadTask>[];
   final imageUploadRevision = ValueNotifier<int>(0);
   void clearFinishedImageUploads() {
@@ -847,6 +853,9 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   bool get hasRetiringSessions => _retiringSessions.isNotEmpty;
 
   Future<void> _retireDetachedSession(LiveTerminalSession source) {
+    // UI-only metadata cannot be needed by retiring protocol/file workers.
+    // Also unregister all entries from the shared budget on a failed close.
+    source.directoryCache.clear();
     if (_remoteFileClipboards.remove(source.id) != null) _clipboardRevision++;
     final existing = _retirementWork[source];
     if (existing != null) return existing;
@@ -1964,7 +1973,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
     }
     final id = host.id, epoch = _catalogEpoch;
     _track(
-      rust.recordRecentHost(hostId: id).then<void>((ids) {
+      Future.sync(() => rust.recordRecentHost(hostId: id)).then<void>((ids) {
         if (_disposed || _shutdown != null || epoch != _catalogEpoch) return;
         recent
           ..clear()
@@ -1984,6 +1993,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         host.snapshot(),
         backendFactory(),
         preferenceScope: _catalogScope,
+        directoryCacheBudget: directoryCacheBudget,
       );
   @override
   void openHost(DemoHost host) => _openHost(host);
@@ -2746,6 +2756,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         s.forward.clear();
       }
       s.path = path;
+      s.directoryCache.activate(path);
       s.directoryPublishVersion++;
       AppRunLog.instance.event(
         AppLogEvent.sftpDirectoryCacheHit,
@@ -3132,6 +3143,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
         );
         await Future.wait(
           sessions.cast<LiveTerminalSession>().map((s) {
+            s.directoryCache.clear();
             s.clearTemporaryInput();
             return s.stopInspection().whenComplete(s.controller.shutdown);
           }),
