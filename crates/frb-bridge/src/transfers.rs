@@ -272,7 +272,10 @@ fn view(job: &Job) -> TransferTaskView {
             })
             .map(|s| s.total),
         current: data.current.clone(),
-        active_files: Some(data.active_files.clone()),
+        // No children means no payload, not a fresh empty Dart List on every
+        // poll. Apart from saving decoding, immutable ended tasks then compare
+        // equal through the generated DTO equality instead of list identity.
+        active_files: (!data.active_files.is_empty()).then(|| data.active_files.clone()),
         error: h.error.clone(),
     }
 }

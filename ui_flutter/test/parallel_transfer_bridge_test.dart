@@ -87,7 +87,7 @@ void main() {
       await rust.stopTransfer(taskId: id, cancel: false);
       final paused = await waitTask(id, (t) => !t.busy);
       expect(paused.state, 'Paused', reason: paused.error);
-      expect(paused.activeFiles, isEmpty);
+      expect(paused.activeFiles, isNull);
       expect(paused.acknowledged, greaterThanOrEqualTo(active.acknowledged));
       await rust.saveTransferPreferences(
         value: const jobs.TransferPreferences(
@@ -117,7 +117,7 @@ void main() {
         'Failed',
         reason: 'the last journal deletion is intentionally rejected',
       );
-      expect(done.activeFiles, isEmpty);
+      expect(done.activeFiles, isNull);
       for (var i = 0; i < 4; i++) {
         expect(await File('${target.path}/file-$i.bin').readAsBytes(), bytes);
       }

@@ -87,14 +87,14 @@ void main() {
       await rust.stopRemoteCopy(taskId: id, cancel: false);
       final paused = await remoteTask(id, (t) => !t.busy);
       expect(paused.state, 'Paused', reason: paused.error);
-      expect(paused.activeFiles, isEmpty);
+      expect(paused.activeFiles, isNull);
       expect(paused.acknowledged, greaterThanOrEqualTo(active.acknowledged));
       await rust.unlockVault(path: vault, password: password);
       final restored = (await rust.listRemoteCopies()).singleWhere(
         (t) => t.id == id,
       );
       expect(restored.state, 'Paused');
-      expect(restored.activeFiles, isEmpty);
+      expect(restored.activeFiles, isNull);
       expect(restored.terminalId, isNull);
       await rust.saveTransferPreferences(
         value: const jobs.TransferPreferences(
@@ -113,7 +113,7 @@ void main() {
       );
       final done = await remoteTask(id, (t) => !t.busy);
       expect(done.state, 'Complete', reason: done.error);
-      expect(done.activeFiles, isEmpty);
+      expect(done.activeFiles, isNull);
       for (var i = 0; i < 5; i++) {
         expect(
           await File('${target.path}/file-$i 中文.bin').readAsBytes(),

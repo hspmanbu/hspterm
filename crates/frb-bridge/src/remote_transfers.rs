@@ -451,7 +451,7 @@ fn view(job: &CopyJob) -> TransferTaskView {
             .filter(|s| s.total_known && h.state != State::Scanning)
             .map(|s| s.total),
         current: d.current.clone(),
-        active_files: Some(d.active_files.clone()),
+        active_files: (!d.active_files.is_empty()).then(|| d.active_files.clone()),
         error: h.error.clone(),
     }
 }
@@ -1300,6 +1300,11 @@ async fn run(
     // jobs. Removing a UI row must never erase their only recovery inventory.
     if h.state.ended() && !retain_checkpoint(&h, plan.as_ref()) && j.io_empty() {
         remove(&id)?;
+        // The complete manifest has finished and no staging/recovery journal
+        // remains. Queue history needs aggregate stats and root paths, not
+        // every admission path (or its Vec capacity). Failed/unknown work
+        // deliberately keeps the full inventory in the branch below.
+        h.entries = Vec::new();
     } else {
         save(&h, plan.as_ref(), None)?;
     }

@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hspterm/src/rust/api.dart' as rust;
+import 'package:hspterm/src/rust/remote_transfers.dart'
+    show RemoteCopyBatchEntry;
 import 'package:hspterm/terminal/backend.dart';
 import 'package:hspterm/workbench/model.dart';
 
@@ -64,6 +66,49 @@ void main() {
           hasLength(66),
         );
         expect(source.connected && target.connected, true);
+        final second = File('${a.directory.path}/second.bin');
+        await second.writeAsBytes([3, 5, 8]);
+        final batch = await rust.enqueueRemoteCopyBatch(
+          sourceId: source.id!,
+          targetId: target.id!,
+          entries: [
+            RemoteCopyBatchEntry(
+              sourcePath: input.path,
+              destinationPath: '${b.directory.path}/batch-a.bin',
+            ),
+            RemoteCopyBatchEntry(
+              sourcePath: second.path,
+              destinationPath: '${b.directory.path}/batch-b.bin',
+            ),
+          ],
+          allowMemoryRelay: false,
+          allowDirect: true,
+          expectedSourceGeneration: source.generation,
+          expectedTargetGeneration: target.generation,
+        );
+        final completedBatch = await remoteTask(batch, (t) => !t.busy);
+        expect(completedBatch.state, 'Complete', reason: completedBatch.error);
+        expect(completedBatch.files, 2);
+        // Completion counts include the synthetic batch root directory.
+        expect(completedBatch.directories, 1);
+        expect(completedBatch.completed, 3);
+        expect(completedBatch.remoteTransport, 'direct');
+        final snapshot = await rust.listRemoteCopies();
+        expect(
+          await rust.listRemoteCopies(),
+          equals(snapshot),
+          reason: 'unchanged completed DTOs must be value-equal across polls',
+        );
+        expect(await File('${b.directory.path}/batch-a.bin').readAsBytes(), [
+          0,
+          127,
+          255,
+        ]);
+        expect(await File('${b.directory.path}/batch-b.bin').readAsBytes(), [
+          3,
+          5,
+          8,
+        ]);
         await rust.clearEndedRemoteCopies();
       } finally {
         await model.shutdown();
