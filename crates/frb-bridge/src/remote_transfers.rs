@@ -164,6 +164,16 @@ impl CopyJob {
             tokio::time::timeout(Duration::from_secs(2), route.wait_idle())
                 .await
                 .context("直传子通道收尾未确认；保留原任务，请先断开原SSH再继续")?;
+            // supervise owns this job's only attempt. Once its real workers
+            // are idle, retain display metadata rather than a live connector,
+            // credential lease and signing worker for every ended queue row.
+            // An unconfirmed close above deliberately leaves the owner intact.
+            // Match view's data -> direct lock order.
+            let mut data = self.data.lock();
+            if data.transport == Some("direct") && route.used_relay() {
+                data.transport = Some("mixed");
+            }
+            self.direct.lock().take();
         }
         Ok(())
     }
