@@ -105,7 +105,8 @@ struct Remembered {
     profile_id: String,
     host: hspterm_ssh_core::HostKey,
     username: String,
-    session: hspterm_ssh_core::tmux::Identity,
+    /// None is an explicitly selected ordinary Shell, not an unknown tmux.
+    session: Option<hspterm_ssh_core::tmux::Identity>,
     readonly: bool,
     lock_size: bool,
     takeover_confirmed: bool,
@@ -314,7 +315,18 @@ impl TmuxRegistry {
             let mut created = None;
             let remembered = if restore {
                 ensure!(p.allow_restore, "一次性覆盖连接不能记忆tmux恢复目标");
-                if let Choice::CreateRemembered { lock_size, .. } = &choice {
+                if matches!(&choice, Choice::Shell) {
+                    Some(Remembered {
+                        vault_scope: v.instance_id().into(),
+                        profile_id: p.profile_id.clone(),
+                        host: p.request.verified_host.clone(),
+                        username: p.request.username.clone(),
+                        session: None,
+                        readonly: false,
+                        lock_size: false,
+                        takeover_confirmed: false,
+                    })
+                } else if let Choice::CreateRemembered { lock_size, .. } = &choice {
                     ensure!(p.request.listing.version.is_some(), "远端tmux版本不可用");
                     created = Some(CreationMemory {
                         vault_scope: v.instance_id().into(),
@@ -351,7 +363,7 @@ impl TmuxRegistry {
                         profile_id: p.profile_id.clone(),
                         host: p.request.verified_host.clone(),
                         username: p.request.username.clone(),
-                        session: session.identity(),
+                        session: Some(session.identity()),
                         readonly: *readonly,
                         lock_size: *lock_size,
                         takeover_confirmed: *takeover_confirmed,
@@ -420,31 +432,33 @@ impl TmuxOwner {
             if memory.owner == self.id {
                 let selected = memory.selected.take().filter(|s| s.owner == self.id);
                 memory.generation = Some(generation);
-                memory.remembered = if let (Some(state), Some(identity), Some(selected)) =
-                    (state, identity, selected)
-                {
-                    if let Some(remembered) = selected.remembered {
-                        (remembered.session == identity
-                            && remembered.readonly == state.readonly
-                            && remembered.lock_size == state.size_locked)
-                            .then_some(remembered)
-                    } else {
-                        selected
-                            .created
-                            .filter(|c| !state.readonly && c.lock_size == state.size_locked)
-                            .map(|c| Remembered {
-                                vault_scope: c.vault_scope,
-                                profile_id: c.profile_id,
-                                host: c.host,
-                                username: c.username,
-                                session: identity,
-                                readonly: false,
-                                lock_size: c.lock_size,
-                                takeover_confirmed: true,
-                            })
+                memory.remembered = match (state, identity, selected) {
+                    (None, None, Some(selected)) => {
+                        selected.remembered.filter(|r| r.session.is_none())
                     }
-                } else {
-                    None
+                    (Some(state), Some(identity), Some(selected)) => {
+                        if let Some(remembered) = selected.remembered {
+                            (remembered.session.as_ref() == Some(&identity)
+                                && remembered.readonly == state.readonly
+                                && remembered.lock_size == state.size_locked)
+                                .then_some(remembered)
+                        } else {
+                            selected
+                                .created
+                                .filter(|c| !state.readonly && c.lock_size == state.size_locked)
+                                .map(|c| Remembered {
+                                    vault_scope: c.vault_scope,
+                                    profile_id: c.profile_id,
+                                    host: c.host,
+                                    username: c.username,
+                                    session: Some(identity),
+                                    readonly: false,
+                                    lock_size: c.lock_size,
+                                    takeover_confirmed: true,
+                                })
+                        }
+                    }
+                    _ => None,
                 };
             }
             self.registry.bind(generation, state);
@@ -484,11 +498,27 @@ impl TmuxOwner {
                     && remembered.profile_id == self.profile_id
                     && remembered.host == request.verified_host
                     && remembered.username == request.username;
-                let session = request
-                    .listing
-                    .sessions
-                    .iter()
-                    .find(|s| s.matches_identity(&remembered.session));
+                if source_matches && remembered.session.is_none() {
+                    // The verified SSH identity still matches the explicit
+                    // Shell choice. A missing tmux/version cannot invalidate
+                    // ordinary Shell restoration, and no tmux is created.
+                    request
+                        .reply
+                        .send(Choice::Shell)
+                        .map_err(|_| anyhow::anyhow!("原Shell恢复请求已取消"))?;
+                    self.registry.memory.lock().selected = Some(Selected {
+                        owner: self.id,
+                        remembered: Some(remembered),
+                        created: None,
+                    });
+                    return Ok(());
+                }
+                let session = request.listing.sessions.iter().find(|s| {
+                    remembered
+                        .session
+                        .as_ref()
+                        .is_some_and(|id| s.matches_identity(id))
+                });
                 if source_matches
                     && request.listing.issue.is_none()
                     && let Some(session) = session
@@ -513,8 +543,7 @@ impl TmuxOwner {
                     });
                     return Ok(());
                 }
-                restore_note =
-                    Some("原记忆tmux目标与当前SSH身份或会话列表不一致；未自动附着，请重新选择。");
+                restore_note = Some("原记忆连接目标与当前SSH身份或会话列表不一致；请重新选择。");
             }
             *pending = Some(TmuxPending {
                 owner: self.id,
@@ -631,7 +660,13 @@ mod tests {
                         hspterm_storage_sync::AuthMethod::Password,
                     );
                     host.id = id.into();
-                    repo.save(host, None)?;
+                    repo.save(
+                        host,
+                        Some(hspterm_storage_sync::Credential {
+                            secret: "synthetic-tmux-fixture".into(),
+                            passphrase: None,
+                        }),
+                    )?;
                 }
             }
             Ok(())
@@ -649,6 +684,74 @@ mod tests {
             lock_size: true,
             ensure_locale: None,
         }
+    }
+    #[tokio::test]
+    async fn ordinary_shell_restore_requires_connected_receipt_and_same_source() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::api::unlock_vault(
+            dir.path()
+                .join("shell-restore.vault")
+                .to_string_lossy()
+                .into_owned(),
+            "synthetic-master".into(),
+        )
+        .await
+        .unwrap();
+        let (session, _events) = ManagedSession::new(Size::new(80, 24).unwrap(), 10).unwrap();
+        let session = Arc::new(session);
+        let verification = Arc::new(Verification::default());
+        let registry = Arc::new(TmuxRegistry::default());
+        let profile = "host-00000000000000000000000000000001";
+        for generation in 1..=3 {
+            let attempt = verification.begin(session.clone()).unwrap();
+            bind_policy(&attempt.scope());
+            let owner = registry
+                .owner(attempt.scope())
+                .for_target(profile.into(), true);
+            let (mut req, reply) = request();
+            // An ordinary Shell never requires a working tmux installation.
+            req.listing.version = None;
+            req.listing.issue = Some(ListingIssue::NotAvailable);
+            owner.install(generation as u32, generation, req).unwrap();
+            if generation <= 2 {
+                // The first answer fails to connect: it must not be remembered.
+                assert!(registry.token().is_some());
+                let mut selected = shell();
+                selected.restore_on_reconnect = Some(true);
+                registry
+                    .answer(generation as u32, generation, selected)
+                    .unwrap();
+                assert!(!registry.restore_enabled(generation).unwrap());
+            } else {
+                assert!(registry.token().is_none());
+            }
+            assert!(matches!(reply.await.unwrap(), Choice::Shell));
+            if generation > 1 {
+                owner.bind(generation, None, None);
+                assert!(registry.restore_enabled(generation).unwrap());
+            }
+            drop(owner);
+            drop(attempt);
+        }
+        // A changed verified host must ask again, not replay the Shell choice.
+        let attempt = verification.begin(session.clone()).unwrap();
+        bind_policy(&attempt.scope());
+        let owner = registry
+            .owner(attempt.scope())
+            .for_target(profile.into(), true);
+        let (mut req, reply) = request();
+        req.verified_host.sha256 = "different-synthetic-fingerprint".into();
+        owner.install(4, 4, req).unwrap();
+        assert_eq!(registry.token(), Some((4, 4)));
+        registry.answer(4, 4, shell()).unwrap();
+        assert!(matches!(reply.await.unwrap(), Choice::Shell));
+        owner.bind(4, None, None);
+        assert!(!registry.restore_enabled(4).unwrap());
+        registry.forget_restore(4).unwrap();
+        drop(owner);
+        drop(attempt);
+        session.shutdown();
+        session.wait_closed().await;
     }
     #[tokio::test]
     async fn new_session_is_remembered_only_after_actual_creation_identity_receipt() {

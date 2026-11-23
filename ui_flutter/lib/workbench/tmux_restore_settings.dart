@@ -28,11 +28,11 @@ Future<void> showTmuxRestoreSettings(
       context: context,
       builder: (ctx) => AlertDialog(
         scrollable: true,
-        title: const Text('当前终端的 tmux 重连恢复'),
+        title: const Text('当前终端的重连恢复'),
         content: Text(
           enabled
-              ? '此终端已记忆一个经过身份验证的 tmux 附着选择。关闭恢复只影响以后手动重连，不断开当前 SSH 或退出 tmux。'
-              : '此终端没有启用 tmux 重连恢复。可在下次 tmux 会话选择中勾选恢复；新终端和一次性覆盖连接不继承其他终端的记忆。',
+              ? '此终端已记忆经过身份验证的普通Shell或tmux选择。关闭恢复仅影响下次重连，不断开当前SSH或退出tmux。'
+              : '此终端没有启用重连恢复。可在下次连接选择中勾选；新终端和一次性覆盖连接不继承其他终端的记忆。',
         ),
         actions: [
           TextButton(
@@ -54,13 +54,13 @@ Future<void> showTmuxRestoreSettings(
     if (context.mounted && current()) {
       showAppNotice(
         context,
-        '已关闭此终端的 tmux 重连恢复；当前会话保持。',
+        '已关闭此终端的重连恢复；当前会话保持。',
         level: AppNoticeLevel.success,
       );
     }
   } catch (_) {
     if (context.mounted && current()) {
-      model.reportOperation('无法确认当前 tmux 恢复设置，请重新读取；没有新建或断开连接。');
+      model.reportOperation('无法确认当前恢复设置，请重新读取；没有新建或断开连接。');
     }
   }
 }

@@ -203,14 +203,18 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
                         validTmuxName(value ?? '') ? null : '请填写有效名称（不含首尾空格）',
                   ),
                 ),
-              if (p.restoreAvailable == true && kind != 1)
+              if (p.restoreAvailable == true)
                 CheckboxListTile(
                   key: const ValueKey('tmux-restore-on-reconnect'),
                   contentPadding: EdgeInsets.zero,
                   dense: true,
-                  title: const Text('本终端手动重连时恢复此 tmux 会话'),
+                  title: Text(
+                    kind == 1 ? '本会话重连恢复普通Shell' : '本终端手动重连时恢复此 tmux 会话',
+                  ),
                   subtitle: Text(
-                    kind == 3 && readonly
+                    kind == 1
+                        ? '仅对当前终端标签生效，关闭标签后失效；重连时不再询问tmux，不修改主机设置。'
+                        : kind == 3 && readonly
                         ? '仅保留到终端关闭；每次重新验证 SSH 指纹及会话身份，沿用只读和尺寸锁。仍需手动点击重新连接。'
                         : '仅保留到终端关闭；手动重连将接管原会话，分离其他客户端。',
                   ),
@@ -266,7 +270,7 @@ class _TmuxChoiceState extends State<_TmuxChoice> {
                   Navigator.pop(
                     context,
                     tmx.TmuxSelection(
-                      restoreOnReconnect: kind != 1 && restore,
+                      restoreOnReconnect: restore,
                       kind: kind,
                       name: kind == 2 ? name.text : null,
                       sessionId: kind == 3 ? session : null,

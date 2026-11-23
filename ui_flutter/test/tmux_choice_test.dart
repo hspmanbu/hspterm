@@ -28,6 +28,72 @@ tmx.TmuxPrompt prompt({
   ],
 );
 void main() {
+  for (final available in [false, true]) {
+    testWidgets(
+      'ordinary Shell restore is explicit and session-scoped (available=$available)',
+      (tester) async {
+        tester.view.physicalSize = const Size(1000, 1100);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final s = LiveTerminalSession(
+          'source',
+          DemoHost('h', 'Fixture', 'example.invalid', 'g'),
+          FakeBackend(),
+        );
+        s.controller
+          ..id = 1
+          ..generation = 7
+          ..phase = 'Connecting';
+        tmx.TmuxSelection? selected;
+        try {
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () async => selected = await showTmuxChoice(
+                    context,
+                    s.controller,
+                    prompt(restoreAvailable: available),
+                  ),
+                  child: const Text('choose'),
+                ),
+              ),
+            ),
+          );
+          await tester.tap(find.text('choose'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('tmux-kind')));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('明确改用普通 SSH Shell').last);
+          await tester.pumpAndSettle();
+          final restore = find.byKey(
+            const ValueKey('tmux-restore-on-reconnect'),
+          );
+          if (available) {
+            expect(find.text('本会话重连恢复普通Shell'), findsOneWidget);
+            expect(tester.widget<CheckboxListTile>(restore).value, false);
+            await tester.ensureVisible(restore);
+            await tester.tap(restore);
+            await tester.pump();
+          } else {
+            expect(restore, findsNothing);
+          }
+          await tester.tap(find.byKey(const ValueKey('tmux-confirm')));
+          await tester.pumpAndSettle();
+          expect(selected!.kind, 1);
+          expect(selected!.restoreOnReconnect, available);
+          expect(selected!.sessionId, null);
+          expect(selected!.ensureLocale, false);
+          expect(selected!.lockSize, false);
+        } finally {
+          await tester.pumpWidget(const SizedBox());
+          await s.controller.shutdown();
+          s.controller.dispose();
+        }
+      },
+    );
+  }
   for (final readonly in [false, true]) {
     testWidgets(
       'host readonly default=$readonly is shown without takeover consent',
