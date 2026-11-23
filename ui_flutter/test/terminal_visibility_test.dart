@@ -1,10 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hspterm/src/rust/api.dart' as rust;
 import 'package:hspterm/terminal/controller.dart';
+import 'package:hspterm/terminal/view.dart';
 
 import 'support/fake_backend.dart';
+import 'support/terminal_cleanup.dart';
 
 class DelayedFrame extends FakeBackend {
   final reply = Completer<rust.RenderFrame?>();
@@ -27,6 +30,49 @@ class DelayedHide extends FakeBackend {
 }
 
 void main() {
+  testWidgets(
+    'hidden views release drawing caches and restore the unchanged grid',
+    (tester) async {
+      final c = TerminalController(FakeBackend());
+      final key = GlobalKey<TerminalViewState>();
+      await c.start();
+      c.applyFrame(fixture());
+      final text = c.rows.first.map((cell) => cell.text).join();
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: TerminalView(key: key, controller: c),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(key.currentState!.debugCacheStats['glyphs'], greaterThan(0));
+        key.currentState!.didChangeAppLifecycleState(
+          AppLifecycleState.inactive,
+        );
+        await tester.pumpAndSettle();
+        expect(key.currentState!.debugCacheStats['glyphs'], greaterThan(0));
+        key.currentState!.didChangeAppLifecycleState(AppLifecycleState.hidden);
+        await tester.pumpAndSettle();
+        expect(key.currentState!.debugCacheStats['glyphs'], 0);
+        expect(key.currentState!.debugCacheStats['row_pictures'], 0);
+        expect(c.rows.first.map((cell) => cell.text).join(), text);
+        key.currentState!.didChangeAppLifecycleState(AppLifecycleState.resumed);
+        await tester.pumpAndSettle();
+        expect(key.currentState!.debugCacheStats['glyphs'], greaterThan(0));
+        expect(c.rows.first.map((cell) => cell.text).join(), text);
+        expect(
+          c.frameCount,
+          1,
+          reason: 'cache recovery does not require another terminal frame',
+        );
+      } finally {
+        await tester.pumpWidget(const SizedBox());
+        await closeTerminal(tester, c);
+      }
+    },
+  );
   test(
     'hiding waits for an in-flight delta without discarding its rows',
     () async {

@@ -312,6 +312,11 @@ class TerminalViewState extends State<TerminalView>
   }
 
   void _changed() {
+    // Hidden terminals keep their protocol grid/history in the controller,
+    // not native Paragraph/Picture caches. The controller repaint listener
+    // rebuilds these from the same cells when visibility returns. Desktop
+    // focus loss is still visible and must never take this path.
+    if (!c.visible) _cache.clear();
     if (c.error == null) _shownOperationError = null;
     if (c.connected && c.error != null && c.error != _shownOperationError) {
       final message = c.error!;
@@ -780,6 +785,7 @@ class TerminalViewState extends State<TerminalView>
       if (c >= cells.length) c = cells.length - 1;
       return cells[c].flags & 64 != 0 && c > 0 ? c - 1 : c;
     }
+
     final target = snap(cell.x);
     final cursor = snap(frame.cursorColumn);
     var steps = 0;

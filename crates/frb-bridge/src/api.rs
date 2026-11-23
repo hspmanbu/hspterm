@@ -1364,17 +1364,20 @@ pub async fn take_frame(id: u32) -> Result<Option<RenderFrame>> {
                 .clone()
                 .filter(|index| index.revision() == snapshot.content_revision);
             let mut previous_copy = entry.previous.lock();
-            let mut frame = crate::frame::delta(previous_copy.as_ref(), &snapshot, &fingerprint);
-            if let Some(runtime) = entry.display.lock().as_ref() {
+            let decorations = entry.display.lock().as_ref().map(|runtime| {
                 let config = runtime.decorator.config();
-                frame.same_word_enabled = Some(
-                    config.enabled
-                        && config.same_word
-                        && (!snapshot.alternate_screen || config.allow_in_alternate_screen),
-                );
-                frame.same_word_case_sensitive = Some(config.same_word_case_sensitive);
-                let changed = frame.changed_rows.iter().map(|r| r.index).collect();
+                let enabled = config.enabled
+                    && config.same_word
+                    && (!snapshot.alternate_screen || config.allow_in_alternate_screen);
+                let changed =
+                    crate::frame::changed_rows(previous_copy.as_ref(), &fingerprint).collect();
                 let decorated = runtime.decorator.decorate_rows(&snapshot, Some(&changed));
+                (enabled, config.same_word_case_sensitive, decorated)
+            });
+            let mut frame = crate::frame::delta(previous_copy.as_ref(), snapshot, &fingerprint);
+            if let Some((enabled, case_sensitive, decorated)) = decorations {
+                frame.same_word_enabled = Some(enabled);
+                frame.same_word_case_sensitive = Some(case_sensitive);
                 frame.decorations_limited = Some(decorated.limited);
                 for d in decorated.cells {
                     if let Ok(index) = frame.changed_rows.binary_search_by_key(&d.row, |r| r.index)
@@ -1396,13 +1399,10 @@ pub async fn take_frame(id: u32) -> Result<Option<RenderFrame>> {
             }
             if let Some(search) = search {
                 frame.search_revision = Some(search.revision());
-                let first = snapshot.history_lines - snapshot.display_offset;
-                for hit in search.visible_hits(first, snapshot.size.rows as usize)? {
+                let first = (frame.history_lines - frame.display_offset) as usize;
+                for hit in search.visible_hits(first, frame.rows as usize)? {
                     for row in hit.start.row.max(first as u32)
-                        ..=hit
-                            .end
-                            .row
-                            .min((first + snapshot.size.rows as usize - 1) as u32)
+                        ..=hit.end.row.min((first + frame.rows as usize - 1) as u32)
                     {
                         let start = if row == hit.start.row {
                             hit.start.column
@@ -1412,7 +1412,7 @@ pub async fn take_frame(id: u32) -> Result<Option<RenderFrame>> {
                         let end = if row == hit.end.row {
                             hit.end.column
                         } else {
-                            snapshot.size.columns
+                            frame.columns
                         };
                         if end <= start {
                             continue;
@@ -1441,9 +1441,7 @@ pub async fn take_frame(id: u32) -> Result<Option<RenderFrame>> {
             entry
                 .rows_sent
                 .fetch_add(frame.changed_rows.len() as u64, Ordering::Relaxed);
-            entry
-                .last_revision
-                .store(snapshot.revision, Ordering::Release);
+            entry.last_revision.store(frame.revision, Ordering::Release);
             *previous_copy = Some(fingerprint);
             Ok(Some(frame))
         })();
