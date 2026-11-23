@@ -446,7 +446,11 @@ fn record_at(
         return Ok(false);
     }
     let stamp = Stamp::next(journal.clock.as_ref(), &journal.actor, now).map_err(storage)?;
+    let aliases_raw = row(tx, key, super::reconciliation::IDENTITIES, 2 * 1024 * 1024)?;
+    let aliases = super::reconciliation::identity_map(aliases_raw.as_deref().map(Vec::as_slice))
+        .map_err(storage)?;
     for id in units {
+        let id = aliases.get(&id).cloned().unwrap_or(id);
         if !projection::allowed_id(&id) {
             return Err(StorageError::Format);
         }

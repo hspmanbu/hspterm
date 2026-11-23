@@ -9,6 +9,9 @@ mod envelope;
 mod exchange;
 pub mod journal;
 mod projection;
+pub(super) mod reconciliation;
+mod snapshots;
+pub use snapshots::SnapshotInfo;
 mod references;
 pub use references::{ReferenceChoice, ReferenceSelection, ReferenceSide};
 pub mod settings;
@@ -171,6 +174,7 @@ pub struct Document {
     version: u32,
     collection: String,
     items: Vec<Item>,
+    snapshots: Vec<snapshots::HistoricalSnapshot>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -179,6 +183,8 @@ struct WireDocument {
     collection: String,
     #[serde(deserialize_with = "bounded_items")]
     items: Vec<Item>,
+    #[serde(default, deserialize_with = "snapshots::bounded_history")]
+    snapshots: Vec<snapshots::HistoricalSnapshot>,
 }
 fn bounded_items<'de, D: serde::Deserializer<'de>>(
     d: D,
@@ -213,6 +219,7 @@ impl WireDocument {
             version: self.version,
             collection: self.collection,
             items: self.items,
+            snapshots: self.snapshots,
         }
     }
 }
@@ -221,6 +228,8 @@ struct DocumentRef<'a> {
     version: u32,
     collection: &'a str,
     items: &'a [Item],
+    #[serde(skip_serializing_if = "<[snapshots::HistoricalSnapshot]>::is_empty")]
+    snapshots: &'a [snapshots::HistoricalSnapshot],
 }
 #[derive(Clone, Default, Serialize)]
 pub struct MergeSummary {
@@ -248,9 +257,10 @@ pub enum Divergence {
 impl Document {
     fn serializable(&self) -> DocumentRef<'_> {
         DocumentRef {
-            version: self.version,
+            version: if self.snapshots.is_empty() { 1 } else { 2 },
             collection: &self.collection,
             items: &self.items,
+            snapshots: &self.snapshots,
         }
     }
     pub fn empty(collection: &str) -> Result<Self> {
@@ -261,6 +271,7 @@ impl Document {
             version: 1,
             collection: collection.into(),
             items: vec![],
+            snapshots: vec![],
         })
     }
     pub fn collection(&self) -> &str {
@@ -270,9 +281,10 @@ impl Document {
         self.items.iter().map(|i| (i.id.as_str(), i)).collect()
     }
     fn validate(&self, now: u64) -> Result<()> {
-        if self.version != 1 || !opaque(&self.collection) {
+        if !matches!(self.version, 1 | 2) || !opaque(&self.collection) {
             return Err(SyncError::Invalid);
         }
+        self.validate_snapshots(now)?;
         if self.items.len() > MAX_ITEMS {
             return Err(SyncError::Capacity);
         }
@@ -401,6 +413,7 @@ impl Document {
             version: 1,
             collection: self.collection.clone(),
             items,
+            snapshots: self.snapshots.clone(),
         };
         next.validate(now)?;
         Ok(next)
@@ -460,6 +473,31 @@ impl Document {
                     records: BTreeMap::from([(super::HISTORY.into(), merged.to_vec())]),
                 });
                 item
+            } else if id == "sftp-bookmarks-v1" {
+                let (value, conflict) = reconciliation::merge_bookmarks(
+                    left.and_then(|i| i.value.as_ref()),
+                    right.and_then(|i| i.value.as_ref()),
+                    common.and_then(|i| i.value.as_ref()),
+                    divergence,
+                )?;
+                if conflict {
+                    summary.conflicts += 1;
+                    if divergence == Divergence::Unresolved {
+                        summary.diverged.push(id.into());
+                    }
+                }
+                let stamp = left
+                    .into_iter()
+                    .chain(right)
+                    .map(|i| &i.stamp)
+                    .max()
+                    .ok_or(SyncError::Invalid)?
+                    .clone();
+                Item {
+                    id: id.into(),
+                    stamp,
+                    value,
+                }
             } else {
                 match (left, right) {
                     (Some(a), Some(b)) => {
@@ -528,6 +566,7 @@ impl Document {
             version: 1,
             collection: self.collection.clone(),
             items,
+            snapshots: remote.snapshots.clone(),
         };
         Ok((merged, summary))
     }
@@ -567,6 +606,7 @@ impl Document {
             version: 1,
             collection: collection.into(),
             items: self.items.clone(),
+            snapshots: self.snapshots.clone(),
         })
     }
 }
@@ -801,9 +841,10 @@ impl Baseline {
         {
             return Err(SyncError::Changed);
         }
-        let incoming = merged.projection().snapshot()?;
         let local = projection::Projection::from_snapshot(&current)?;
-        let remote = merged.projection();
+        let mut remote = merged.projection();
+        let identities = remote.localize(vault, &local)?;
+        let incoming = remote.snapshot()?;
         // Only changed units get the restore path's independent credential IDs;
         // unchanged hosts retain their exact local records and active identity.
         let ids: std::collections::BTreeSet<_> = local
@@ -846,6 +887,7 @@ impl Baseline {
                     })
                     .transpose()?,
                 proposal.settings.rows(),
+                identities,
             ),
         })
     }

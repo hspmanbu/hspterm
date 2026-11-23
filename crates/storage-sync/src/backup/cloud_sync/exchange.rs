@@ -17,9 +17,12 @@ pub struct Exchange {
     pub(super) original: Document,
     /// Last locally applied baseline: the shared three-way merge ancestor.
     pub(super) base: Document,
-    remote: Option<Document>,
-    etag: Option<EntityTag>,
+    pub(super) remote: Option<Document>,
+    pub(super) remote_prior: Option<Document>,
+    local_choice: Option<Document>,
+    pub(super) etag: Option<EntityTag>,
     reads: u8,
+    readdress: bool,
     pub(super) resolution: Divergence,
     pub(super) actor: String,
 }
@@ -62,6 +65,9 @@ pub struct Acknowledged {
     summary: MergeSummary,
 }
 impl Acknowledged {
+    pub fn snapshots(&self) -> Vec<SnapshotInfo> {
+        self.document.snapshots()
+    }
     pub fn summary(&self) -> MergeSummary {
         self.summary.clone()
     }
@@ -74,8 +80,11 @@ impl Exchange {
             original: proposal.document.clone(),
             base: base.clone(),
             remote: None,
+            remote_prior: None,
+            local_choice: None,
             etag: None,
             reads: 0,
+            readdress: false,
             resolution: Divergence::Unresolved,
             actor: proposal.actor.clone(),
         }
@@ -114,7 +123,9 @@ impl Exchange {
                 }))
             }
             RemoteRead::Present { etag, ciphertext } => {
-                let remote =
+                self.readdress = Document::header_collection(&ciphertext).as_deref()
+                    != Some(self.local.collection());
+                let mut remote =
                     match Document::decrypt(&ciphertext, password, self.local.collection(), now) {
                         Ok(remote) => remote,
                         Err(SyncError::Invalid) => {
@@ -129,6 +140,8 @@ impl Exchange {
                         }
                         Err(error) => return Err(error),
                     };
+                (self.remote_prior, self.local_choice) =
+                    self.local.align_hosts(&mut self.base, &mut remote)?;
                 self.remote = Some(remote.clone());
                 self.etag = Some(etag);
                 let etag = self.etag.clone().expect("etag stored before rebuild");
@@ -150,12 +163,12 @@ impl Exchange {
         password: &[u8],
         now: u64,
     ) -> Result<ExchangeStep> {
-        let (merged, summary) =
+        let (mut merged, summary) =
             self.local
                 .merge_candidate(&self.base, remote, now, self.resolution)?;
         match merged.validate(now) {
             Ok(()) => {}
-            Err(SyncError::References) if summary.diverged.is_empty() => {
+            Err(SyncError::References) => {
                 return Ok(ExchangeStep::References(PendingReferences {
                     remote: remote.clone(),
                     etag: etag.clone(),
@@ -164,8 +177,12 @@ impl Exchange {
             }
             Err(error) => return Err(error),
         }
-        let summary = references::summary(&self.original, &merged, summary.conflicts);
-        if merged.encode(now)?.as_slice() == remote.encode(now)?.as_slice() {
+        let mut reviewed = references::summary(&self.original, &merged, summary.conflicts);
+        reviewed.diverged = summary.diverged;
+        let summary = reviewed;
+        let previous = self.remote_prior.as_ref().unwrap_or(remote);
+        merged.retain_previous(previous, now)?;
+        if !self.readdress && merged.encode(now)?.as_slice() == previous.encode(now)?.as_slice() {
             return Ok(ExchangeStep::AlreadyCurrent(Acknowledged {
                 operation: self.operation,
                 document: merged,
@@ -182,9 +199,8 @@ impl Exchange {
             summary,
         }))
     }
-    /// Apply the user's whole-direction choice to EVERY unit modified on both
-    /// sides since the baseline, then recompute the review step. The choice
-    /// stays frozen for later 412 re-reads of the same operation.
+    /// Resolve an ambiguous merge by selecting one complete configuration.
+    /// Later concurrent cloud writes are read again and may need a new choice.
     pub fn resolve_divergence(
         &mut self,
         direction: Divergence,
@@ -198,7 +214,68 @@ impl Exchange {
             (Some(remote), Some(etag)) => (remote, etag),
             _ => return Err(SyncError::Changed),
         };
-        self.resolution = direction;
+        // An explicit overwrite direction selects one complete configuration,
+        // so group/jump/bookmark references cannot be left half merged.
+        let chosen = if direction == Divergence::PreferRemote {
+            remote.clone()
+        } else {
+            self.local_choice
+                .clone()
+                .unwrap_or_else(|| self.local.clone())
+        };
+        let stamp = Stamp::next(
+            self.local
+                .items
+                .iter()
+                .chain(remote.items.iter())
+                .map(|i| &i.stamp)
+                .max(),
+            &self.actor,
+            now,
+        )?;
+        let mut items: BTreeMap<_, _> = chosen
+            .items
+            .into_iter()
+            .map(|i| (i.id.clone(), i))
+            .collect();
+        for item in self.local.items.iter().chain(remote.items.iter()) {
+            items.entry(item.id.clone()).or_insert_with(|| Item {
+                id: item.id.clone(),
+                stamp: stamp.clone(),
+                value: None,
+            });
+        }
+        if let (Some(a), Some(b)) = (
+            self.local
+                .items
+                .iter()
+                .find(|i| i.id == super::super::HISTORY),
+            remote.items.iter().find(|i| i.id == super::super::HISTORY),
+        ) {
+            let history = crate::command_history::merge_sync_payload(
+                projection::history(a)?,
+                projection::history(b)?,
+            )
+            .map_err(|_| SyncError::Invalid)?;
+            if let Some(item) = items.get_mut(super::super::HISTORY) {
+                item.value = Some(Bundle {
+                    records: BTreeMap::from([(super::super::HISTORY.into(), history.to_vec())]),
+                });
+            }
+        }
+        for item in items.values_mut() {
+            item.stamp = stamp.clone();
+        }
+        self.local = Document {
+            version: 2,
+            collection: chosen.collection,
+            items: items.into_values().collect(),
+            snapshots: remote.snapshots.clone(),
+        };
+        self.local.validate(now)?;
+        self.base = remote.clone();
+        self.local_choice = None;
+        self.resolution = Divergence::Unresolved;
         self.rebuild(&remote, &etag, password, now)
     }
 }

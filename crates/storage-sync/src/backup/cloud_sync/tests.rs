@@ -250,7 +250,9 @@ fn two_devices_merge_disjoint_hosts_then_apply_without_a_credential_or_order_res
     let mut a = vault(dir.path(), "a.vault");
     let mut b = vault(dir.path(), "b.vault");
     let x = host(&mut a, "Host A");
-    let y = host(&mut b, "Host B");
+    let mut y = host(&mut b, "Host B");
+    y.address = "different-endpoint.invalid".into();
+    Repository::new(&mut b).save(y.clone(), None).unwrap();
     let ba = Baseline::load(&a, COLLECTION, NOW).unwrap();
     let bb = Baseline::load(&b, COLLECTION, NOW).unwrap();
     let pa = ba.capture_local(&a, NOW).unwrap();
@@ -764,3 +766,6 @@ fn legacy_identifier_first_contact_is_distinguished_adopted_or_reported_by_owner
     .unwrap();
     assert_eq!(migrated.items.len(), legacy.items.len());
 }
+
+#[path = "improvements_tests.rs"]
+mod improvements;

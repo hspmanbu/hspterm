@@ -114,7 +114,9 @@ impl Projection {
         // Do NOT capture a complete backup then remove fonts afterward: that
         // would already have read device paths/font bodies into sync memory.
         let snapshot = Snapshot::capture_kind(vault, false).map_err(backup_error)?;
-        Self::from_snapshot(&snapshot)
+        let mut projection = Self::from_snapshot(&snapshot)?;
+        projection.canonicalize(vault)?;
+        Ok(projection)
     }
     pub fn from_snapshot(snapshot: &Snapshot) -> Result<Self> {
         let mut units = BTreeMap::new();

@@ -247,11 +247,15 @@ impl PreparedRestore {
         next: Bytes,
         journal: Option<(Option<Bytes>, Bytes)>,
         settings: Vec<(String, Option<Bytes>)>,
+        identities: (Option<Bytes>, Bytes),
     ) -> Self {
         // Ordinary synchronization has per-record and ledger CAS. Keep the
         // running Vault scope so a metadata-only ACK does not invalidate every
         // unrelated host-key prompt, Agent consent or open settings form.
         self.next_scope = self.scope.clone();
+        let id = cloud_sync::reconciliation::IDENTITIES.to_owned();
+        self.expected.insert(id.clone(), identities.0);
+        self.candidate.insert(id, identities.1);
         let key = cloud_sync::LEDGER.to_owned();
         self.expected.insert(key.clone(), prior);
         self.candidate.insert(key, next);
@@ -473,6 +477,8 @@ pub fn prepare_restore(
         .map(|(id, raw)| (id.clone(), Some(Arc::clone(raw))))
         .collect();
     expected.insert(CATALOG.into(), original_catalog);
+    let identity_key = cloud_sync::reconciliation::IDENTITIES;
+    expected.insert(identity_key.into(), read_record(vault, identity_key)?);
     for key in GLOBALS.iter().copied().chain(std::iter::once(TYPOGRAPHY)) {
         expected.entry(key.into()).or_insert(None);
     }

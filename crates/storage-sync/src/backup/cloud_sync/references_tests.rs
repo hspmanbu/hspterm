@@ -8,7 +8,7 @@ fn host(v: &mut Vault, name: &str) -> HostRecord {
         .save(
             HostRecord::new(
                 name.into(),
-                "fixture.invalid".into(),
+                format!("{}.fixture.invalid", name.to_ascii_lowercase()),
                 "fixture".into(),
                 AuthMethod::Password,
             ),

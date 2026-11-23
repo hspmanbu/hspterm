@@ -6777,6 +6777,20 @@ pub async fn prepare_configuration_sync(owner: String, operation: String) -> Res
     .await;
     crate::public_errors::finish(outcome)
 }
+/// Restore one authenticated cloud snapshot as a new revision, after explicit
+/// UI confirmation. The original operation/target and final ETag remain bound.
+pub async fn prepare_configuration_sync_snapshot(
+    owner: String,
+    operation: String,
+    snapshot: String,
+) -> Result<String> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        crate::configuration_sync::prepare_snapshot(owner, operation, snapshot).await
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
 pub async fn confirm_configuration_sync(
     owner: String,
     operation: String,
@@ -6829,9 +6843,9 @@ pub async fn resolve_configuration_sync_references(
     .await;
     crate::public_errors::finish(outcome)
 }
-/// Whole-direction choice ("local" keeps this device's version of every unit
-/// modified on both sides; "remote" takes the cloud's) applied to the pending
-/// review before any publication. Metadata only; no candidate body crosses.
+/// Explicit complete-configuration overwrite direction. Shared host IDs and
+/// reference integrity are preserved; command-history deletion knowledge is
+/// merged. No candidate plaintext crosses the bridge.
 pub async fn resolve_configuration_sync_direction(
     owner: String,
     operation: String,

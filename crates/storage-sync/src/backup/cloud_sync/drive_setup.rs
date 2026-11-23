@@ -159,6 +159,7 @@ pub fn stage(
                 value: Some(value),
             })
             .collect(),
+        snapshots: vec![],
     };
     document.validate(now)?;
     let body = Zeroizing::new(document.encrypt(password.as_bytes(), now)?);

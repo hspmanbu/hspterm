@@ -712,6 +712,22 @@ pub(crate) fn restore_payload(
 /// The synchronizer only calls this on authenticated allowlisted documents.
 /// It is the same clear-epoch CRDT used by the local repository, with no write,
 /// logging, remote command collection or unconditional whole-document LWW.
+pub(crate) fn remap_sync_hosts(
+    raw: &[u8],
+    aliases: &BTreeMap<String, String>,
+) -> Result<Zeroizing<Vec<u8>>> {
+    let mut source = Document::decode(raw)?;
+    let original = std::mem::take(&mut source.hosts);
+    let mut result = source.clone();
+    for (id, history) in original {
+        let mut part = source.clone();
+        part.hosts
+            .insert(aliases.get(&id).cloned().unwrap_or(id), history);
+        result = Document::merged(&result, &part)?;
+    }
+    result.encode()
+}
+
 pub(crate) fn merge_sync_payload(a: &[u8], b: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
     Document::merged(&Document::decode(a)?, &Document::decode(b)?)?.encode()
 }

@@ -42,6 +42,7 @@ pub(crate) struct Status {
     phase: &'static str,
     error: Option<&'static str>,
     review: Option<Review>,
+    snapshots: Vec<cloud::SnapshotInfo>,
     commits: u64,
     configuration_updates: u64,
     remote_published: bool,
@@ -74,6 +75,7 @@ struct Workflow {
     exchange: Exchange,
     step: Option<ExchangeStep>,
     review: Option<String>,
+    restore: bool,
 }
 enum Transport {
     WebDav(webdav::WebDav),
@@ -276,6 +278,7 @@ pub(crate) fn open() -> Result<String> {
                 phase: "idle",
                 error: None,
                 review: None,
+                snapshots: vec![],
                 commits: 0,
                 configuration_updates: 0,
                 remote_published: false,
@@ -357,7 +360,10 @@ pub(crate) fn settings_saved(scope: &str, eligible: bool) {
     if let Some(op) = root.operation.lock().clone() {
         op.cancel.cancel();
     }
-    root.emit(|s| s.eligible = eligible);
+    root.emit(|s| {
+        s.eligible = eligible;
+        s.snapshots.clear();
+    });
 }
 pub(crate) fn authorization_changed(
     target: &settings::View,
@@ -482,7 +488,7 @@ fn ensure_source(root: &Owner, op: &Operation, flow: &Workflow) -> Result<()> {
 struct FirstReadMismatch;
 impl std::fmt::Display for FirstReadMismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("云端数据解密失败：同步密码与创建该数据集的设备不一致，未应用任何配置")
+        f.write_str("无法读取云端配置：同步密码不匹配、版本不支持或数据损坏，未修改本机配置")
     }
 }
 impl std::error::Error for FirstReadMismatch {}
@@ -575,7 +581,7 @@ async fn read_step(
     let first_contact =
         flow.baseline.etag().is_none() && matches!(response, cloud::RemoteRead::Present { .. });
     let (r, o) = (root.clone(), op.clone());
-    blocking(lease, move || {
+    let flow = blocking(lease, move || {
         let mut flow = flow;
         r.check(&o)?;
         let adopt_legacy = match legacy_collection {
@@ -603,7 +609,9 @@ async fn read_step(
         ensure_source(&r, &o, &flow)?;
         Ok(flow)
     })
-    .await
+    .await?;
+    root.emit(|s| s.snapshots = flow.exchange.snapshots());
+    Ok(flow)
 }
 fn publish_review(root: &Owner, op: &Operation, mut flow: Workflow) -> Result<()> {
     root.check(op)?;
@@ -729,6 +737,16 @@ async fn prepare_target(
     .await
 }
 pub(crate) async fn prepare(id: String, operation: String) -> Result<String> {
+    prepare_impl(id, operation, None).await
+}
+pub(crate) async fn prepare_snapshot(
+    id: String,
+    operation: String,
+    snapshot: String,
+) -> Result<String> {
+    prepare_impl(id, operation, Some(snapshot)).await
+}
+async fn prepare_impl(id: String, operation: String, snapshot: Option<String>) -> Result<String> {
     let root = owner(&id)?;
     let op = root.operation(&operation)?;
     let lease = acquire(&root, &op)?;
@@ -742,6 +760,16 @@ pub(crate) async fn prepare(id: String, operation: String) -> Result<String> {
     };
     root.emit(|s| s.phase = "reading");
     let result = async {
+        if let Some(id) = &snapshot {
+            ensure!(
+                id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()),
+                "历史快照标识无效"
+            );
+            if !root.status.lock().snapshots.iter().any(|s| s.id == *id) {
+                return Err(cloud::SyncError::Changed.into());
+            }
+        }
+
         let (target, transport) = prepare_target(&root, &op, &lease).await?;
         let (r, o) = (root.clone(), op.clone());
         let flow = blocking(&lease, move || {
@@ -766,6 +794,7 @@ pub(crate) async fn prepare(id: String, operation: String) -> Result<String> {
                 exchange,
                 step: None,
                 review: None,
+                restore: false,
             })
         })
         .await?;
@@ -776,7 +805,21 @@ pub(crate) async fn prepare(id: String, operation: String) -> Result<String> {
         if let (Transport::WebDav(client), None) = (&flow.transport, flow.baseline.etag()) {
             client.ensure_collection(&op.cancel).await?;
         }
-        let flow = read_step(&root, &op, &lease, flow).await?;
+        let mut flow = read_step(&root, &op, &lease, flow).await?;
+        if let Some(snapshot) = snapshot {
+            let (r, o) = (root.clone(), op.clone());
+            flow = blocking(&lease, move || {
+                ensure_source(&r, &o, &flow)?;
+                flow.step = Some(flow.exchange.restore_snapshot(
+                    &snapshot,
+                    flow.target.password(),
+                    cloud::journal::now_millis()?,
+                )?);
+                flow.restore = true;
+                Ok(flow)
+            })
+            .await?;
+        }
         publish_review(&root, &op, flow)?;
         status(&id)
     }
@@ -797,7 +840,7 @@ pub(crate) async fn prepare(id: String, operation: String) -> Result<String> {
     result.map_err(|error| {
         if error.is::<FirstReadMismatch>() {
             return anyhow::anyhow!(
-                "云端数据解密失败：本机同步密码与创建该数据集时的密码不一致，未应用任何配置"
+                "无法读取云端配置：同步密码不匹配、版本不支持或数据损坏，未修改本机配置"
             );
         }
         if error.is::<LegacyCollectionDataset>() {
@@ -807,7 +850,7 @@ pub(crate) async fn prepare(id: String, operation: String) -> Result<String> {
         }
         match error.downcast_ref::<cloud::SyncError>() {
             Some(cloud::SyncError::Invalid) => anyhow::anyhow!(
-                "云端数据解密失败：同步密码与创建该数据集的设备不一致，未应用任何配置"
+                "无法读取云端配置：同步密码不匹配、版本不支持或数据损坏，未修改本机配置"
             ),
             _ => match error.downcast_ref::<webdav::TransportError>() {
                 Some(webdav::TransportError::Directory) => {
@@ -836,6 +879,7 @@ async fn commit(
             crate::api::with_vault(|v| {
                 root.check(&op)?;
                 let source_scope = root.status.lock().vault_scope.clone();
+                let snapshots = acknowledged.snapshots();
                 let plan = flow.baseline.prepare_acknowledged(
                     v,
                     &flow.proposal,
@@ -900,6 +944,7 @@ async fn commit(
                 );
                 state.vault_scope = next_scope;
                 state.phase = "committed";
+                state.snapshots = snapshots;
                 state.error = None;
                 state.review = None;
                 state.commits = state.commits.saturating_add(1);
@@ -969,6 +1014,9 @@ pub(crate) async fn confirm(id: String, operation: String, review: String) -> Re
                 match flow.transport.publish(upload, &op.cancel).await? {
                     webdav::PutResponse::PreconditionFailed => {
                         op.attempting_put.store(false, Ordering::Release);
+                        if flow.restore {
+                            return Err(cloud::SyncError::Changed.into());
+                        }
                         let flow = read_step(&root, &op, &lease, flow).await?;
                         publish_review(&root, &op, flow)?;
                         return status(&id);
@@ -1109,7 +1157,8 @@ pub(crate) async fn resolve_direction(
     let flow = {
         let state = root.status.lock();
         ensure!(
-            state.phase == "review" && state.review.as_ref().is_some_and(|r| r.token == review),
+            matches!(state.phase, "review" | "references")
+                && state.review.as_ref().is_some_and(|r| r.token == review),
             "原同步审阅已失效"
         );
         op.pending

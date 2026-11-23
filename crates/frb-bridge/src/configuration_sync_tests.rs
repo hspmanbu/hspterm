@@ -22,6 +22,7 @@ fn fixture() -> (Arc<Owner>, Arc<Operation>) {
             phase: "reading",
             error: None,
             review: None,
+            snapshots: vec![],
             commits: 0,
             configuration_updates: 0,
             remote_published: false,

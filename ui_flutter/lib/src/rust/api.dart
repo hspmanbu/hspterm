@@ -27,7 +27,7 @@ import 'transfers.dart';
 import 'transfers/explorer.dart';
 import 'transfers/export_cleanup.dart';
 
-// These functions are ignored because they are not marked as `pub`: `agent_connected`, `agent_scope`, `allowed_integration`, `apply_entry_preferences`, `bind_display`, `check_directory_session`, `check_file_generation`, `close_terminal_owned`, `configuration_restored`, `configuration_synchronized`, `connect_terminal_inner`, `connect_terminal_run`, `credential`, `display_sources`, `ensure_command_source`, `entry`, `event`, `history_version`, `integrated_result`, `integration_guard`, `integration_status`, `invalidate_backup_agents`, `invalidate_synchronized_agents`, `key_credential`, `migrate_legacy_profiles`, `modifiers`, `next_id`, `parse_account_lines`, `persist_key_file`, `property_children`, `publish_terminal_preferences`, `record_integration_commands`, `record`, `remember_host_key`, `remote_sftp`, `replace_display`, `retire_suggestions_for`, `retire_suggestions`, `sessions`, `suggestion_context`, `terminal_path_context_revision`, `terminal_path_context`, `tmux_event`, `transfer_agent_registry`, `transfer_connection`, `trust_id`, `unlock_vault_inner`, `validate_remote_path`, `vault`, `with_vault`
+// These functions are ignored because they are not marked as `pub`: `agent_connected`, `agent_scope`, `allowed_integration`, `apply_entry_preferences`, `bind_display`, `check_directory_session`, `check_file_generation`, `close_terminal_owned`, `configuration_restored`, `configuration_synchronized`, `connect_terminal_inner`, `connect_terminal_run`, `credential`, `display_sources`, `ensure_command_source`, `entry`, `event`, `history_version`, `integrated_result`, `integration_guard`, `integration_status`, `invalidate_backup_agents`, `invalidate_synchronized_agents`, `key_credential`, `migrate_legacy_profiles`, `modifiers`, `next_id`, `parse_account_lines`, `persist_key_file`, `property_children`, `publish_terminal_preferences`, `record_integration_commands`, `record`, `remember_host_key`, `remote_sftp`, `replace_display`, `retire_stale_search`, `retire_suggestions_for`, `retire_suggestions`, `sessions`, `suggestion_context`, `terminal_path_context_revision`, `terminal_path_context`, `tmux_event`, `transfer_agent_registry`, `transfer_connection`, `trust_id`, `unlock_vault_inner`, `validate_remote_path`, `vault`, `with_vault`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DirSizeJob`, `Entry`, `SavedProfile`, `SuggestionProposal`, `SuggestionsCache`, `TerminalCloseState`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `from`, `from`, `from`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`, `default`
@@ -1836,6 +1836,18 @@ Future<String> prepareConfigurationSync({
   operation: operation,
 );
 
+/// Restore one authenticated cloud snapshot as a new revision, after explicit
+/// UI confirmation. The original operation/target and final ETag remain bound.
+Future<String> prepareConfigurationSyncSnapshot({
+  required String owner,
+  required String operation,
+  required String snapshot,
+}) => RustLib.instance.api.crateApiPrepareConfigurationSyncSnapshot(
+  owner: owner,
+  operation: operation,
+  snapshot: snapshot,
+);
+
 Future<String> confirmConfigurationSync({
   required String owner,
   required String operation,
@@ -1879,9 +1891,9 @@ Future<String> resolveConfigurationSyncReferences({
   choices: choices,
 );
 
-/// Whole-direction choice ("local" keeps this device's version of every unit
-/// modified on both sides; "remote" takes the cloud's) applied to the pending
-/// review before any publication. Metadata only; no candidate body crosses.
+/// Explicit complete-configuration overwrite direction. Shared host IDs and
+/// reference integrity are preserved; command-history deletion knowledge is
+/// merged. No candidate plaintext crosses the bridge.
 Future<String> resolveConfigurationSyncDirection({
   required String owner,
   required String operation,
