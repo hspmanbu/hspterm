@@ -17,7 +17,83 @@ class CountedFile extends DemoFile {
   }
 }
 
+class _PublishedSession extends TerminalSession {
+  _PublishedSession(super.id, super.host);
+  int revision = 0;
+  @override
+  int get fileListRevision => revision;
+}
+
 void main() {
+  testWidgets(
+    'published listings reuse sorting across progress rebuilds and invalidate on content or filter changes',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1100, 720);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final m = WorkbenchModel()..demo();
+      final session = _PublishedSession('published', m.focus!.host)
+        ..path = '/fixture';
+      const count = 4096;
+      final files = List.generate(
+        count,
+        (i) => CountedFile(
+          '/fixture/$i',
+          'FILE-${(count - i).toString().padLeft(6, '0')}.txt',
+        ),
+      );
+      session.directories[session.path] = files;
+      Widget app() => MaterialApp(
+        theme: Desk.theme(false),
+        home: Scaffold(
+          body: FilesPanel(model: m, pane: session),
+        ),
+      );
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      CountedFile.reads = 0;
+      for (var i = 0; i < 10; i++) {
+        await tester.pumpWidget(app());
+        await tester.pumpAndSettle();
+      }
+      expect(
+        CountedFile.reads,
+        lessThan(count * 2),
+        reason:
+            'unchanged progress updates must not rescan or resort all names',
+      );
+      files.last.name = 'AAA changed.txt';
+      session.revision++;
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.text('AAA changed.txt'), findsOneWidget);
+      await tester.tap(find.text('AAA changed.txt'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('已选 1'), findsOneWidget);
+      // Same backing list and same length: only the producer revision changes.
+      files[files.length - 1] = CountedFile(
+        '/fixture/replacement',
+        'AAA replacement.txt',
+      );
+      session.revision++;
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.text('AAA replacement.txt'), findsOneWidget);
+      expect(find.textContaining('已选 1'), findsNothing);
+      await tester.tap(find.byTooltip('筛选文件'));
+      await tester.pumpAndSettle();
+      final filter = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.hintText == '筛选当前目录',
+      );
+      await tester.enterText(filter, 'FILE-000002');
+      await tester.pumpAndSettle();
+      expect(find.text('AAA replacement.txt'), findsNothing);
+      expect(find.text('FILE-000002.txt'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      m.dispose();
+    },
+  );
   testWidgets(
     'large SFTP listing sorts once and scrolling only builds visible rows',
     (tester) async {

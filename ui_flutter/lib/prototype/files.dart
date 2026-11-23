@@ -216,6 +216,18 @@ class _FilesPanelState extends State<FilesPanel> {
   int sortColumn = 0;
   bool ascending = true;
   List<DemoFile>? _visible;
+  Object? _listingKey, _visibleKey;
+
+  Object? _currentListingKey() => p.fileListRevision == null
+      ? null
+      : (
+          p,
+          p.path,
+          p.connectionGeneration,
+          p.fileListRevision,
+          p.files,
+          p.files.length,
+        );
   // Stable column identifiers (persisted per host); the canonical order
   // below doubles as the sort-column index mapping.
   static const _columnIds = [
@@ -391,7 +403,8 @@ class _FilesPanelState extends State<FilesPanel> {
       anchor = null;
       editing = null;
       renameError = null;
-    } else {
+    } else if (_currentListingKey() == null ||
+        _currentListingKey() != _listingKey) {
       // An explicit refresh may replace/remove rows in the same directory.
       // Keep valid selections, but never route keys through missing objects.
       final ids = p.files.map((file) => file.id).toSet();
@@ -2277,9 +2290,21 @@ class _FilesPanelState extends State<FilesPanel> {
       _explorerOver = false;
       hoverTarget = null;
     }
-    // One consistent sorted/filtered snapshot per build. Lazy row builders and
-    // scrolling reuse it; the next rebuild observes even in-place Mock edits.
-    _visible = null;
+    // Transfer progress, resource samples and selection changes do not alter
+    // directory content. Keep its sorted reference list until publication or
+    // filter/sort settings change; never cache mutable Mock edits across builds.
+    _listingKey = _currentListingKey();
+    final visibleKey = (
+      _listingKey,
+      hidden,
+      foldersFirst,
+      sortColumn,
+      ascending,
+      _filter.text,
+      _newEntryTail,
+    );
+    if (_listingKey == null || _visibleKey != visibleKey) _visible = null;
+    _visibleKey = visibleKey;
     _trimFolderRegistries();
     // Publish the visible content width so the sidebar grip can cap the
     // panel at its real columns instead of a hardcoded 660px.

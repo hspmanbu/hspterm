@@ -272,6 +272,10 @@ class TerminalSession {
   final entered = <String>[];
   final List<String> back = [], forward = [];
   final Map<String, List<DemoFile>> directories = {};
+
+  /// A producer may supply a revision for complete directory publications.
+  /// Null keeps mutable prototype/third-party models on per-build snapshots.
+  int? get fileListRevision => null;
   List<DemoFile> get files => directories.putIfAbsent(
     path,
     () => [

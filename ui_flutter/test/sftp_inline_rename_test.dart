@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hspterm/prototype/files.dart';
@@ -115,14 +116,23 @@ void main() {
 
     GestureBinding.instance.pointerRouter.addGlobalRoute(route);
     final controller = tester.widget<TextField>(field).controller!;
-    final box = tester.getRect(
-      find.descendant(of: field, matching: find.byType(EditableText)),
+    final editable = find.descendant(
+      of: field,
+      matching: find.byType(EditableText),
+    );
+    final RenderEditable render = tester
+        .state<EditableTextState>(editable)
+        .renderEditable;
+    // Start inside the actual text, not in the wide field's empty right half.
+    // Keep the original 1px moves so the drag recognizer regression remains.
+    final start = render.localToGlobal(
+      render.getLocalRectForCaret(const TextPosition(offset: 4)).center,
     );
     // Slow mouse drag: several 1 px moves. The row drag accepts at 1.0 px
     // while the field's pan selection needs 2.0 px, so a wrapper above the
     // editor would swallow the gesture and freeze the selection.
     final gesture = await tester.startGesture(
-      box.center,
+      start,
       kind: PointerDeviceKind.mouse,
     );
     await tester.pump();

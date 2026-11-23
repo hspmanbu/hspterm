@@ -177,6 +177,8 @@ class LiveTerminalSession extends TerminalSession {
   // sequence) this counts published navigations, so cache-hit navigation can
   // be observed by in-flight locate/follow requests.
   int directoryPublishVersion = 0;
+  @override
+  int get fileListRevision => directoryPublishVersion;
   int followedDirectoryVersion = -1;
   late final directoryCache = DirectoryCache(
     directories,
