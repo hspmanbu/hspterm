@@ -2121,6 +2121,31 @@ async fn record_integration_commands(
     .await?
 }
 
+/// Drop an obsolete search's frozen grid/plaintext even while its view is
+/// hidden. Read the terminal outside the search lock; a replacement index is
+/// protected by Arc identity so an older observation cannot erase a new one.
+fn retire_stale_search(entry: &Entry) {
+    let Some(observed) = entry.search.lock().clone() else {
+        return;
+    };
+    if observed.revision() == entry.session.content_revision() {
+        return;
+    }
+    let retired = {
+        let mut current = entry.search.lock();
+        if current
+            .as_ref()
+            .is_some_and(|index| Arc::ptr_eq(index, &observed))
+        {
+            current.take()
+        } else {
+            None
+        }
+    };
+    // Potentially large zeroization/destructors must run outside the lock.
+    drop(retired);
+}
+
 /// Only small invalidations/platform events cross FFI; no history command body.
 pub async fn watch_events(id: u32, sink: StreamSink<BridgeEvent>) -> Result<()> {
     /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
@@ -2320,7 +2345,7 @@ pub async fn watch_events(id: u32, sink: StreamSink<BridgeEvent>) -> Result<()> 
                         Event::MouseCursorDirty|Event::CursorBlinkingChange|Event::Wakeup|Event::Exit|Event::ChildExit(_)=>None,
                     };if let Some(message)=message && sink.add(message).is_err(){break;}
                 },None=>break}}
-            r=frames.changed()=>{if r.is_err(){break;} frames.borrow_and_update();}
+            r=frames.changed()=>{if r.is_err(){break;} frames.borrow_and_update();retire_stale_search(&entry);}
             _=entry.kick.notified()=>{}
         }
         if entry.visible.load(Ordering::Acquire)
@@ -7239,6 +7264,30 @@ pub async fn terminate_remote_process(
 #[cfg(test)]
 mod trust_tests {
     use super::*;
+    #[tokio::test]
+    async fn stale_search_snapshot_is_retired_for_hidden_views_but_cursor_only_changes_keep_it() {
+        let id = create_terminal(40, 5, 100).await.unwrap();
+        let source = entry(id).unwrap();
+        search_terminal(id, "synthetic".into(), false, false)
+            .await
+            .unwrap();
+        let weak = Arc::downgrade(source.search.lock().as_ref().unwrap());
+        source.visible.store(false, Ordering::Release);
+        source.session.invalidate_view();
+        retire_stale_search(&source);
+        assert!(
+            weak.upgrade().is_some(),
+            "view/cursor invalidations keep the current search"
+        );
+        resize_terminal(id, 41, 6, 9, 20).await.unwrap();
+        retire_stale_search(&source);
+        assert!(source.search.lock().is_none());
+        assert!(
+            weak.upgrade().is_none(),
+            "the frozen corpus/grid must actually be released"
+        );
+        destroy_terminal(id).await.unwrap();
+    }
     #[tokio::test]
     async fn clearing_one_host_retires_only_its_waiting_capture_owners() {
         let first = create_terminal(40, 5, 100).await.unwrap();
