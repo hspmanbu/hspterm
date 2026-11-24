@@ -115,6 +115,7 @@ class TerminalController extends ChangeNotifier {
   final _shutdownIntent = ShutdownIntent();
   bool manualReconnectRequired = false;
   String? _tmuxPane;
+  int? _tmuxPaneGeneration;
   DateTime? _tmuxShellAt;
   bool _tmuxShell = false;
   void reportTmuxShell(String pane, bool shell) {
@@ -124,6 +125,7 @@ class TerminalController extends ChangeNotifier {
       _shutdownIntent.cancelLine();
     }
     _tmuxPane = pane;
+    _tmuxPaneGeneration = generation;
     _tmuxShell = shell;
     _tmuxShellAt = DateTime.now();
   }
@@ -895,6 +897,45 @@ class TerminalController extends ChangeNotifier {
   ) => _ordered(
     (value) => backend.mouse(value, column, row, action, button, modifiers),
   );
+  bool _tmuxClickPending = false;
+  Future<void> clickTmuxCursor(
+    rust.TerminalCursorMove movement, {
+    required bool mouseForwarded,
+  }) {
+    final pointer = backend, pane = _tmuxPane, expected = generation;
+    if (_tmuxClickPending ||
+        tmuxReadonly != false ||
+        pane == null ||
+        _tmuxPaneGeneration != expected ||
+        pointer is! TerminalTmuxPointerBackend) {
+      return Future.value();
+    }
+    _tmuxClickPending = true;
+    // Ordering includes any native click pair; subsequent typing cannot race
+    // the probe. Extra clicks while awaiting it are not accumulated or replayed.
+    return _ordered((id) async {
+      if (tmuxReadonly != false || _tmuxPane != pane) return;
+      final route = await (pointer as TerminalTmuxPointerBackend)
+          .tmuxClickCursor(id, expected, pane, movement);
+      if (route == 'mouse' &&
+          tmuxReadonly == false &&
+          _tmuxPane == pane &&
+          !mouseForwarded &&
+          !_disposed &&
+          connected &&
+          generation == expected) {
+        await backend.mouse(id, movement.column, movement.row, 0, 0, 0);
+        if (!_disposed &&
+            connected &&
+            generation == expected &&
+            tmuxReadonly == false &&
+            _tmuxPane == pane) {
+          await backend.mouse(id, movement.column, movement.row, 1, 0, 0);
+        }
+      }
+    }).whenComplete(() => _tmuxClickPending = false);
+  }
+
   Future<void> focus(bool value) => _ordered((id) => backend.focus(id, value));
   Future<void> scroll(int lines) async {
     final value = id;

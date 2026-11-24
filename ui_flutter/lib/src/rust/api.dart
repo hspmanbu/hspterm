@@ -2053,6 +2053,20 @@ Future<void> configureRemoteInspection({
   processes: processes,
 );
 
+/// Fresh inner-pane mouse detection and tmux-queue guarded caret movement.
+/// "handled" is not an execution receipt; never automatically replay it.
+Future<String> terminalTmuxClickCursor({
+  required int id,
+  required int generation,
+  required String pane,
+  required TerminalCursorMove movement,
+}) => RustLib.instance.api.crateApiTerminalTmuxClickCursor(
+  id: id,
+  generation: generation,
+  pane: pane,
+  movement: movement,
+);
+
 /// Read/seek the attached tmux pane's real bounded history. No PTY injection.
 Future<String> terminalTmuxHistory({
   required int id,
@@ -3331,6 +3345,42 @@ class TemporaryConnectionOptions {
           port == other.port &&
           username == other.username &&
           authentication == other.authentication;
+}
+
+/// No text/commands: bounded geometry for an explicit same-line click.
+class TerminalCursorMove {
+  final int column;
+  final int row;
+  final int cursorColumn;
+  final int cursorRow;
+  final int steps;
+
+  const TerminalCursorMove({
+    required this.column,
+    required this.row,
+    required this.cursorColumn,
+    required this.cursorRow,
+    required this.steps,
+  });
+
+  @override
+  int get hashCode =>
+      column.hashCode ^
+      row.hashCode ^
+      cursorColumn.hashCode ^
+      cursorRow.hashCode ^
+      steps.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TerminalCursorMove &&
+          runtimeType == other.runtimeType &&
+          column == other.column &&
+          row == other.row &&
+          cursorColumn == other.cursorColumn &&
+          cursorRow == other.cursorRow &&
+          steps == other.steps;
 }
 
 class TerminalMetrics {

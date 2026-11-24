@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -841249792;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1695481708;
 
 // Section: executor
 
@@ -10100,6 +10100,51 @@ fn wire__crate__api__terminal_suggestions_impl(
         },
     )
 }
+fn wire__crate__api__terminal_tmux_click_cursor_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "terminal_tmux_click_cursor",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <u32>::sse_decode(&mut deserializer);
+            let api_generation = <u64>::sse_decode(&mut deserializer);
+            let api_pane = <String>::sse_decode(&mut deserializer);
+            let api_movement = <crate::api::TerminalCursorMove>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::terminal_tmux_click_cursor(
+                            api_id,
+                            api_generation,
+                            api_pane,
+                            api_movement,
+                        )
+                        .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__terminal_tmux_history_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -12989,6 +13034,24 @@ impl SseDecode for crate::connections::temporary::TemporarySource {
     }
 }
 
+impl SseDecode for crate::api::TerminalCursorMove {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_column = <u16>::sse_decode(deserializer);
+        let mut var_row = <u16>::sse_decode(deserializer);
+        let mut var_cursorColumn = <u16>::sse_decode(deserializer);
+        let mut var_cursorRow = <u16>::sse_decode(deserializer);
+        let mut var_steps = <u16>::sse_decode(deserializer);
+        return crate::api::TerminalCursorMove {
+            column: var_column,
+            row: var_row,
+            cursor_column: var_cursorColumn,
+            cursor_row: var_cursorRow,
+            steps: var_steps,
+        };
+    }
+}
+
 impl SseDecode for crate::api::TerminalMetrics {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -13646,26 +13709,27 @@ fn pde_ffi_dispatcher_primary_impl(
         253 => wire__crate__api__terminal_metrics_impl(port, ptr, rust_vec_len, data_len),
         254 => wire__crate__api__terminal_relative_paths_impl(port, ptr, rust_vec_len, data_len),
         255 => wire__crate__api__terminal_suggestions_impl(port, ptr, rust_vec_len, data_len),
-        256 => wire__crate__api__terminal_tmux_history_impl(port, ptr, rust_vec_len, data_len),
-        257 => wire__crate__api__terminal_tmux_prompt_impl(port, ptr, rust_vec_len, data_len),
-        258 => {
+        256 => wire__crate__api__terminal_tmux_click_cursor_impl(port, ptr, rust_vec_len, data_len),
+        257 => wire__crate__api__terminal_tmux_history_impl(port, ptr, rust_vec_len, data_len),
+        258 => wire__crate__api__terminal_tmux_prompt_impl(port, ptr, rust_vec_len, data_len),
+        259 => {
             wire__crate__api__terminal_tmux_restore_enabled_impl(port, ptr, rust_vec_len, data_len)
         }
-        259 => wire__crate__api__terminal_working_directory_impl(port, ptr, rust_vec_len, data_len),
-        260 => wire__crate__api__terminate_remote_process_impl(port, ptr, rust_vec_len, data_len),
-        261 => wire__crate__api__test_display_rules_impl(port, ptr, rust_vec_len, data_len),
-        262 => wire__crate__api__test_host_connection_impl(port, ptr, rust_vec_len, data_len),
-        263 => wire__crate__api__transfer_failures_impl(port, ptr, rust_vec_len, data_len),
-        264 => wire__crate__api__transfer_preferences_impl(port, ptr, rust_vec_len, data_len),
-        265 => wire__crate__api__transfer_reconnect_notice_impl(port, ptr, rust_vec_len, data_len),
-        266 => wire__crate__api__unlock_existing_vault_impl(port, ptr, rust_vec_len, data_len),
-        267 => wire__crate__api__unlock_vault_impl(port, ptr, rust_vec_len, data_len),
-        268 => wire__crate__api__update_editor_impl(port, ptr, rust_vec_len, data_len),
-        269 => wire__crate__api__upload_clipboard_image_impl(port, ptr, rust_vec_len, data_len),
-        270 => wire__crate__api__vault_unlock_hint_impl(port, ptr, rust_vec_len, data_len),
-        271 => wire__crate__api__verify_secure_unlock_impl(port, ptr, rust_vec_len, data_len),
-        272 => wire__crate__api__watch_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
-        273 => wire__crate__api__watch_events_impl(port, ptr, rust_vec_len, data_len),
+        260 => wire__crate__api__terminal_working_directory_impl(port, ptr, rust_vec_len, data_len),
+        261 => wire__crate__api__terminate_remote_process_impl(port, ptr, rust_vec_len, data_len),
+        262 => wire__crate__api__test_display_rules_impl(port, ptr, rust_vec_len, data_len),
+        263 => wire__crate__api__test_host_connection_impl(port, ptr, rust_vec_len, data_len),
+        264 => wire__crate__api__transfer_failures_impl(port, ptr, rust_vec_len, data_len),
+        265 => wire__crate__api__transfer_preferences_impl(port, ptr, rust_vec_len, data_len),
+        266 => wire__crate__api__transfer_reconnect_notice_impl(port, ptr, rust_vec_len, data_len),
+        267 => wire__crate__api__unlock_existing_vault_impl(port, ptr, rust_vec_len, data_len),
+        268 => wire__crate__api__unlock_vault_impl(port, ptr, rust_vec_len, data_len),
+        269 => wire__crate__api__update_editor_impl(port, ptr, rust_vec_len, data_len),
+        270 => wire__crate__api__upload_clipboard_image_impl(port, ptr, rust_vec_len, data_len),
+        271 => wire__crate__api__vault_unlock_hint_impl(port, ptr, rust_vec_len, data_len),
+        272 => wire__crate__api__verify_secure_unlock_impl(port, ptr, rust_vec_len, data_len),
+        273 => wire__crate__api__watch_configuration_sync_impl(port, ptr, rust_vec_len, data_len),
+        274 => wire__crate__api__watch_events_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -15430,6 +15494,30 @@ impl flutter_rust_bridge::IntoIntoDart<crate::connections::temporary::TemporaryS
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::TerminalCursorMove {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.column.into_into_dart().into_dart(),
+            self.row.into_into_dart().into_dart(),
+            self.cursor_column.into_into_dart().into_dart(),
+            self.cursor_row.into_into_dart().into_dart(),
+            self.steps.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::TerminalCursorMove
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::TerminalCursorMove>
+    for crate::api::TerminalCursorMove
+{
+    fn into_into_dart(self) -> crate::api::TerminalCursorMove {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::TerminalMetrics {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -17145,6 +17233,17 @@ impl SseEncode for crate::connections::temporary::TemporarySource {
         <String>::sse_encode(self.username, serializer);
         <bool>::sse_encode(self.private_key, serializer);
         <bool>::sse_encode(self.credential_present, serializer);
+    }
+}
+
+impl SseEncode for crate::api::TerminalCursorMove {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u16>::sse_encode(self.column, serializer);
+        <u16>::sse_encode(self.row, serializer);
+        <u16>::sse_encode(self.cursor_column, serializer);
+        <u16>::sse_encode(self.cursor_row, serializer);
+        <u16>::sse_encode(self.steps, serializer);
     }
 }
 

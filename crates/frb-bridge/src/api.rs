@@ -7183,6 +7183,56 @@ pub async fn configure_remote_inspection(
     crate::public_errors::finish(outcome)
 }
 
+/// No text/commands: bounded geometry for an explicit same-line click.
+pub struct TerminalCursorMove {
+    pub column: u16,
+    pub row: u16,
+    pub cursor_column: u16,
+    pub cursor_row: u16,
+    pub steps: u16,
+}
+
+/// Fresh inner-pane mouse detection and tmux-queue guarded caret movement.
+/// "handled" is not an execution receipt; never automatically replay it.
+pub async fn terminal_tmux_click_cursor(
+    id: u32,
+    generation: u64,
+    pane: String,
+    movement: TerminalCursorMove,
+) -> Result<String> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        let target = entry(id)?;
+        let inspector = target.session.inspector_for(generation).await?;
+        let value = inspector
+            .tmux_click_cursor(
+                pane,
+                hspterm_ssh_core::inspection::CursorMove {
+                    column: movement.column,
+                    row: movement.row,
+                    cursor_column: movement.cursor_column,
+                    cursor_row: movement.cursor_row,
+                    steps: movement.steps,
+                },
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await?;
+        ensure!(
+            target.session.status().generation == generation
+                && target.session.status().phase == SessionPhase::Connected,
+            "原终端会话已改变"
+        );
+        let route = value
+            .get("pointer")
+            .and_then(serde_json::Value::as_str)
+            .filter(|v| matches!(*v, "mouse" | "handled" | "ignored"))
+            .context("tmux点击响应无效")?;
+        Ok(route.to_owned())
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
 /// Read/seek the attached tmux pane's real bounded history. No PTY injection.
 pub async fn terminal_tmux_history(
     id: u32,

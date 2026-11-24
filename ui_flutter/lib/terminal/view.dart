@@ -70,7 +70,9 @@ class TerminalViewState extends State<TerminalView>
   bool _active = true, _tickerVisible = true;
   Point<int>? _anchor;
   Point<int>? _pressCell;
-  bool _pressPlain = false;
+  bool _pressPlain = false, _pressMoved = false;
+  TerminalController? _pressSource;
+  int? _pressId, _pressGeneration;
   int _button = 3;
   bool _remoteDrag = false;
   int? _dragMouseModifiers;
@@ -735,6 +737,10 @@ class TerminalViewState extends State<TerminalView>
     ),
     (position.dy / _cell.height).floor().clamp(0, (c.metadata?.rows ?? 24) - 1),
   );
+  bool get _pressCurrent =>
+      identical(_pressSource, c) &&
+      _pressId == c.id &&
+      _pressGeneration == c.generation;
   bool get _capture =>
       c.metadata?.mouseReporting == true && _mods & 1 == 0 && c.connected;
   void _mouse(Offset position, int action, int button) {
@@ -761,38 +767,54 @@ class TerminalViewState extends State<TerminalView>
   /// plain-shell proof ready, leftover TUI mouse mode gets no events.
   bool get _forwardRemoteMouse => _capture && !c.shellInputReady;
 
-  /// nyaterm-style caret placement for plain shells: without mouse
-  /// reporting, a plain primary click (no shift, no drag) on the cursor's
-  /// own row replays ArrowLeft/ArrowRight so the remote REPL (bash, zsh,
-  /// hermes CLI, …) walks its caret to the clicked cell. Wide glyphs count
-  /// one step and clicks on their trailing spacer snap to the glyph's
-  /// lead, mirroring how a caret actually moves through CJK text.
-  void _clickToCursor(Point<int> cell) {
+  /// Same-row keyboard fallback for applications without mouse reporting.
+  /// tmux's outer mode is not the inner app's mode: the native operation
+  /// probes it afresh and guards identity/geometry/mode in tmux's own queue.
+  void _clickToCursor(Point<int> cell, {bool mouseForwarded = false}) {
     final frame = c.metadata;
-    if (frame == null || !c.connected || c.id == null) return;
-    if (frame.mouseReporting || frame.alternateScreen) return;
-    final cursorRow = frame.cursorRow;
-    if (cell.y != cursorRow) return;
-    if (cursorRow < 0 || cursorRow >= c.rows.length) return;
-    final cells = c.rows[cursorRow];
+    if (frame == null ||
+        !c.connected ||
+        c.id == null ||
+        frame.displayOffset != 0) {
+      return;
+    }
+    final tmux = c.tmuxReadonly != null;
+    if (!tmux &&
+        (frame.mouseReporting ||
+            frame.alternateScreen && !frame.cursorVisible)) {
+      return;
+    }
+    if (!tmux && cell.y != frame.cursorRow) return;
+    final cells = frame.cursorRow >= 0 && frame.cursorRow < c.rows.length
+        ? c.rows[frame.cursorRow]
+        : const <rust.RenderCell>[];
     if (cells.isEmpty) return;
-    // A click or a caret on a wide glyph's trailing half belongs to the
-    // glyph's lead cell; the Rust core already snaps the reported cursor
-    // column, this also defends frames from an older core.
     int snap(int column) {
-      var c = column;
-      if (c < 0) c = 0;
-      if (c >= cells.length) c = cells.length - 1;
-      return cells[c].flags & 64 != 0 && c > 0 ? c - 1 : c;
+      final value = column.clamp(0, cells.length - 1);
+      return cells[value].flags & 64 != 0 && value > 0 ? value - 1 : value;
     }
 
-    final target = snap(cell.x);
-    final cursor = snap(frame.cursorColumn);
+    final target = snap(cell.x), cursor = snap(frame.cursorColumn);
     var steps = 0;
-    for (var x = min(cursor, target); x < max(cursor, target); x++) {
-      // Wide leads are one character; their trailing spacers (64) and
-      // wrap markers (1024) are not characters of their own.
-      if (cells[x].flags & (64 | 1024) == 0) steps++;
+    if (cell.y == frame.cursorRow) {
+      for (var x = min(cursor, target); x < max(cursor, target); x++) {
+        if (cells[x].flags & (64 | 1024) == 0) steps++;
+      }
+    }
+    if (tmux) {
+      _run(
+        c.clickTmuxCursor(
+          rust.TerminalCursorMove(
+            column: cell.x,
+            row: cell.y,
+            cursorColumn: frame.cursorColumn,
+            cursorRow: frame.cursorRow,
+            steps: steps,
+          ),
+          mouseForwarded: mouseForwarded,
+        ),
+      );
+      return;
     }
     if (steps == 0) return;
     _snapToBottomForInput();
@@ -811,6 +833,12 @@ class TerminalViewState extends State<TerminalView>
         : event.buttons & kMiddleMouseButton != 0
         ? 1
         : 2;
+    _pressSource = c;
+    _pressId = c.id;
+    _pressGeneration = c.generation;
+    _pressCell = _button == 0 ? _point(event.localPosition) : null;
+    _pressPlain = _mods & 15 == 0;
+    _pressMoved = false;
     // Right-click paste stays local even while the remote reports mouse
     // events: TUI programs almost never bind button 3, and terminal users
     // expect right-click paste in CLI tools like codex. Shift+right-click
@@ -865,7 +893,7 @@ class TerminalViewState extends State<TerminalView>
       // Remember the plain press for caret placement on release; the
       // no-shift requirement is captured once, for the whole gesture.
       _pressCell = _anchor;
-      _pressPlain = _mods & 1 == 0;
+      _pressPlain = _mods & 15 == 0;
       c.clearSelection();
     }
     if (_button == 2) {
@@ -1081,14 +1109,25 @@ class TerminalViewState extends State<TerminalView>
                   behavior: HitTestBehavior.opaque,
                   onPointerDown: down,
                   onPointerUp: (e) {
-                    if (_remoteDrag) _mouse(e.localPosition, 1, _button);
+                    final forwarded = _remoteDrag;
+                    if (_remoteDrag && _pressCurrent) {
+                      _mouse(e.localPosition, 1, _button);
+                    }
                     _remoteDrag = false;
                     // A finished primary-button drag selects; honor the
                     // select-to-copy preference unless it is all whitespace.
                     final pressCell = _pressCell;
                     final plainPress =
-                        _button == 0 && pressCell != null && _pressPlain;
+                        _button == 0 &&
+                        pressCell != null &&
+                        _pressPlain &&
+                        !_pressMoved &&
+                        identical(_pressSource, c) &&
+                        _pressId == c.id &&
+                        _pressGeneration == c.generation;
                     _pressCell = null;
+                    _pressSource = null;
+                    _pressId = _pressGeneration = null;
                     final selected = _anchor != null && _button == 0;
                     _anchor = null;
                     _button = 3;
@@ -1096,17 +1135,31 @@ class TerminalViewState extends State<TerminalView>
                     // A no-drag plain click on the cursor's row becomes
                     // caret movement instead of an empty selection.
                     if (plainPress && pressCell == _point(e.localPosition)) {
-                      _clickToCursor(pressCell);
+                      _clickToCursor(pressCell, mouseForwarded: forwarded);
                     }
                   },
                   onPointerCancel: (e) {
-                    if (_remoteDrag) _mouse(e.localPosition, 1, _button);
+                    if (_remoteDrag && _pressCurrent) {
+                      _mouse(e.localPosition, 1, _button);
+                    }
                     _remoteDrag = false;
                     _anchor = null;
                     _pressCell = null;
+                    _pressSource = null;
+                    _pressId = _pressGeneration = null;
                     _button = 3;
                   },
                   onPointerMove: (e) {
+                    if (_remoteDrag && !_pressCurrent) {
+                      _remoteDrag = false;
+                      _anchor = null;
+                      _pressCell = null;
+                      return;
+                    }
+                    if (_pressCell != null &&
+                        _point(e.localPosition) != _pressCell) {
+                      _pressMoved = true;
+                    }
                     if (_remoteDrag) {
                       _mouse(e.localPosition, 2, _button);
                     } else if (_anchor != null) {

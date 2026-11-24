@@ -137,6 +137,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   TemporarySource dco_decode_box_autoadd_temporary_source(dynamic raw);
 
   @protected
+  TerminalCursorMove dco_decode_box_autoadd_terminal_cursor_move(dynamic raw);
+
+  @protected
   TerminalSuggestions dco_decode_box_autoadd_terminal_suggestions(dynamic raw);
 
   @protected
@@ -554,6 +557,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   TemporarySource dco_decode_temporary_source(dynamic raw);
 
   @protected
+  TerminalCursorMove dco_decode_terminal_cursor_move(dynamic raw);
+
+  @protected
   TerminalMetrics dco_decode_terminal_metrics(dynamic raw);
 
   @protected
@@ -715,6 +721,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   TemporarySource sse_decode_box_autoadd_temporary_source(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TerminalCursorMove sse_decode_box_autoadd_terminal_cursor_move(
     SseDeserializer deserializer,
   );
 
@@ -1254,6 +1265,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   TemporarySource sse_decode_temporary_source(SseDeserializer deserializer);
 
   @protected
+  TerminalCursorMove sse_decode_terminal_cursor_move(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   TerminalMetrics sse_decode_terminal_metrics(SseDeserializer deserializer);
 
   @protected
@@ -1454,6 +1470,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_temporary_source(
     TemporarySource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_terminal_cursor_move(
+    TerminalCursorMove self,
     SseSerializer serializer,
   );
 
@@ -2144,6 +2166,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_temporary_source(
     TemporarySource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_terminal_cursor_move(
+    TerminalCursorMove self,
     SseSerializer serializer,
   );
 

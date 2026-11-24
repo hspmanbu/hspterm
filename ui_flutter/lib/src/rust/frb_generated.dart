@@ -89,7 +89,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -841249792;
+  int get rustContentHash => -1695481708;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -1296,6 +1296,13 @@ abstract class RustLibApi extends BaseApi {
   Future<TerminalSuggestions?> crateApiTerminalSuggestions({
     required int id,
     required int generation,
+  });
+
+  Future<String> crateApiTerminalTmuxClickCursor({
+    required int id,
+    required int generation,
+    required String pane,
+    required TerminalCursorMove movement,
   });
 
   Future<String> crateApiTerminalTmuxHistory({
@@ -10200,6 +10207,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String> crateApiTerminalTmuxClickCursor({
+    required int id,
+    required int generation,
+    required String pane,
+    required TerminalCursorMove movement,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_u_32(id, serializer);
+          sse_encode_CastedPrimitive_u_64(generation, serializer);
+          sse_encode_String(pane, serializer);
+          sse_encode_box_autoadd_terminal_cursor_move(movement, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 256,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiTerminalTmuxClickCursorConstMeta,
+        argValues: [id, generation, pane, movement],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiTerminalTmuxClickCursorConstMeta =>
+      const TaskConstMeta(
+        debugName: "terminal_tmux_click_cursor",
+        argNames: ["id", "generation", "pane", "movement"],
+      );
+
+  @override
   Future<String> crateApiTerminalTmuxHistory({
     required int id,
     required int generation,
@@ -10217,7 +10263,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 256,
+            funcId: 257,
             port: port_,
           );
         },
@@ -10252,7 +10298,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 257,
+            funcId: 258,
             port: port_,
           );
         },
@@ -10286,7 +10332,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 258,
+            funcId: 259,
             port: port_,
           );
         },
@@ -10321,7 +10367,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 259,
+            funcId: 260,
             port: port_,
           );
         },
@@ -10362,7 +10408,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 260,
+            funcId: 261,
             port: port_,
           );
         },
@@ -10397,7 +10443,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 261,
+            funcId: 262,
             port: port_,
           );
         },
@@ -10439,7 +10485,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 262,
+            funcId: 263,
             port: port_,
           );
         },
@@ -10489,7 +10535,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 263,
+            funcId: 264,
             port: port_,
           );
         },
@@ -10518,7 +10564,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 264,
+            funcId: 265,
             port: port_,
           );
         },
@@ -10546,7 +10592,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 265,
+            funcId: 266,
             port: port_,
           );
         },
@@ -10583,7 +10629,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 266,
+            funcId: 267,
             port: port_,
           );
         },
@@ -10618,7 +10664,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 267,
+            funcId: 268,
             port: port_,
           );
         },
@@ -10658,7 +10704,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 268,
+            funcId: 269,
             port: port_,
           );
         },
@@ -10700,7 +10746,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 269,
+            funcId: 270,
             port: port_,
           );
         },
@@ -10731,7 +10777,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 270,
+            funcId: 271,
             port: port_,
           );
         },
@@ -10765,7 +10811,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 271,
+            funcId: 272,
             port: port_,
           );
         },
@@ -10798,7 +10844,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 272,
+              funcId: 273,
               port: port_,
             );
           },
@@ -10834,7 +10880,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 273,
+              funcId: 274,
               port: port_,
             );
           },
@@ -11070,6 +11116,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TemporarySource dco_decode_box_autoadd_temporary_source(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_temporary_source(raw);
+  }
+
+  @protected
+  TerminalCursorMove dco_decode_box_autoadd_terminal_cursor_move(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_terminal_cursor_move(raw);
   }
 
   @protected
@@ -12575,6 +12627,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  TerminalCursorMove dco_decode_terminal_cursor_move(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return TerminalCursorMove(
+      column: dco_decode_u_16(arr[0]),
+      row: dco_decode_u_16(arr[1]),
+      cursorColumn: dco_decode_u_16(arr[2]),
+      cursorRow: dco_decode_u_16(arr[3]),
+      steps: dco_decode_u_16(arr[4]),
+    );
+  }
+
+  @protected
   TerminalMetrics dco_decode_terminal_metrics(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -13022,6 +13089,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_temporary_source(deserializer));
+  }
+
+  @protected
+  TerminalCursorMove sse_decode_box_autoadd_terminal_cursor_move(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_terminal_cursor_move(deserializer));
   }
 
   @protected
@@ -15054,6 +15129,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  TerminalCursorMove sse_decode_terminal_cursor_move(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_column = sse_decode_u_16(deserializer);
+    var var_row = sse_decode_u_16(deserializer);
+    var var_cursorColumn = sse_decode_u_16(deserializer);
+    var var_cursorRow = sse_decode_u_16(deserializer);
+    var var_steps = sse_decode_u_16(deserializer);
+    return TerminalCursorMove(
+      column: var_column,
+      row: var_row,
+      cursorColumn: var_cursorColumn,
+      cursorRow: var_cursorRow,
+      steps: var_steps,
+    );
+  }
+
+  @protected
   TerminalMetrics sse_decode_terminal_metrics(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_diskBytes = sse_decode_CastedPrimitive_u_64(deserializer);
@@ -15589,6 +15683,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_temporary_source(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_terminal_cursor_move(
+    TerminalCursorMove self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_terminal_cursor_move(self, serializer);
   }
 
   @protected
@@ -17178,6 +17281,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.username, serializer);
     sse_encode_bool(self.privateKey, serializer);
     sse_encode_bool(self.credentialPresent, serializer);
+  }
+
+  @protected
+  void sse_encode_terminal_cursor_move(
+    TerminalCursorMove self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_16(self.column, serializer);
+    sse_encode_u_16(self.row, serializer);
+    sse_encode_u_16(self.cursorColumn, serializer);
+    sse_encode_u_16(self.cursorRow, serializer);
+    sse_encode_u_16(self.steps, serializer);
   }
 
   @protected

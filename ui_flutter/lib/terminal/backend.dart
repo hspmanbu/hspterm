@@ -95,6 +95,15 @@ abstract interface class TerminalTmuxHistoryBackend {
   Future<String> tmuxHistory(int id, int generation, String? pane, int? offset);
 }
 
+abstract interface class TerminalTmuxPointerBackend {
+  Future<String> tmuxClickCursor(
+    int id,
+    int generation,
+    String pane,
+    rust.TerminalCursorMove movement,
+  );
+}
+
 abstract interface class TerminalSuggestionsBackend {
   Future<rust.TerminalSuggestions?> suggestions(int id, int generation);
   Future<String> chooseSuggestion(
@@ -141,8 +150,21 @@ class NativeTerminalBackend
         TerminalSshPreferencesBackend,
         TerminalCommandsBackend,
         TerminalTmuxHistoryBackend,
+        TerminalTmuxPointerBackend,
         TerminalReconnectNoticeBackend,
         TerminalSuggestionsBackend {
+  @override
+  Future<String> tmuxClickCursor(
+    int id,
+    int generation,
+    String pane,
+    rust.TerminalCursorMove movement,
+  ) => rust.terminalTmuxClickCursor(
+    id: id,
+    generation: generation,
+    pane: pane,
+    movement: movement,
+  );
   @override
   Future<SshNetworkDefaults> sshPreferences() => rust.sshNetworkDefaults();
   @override

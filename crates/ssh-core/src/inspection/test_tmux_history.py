@@ -34,6 +34,46 @@ class HistoryTests(unittest.TestCase):
             module.main()
         return json.loads(output.getvalue()), calls
 
+    def test_non_mouse_pointer_uses_guarded_bounded_arrow_keys(self):
+        click = dict(column=8, row=3, cursor_column=5, cursor_row=3, steps=2)
+        result, calls = self.invoke(dict(pane='%3', click=click),
+            ['123|456|%3|80|0|24||100', '%3|0|0|80|24|5|3|1|0|0'])
+        self.assertEqual(result, dict(pointer='handled'))
+        self.assertEqual(calls[-1][-2], 'send-keys -t %3 -N 2 Right')
+        self.assertIn('#{mouse_any_flag},0', calls[-1][-3])
+        self.assertIn('#{cursor_x},5', calls[-1][-3])
+        self.assertIn('#{pane_id},%3', calls[-1][-3])
+        self.assertIn('#{session_created},456', calls[-1][-3])
+
+    def test_native_mouse_routes_to_application_without_injecting_keys(self):
+        click = dict(column=8, row=10, cursor_column=5, cursor_row=3, steps=0)
+        result, calls = self.invoke(dict(pane='%3', click=click),
+            ['123|456|%3|80|0|24||100', '%3|0|0|80|24|5|3|1|1|0'])
+        self.assertEqual(result, dict(pointer='mouse'))
+        self.assertEqual(len(calls), 2)
+
+    def test_pointer_refuses_readonly_modes_stale_cursor_pane_and_geometry(self):
+        original = dict(column=8, row=3, cursor_column=5, cursor_row=3, steps=2)
+        for extra, pane, change in [
+            ({'readonly': True}, '%3|0|0|80|24|5|3|1|0|0', {}),
+            ({}, '%4|0|0|80|24|5|3|1|0|0', {}),
+            ({}, '%3|0|0|80|24|6|3|1|0|0', {}),
+            ({}, '%3|0|0|80|24|5|3|0|0|0', {}),
+            ({}, '%3|0|0|80|24|5|3|1|0|1', {}),
+            ({}, '%3|0|0|80|24|5|3|1|0|0', {'row': 4}),
+            ({}, '%3|0|0|80|24|5|3|1|0|0', {'steps': 99}),
+        ]:
+            request = dict(pane='%3', click=dict(original, **change), **extra)
+            result, calls = self.invoke(request, ['123|456|%3|80|0|24||100', pane])
+            self.assertEqual(result, dict(pointer='ignored'))
+            self.assertFalse(any(c[1] == 'if-shell' for c in calls))
+
+    def test_pointer_rejects_unbounded_or_non_integer_parameters(self):
+        for value in [True, -1, 65536, '3; display-message unsafe']:
+            click = dict(column=8, row=3, cursor_column=5, cursor_row=3, steps=value)
+            with self.assertRaises(ValueError):
+                self.invoke(dict(pane='%3', click=click))
+
     def test_bounded_snapshot(self):
         result, calls = self.invoke()
         self.assertEqual(result['history'], 80)

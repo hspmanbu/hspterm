@@ -1,4 +1,4 @@
-//! Explicit, bounded inspection of the original SSH Transport. No PTY input,
+//! Explicit, bounded inspection of the original SSH Transport. No arbitrary PTY input,
 //! automatic SSH connection or arbitrary remote exec API. The visible tmux
 //! history rail polls bounded metadata on its explicitly attached Transport.
 use crate::{Client, SshError};
@@ -36,6 +36,16 @@ pub enum InspectionError {
     #[error("进程身份无效或原列表已过期；未开始发送信号")]
     Identity,
 }
+/// Cell geometry from the displayed frame; only bounded arrow-key movement.
+#[derive(Clone, Serialize)]
+pub struct CursorMove {
+    pub column: u16,
+    pub row: u16,
+    pub cursor_column: u16,
+    pub cursor_row: u16,
+    pub steps: u16,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sample {
@@ -140,11 +150,12 @@ enum Action {
     Processes,
     ServerCopy(String),
     TmuxHistory(String),
+    TmuxClick(String),
     DirSize(String),
     Terminate { pid: u32, start: u64, boot: String },
 }
 fn command(action: &Action) -> Result<String, InspectionError> {
-    if let Action::TmuxHistory(request) = action {
+    if let Action::TmuxHistory(request) | Action::TmuxClick(request) = action {
         if request.is_empty()
             || request.len() > 4096
             || !request.bytes().all(|b| b.is_ascii_hexdigit())
@@ -297,7 +308,10 @@ impl Inspector {
         let (slot, queued) = if long {
             (&self.long_slot, false)
         } else {
-            (&self.slot, matches!(action, Action::Sample))
+            (
+                &self.slot,
+                matches!(action, Action::Sample | Action::TmuxClick(_)),
+            )
         };
         let permit =
             acquire_slot(slot, &self.sample_waiter, queued, &cancel, &self.transport).await?;
@@ -442,12 +456,31 @@ impl Inspector {
         offset: Option<u32>,
         cancel: CancellationToken,
     ) -> Result<serde_json::Value, SshError> {
+        self.tmux_request(pane, offset, None, cancel).await
+    }
+    pub async fn tmux_click_cursor(
+        &self,
+        pane: String,
+        click: CursorMove,
+        cancel: CancellationToken,
+    ) -> Result<serde_json::Value, SshError> {
+        self.tmux_request(Some(pane), None, Some(click), cancel)
+            .await
+    }
+    async fn tmux_request(
+        &self,
+        pane: Option<String>,
+        offset: Option<u32>,
+        click: Option<CursorMove>,
+        cancel: CancellationToken,
+    ) -> Result<serde_json::Value, SshError> {
+        let moving = click.is_some();
         let identity = self
             .tmux
             .lock()
             .clone()
             .ok_or(InspectionError::Unavailable)?;
-        if offset.is_some()
+        if (offset.is_some() || moving)
             && (self.readonly
                 || pane.as_ref().is_none_or(|p| {
                     p.len() < 2
@@ -462,9 +495,15 @@ impl Inspector {
         request["pane"] = serde_json::json!(pane);
         request["offset"] = serde_json::json!(offset);
         request["readonly"] = serde_json::json!(self.readonly);
+        request["click"] = serde_json::to_value(click).map_err(|_| InspectionError::Identity)?;
         let payload = serde_json::to_vec(&request).map_err(|_| InspectionError::Identity)?;
         let hex = payload.iter().map(|b| format!("{b:02x}")).collect();
-        let output = self.execute(Action::TmuxHistory(hex), cancel).await?;
+        let action = if moving {
+            Action::TmuxClick(hex)
+        } else {
+            Action::TmuxHistory(hex)
+        };
+        let output = self.execute(action, cancel).await?;
         let line = output
             .split(|b| *b == b'\n')
             .rev()

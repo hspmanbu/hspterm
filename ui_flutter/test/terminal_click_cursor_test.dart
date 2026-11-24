@@ -1,4 +1,7 @@
 import 'dart:ui' as ui;
+import 'dart:async';
+
+import 'package:hspterm/terminal/backend.dart';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -14,22 +17,22 @@ import 'support/fake_backend.dart';
 const wideLead = 32, wideSpacer = 64;
 
 rust.RenderCell cell(String text, {int flags = 0}) => rust.RenderCell(
-      text: text,
-      foreground: 0xffffffff,
-      background: 0xff10151d,
-      flags: flags,
-    );
+  text: text,
+  foreground: 0xffffffff,
+  background: 0xff10151d,
+  flags: flags,
+);
 
 /// "$ 中文": the CJK glyphs occupy lead+spacer cell pairs like the grid the
 /// Rust core publishes.
 List<rust.RenderCell> promptRow() => [
-      cell(r'$'),
-      cell(' '),
-      cell('中', flags: wideLead),
-      cell('', flags: wideSpacer),
-      cell('文', flags: wideLead),
-      cell('', flags: wideSpacer),
-    ];
+  cell(r'$'),
+  cell(' '),
+  cell('中', flags: wideLead),
+  cell('', flags: wideSpacer),
+  cell('文', flags: wideLead),
+  cell('', flags: wideSpacer),
+];
 
 rust.RenderFrame frame(
   List<rust.RenderCell> row0, {
@@ -67,7 +70,148 @@ rust.RenderFrame frame(
   );
 }
 
+class PointerBackend extends FakeBackend implements TerminalTmuxPointerBackend {
+  String route = 'handled';
+  Completer<String>? pending;
+  final clicks = <(int, int, String, rust.TerminalCursorMove)>[];
+  @override
+  Future<String> tmuxClickCursor(
+    int id,
+    int generation,
+    String pane,
+    rust.TerminalCursorMove movement,
+  ) async {
+    clicks.add((id, generation, pane, movement));
+    return pending?.future ?? route;
+  }
+}
+
 void main() {
+  for (final localSelection in [true, false]) {
+    for (final nativeMouse in [true, false]) {
+      testWidgets(
+        'tmux routes actual inner mouse=$nativeMouse local selection=$localSelection',
+        (tester) async {
+          final backend = PointerBackend()
+            ..route = nativeMouse ? 'mouse' : 'handled';
+          final c = TerminalController(backend);
+          await c.start();
+          c.phase = 'Connected';
+          c.generation = 1;
+          c.tmuxReadonly = false;
+          c.tmuxLocalSelection = localSelection;
+          c.reportTmuxShell('%3', false);
+          c.applyFrame(
+            frame(promptRow(), cursorColumn: 2, mouse: true, alternate: true),
+          );
+          final key = GlobalKey<TerminalViewState>();
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: TerminalView(key: key, controller: c),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final size = key.currentState!.cellSize;
+          final origin = tester.getTopLeft(find.byType(TerminalView));
+          final gesture = await tester.startGesture(
+            origin + Offset(4.5 * size.width, .5 * size.height),
+            kind: ui.PointerDeviceKind.mouse,
+            buttons: kPrimaryMouseButton,
+          );
+          await tester.pump();
+          await gesture.up();
+          await tester.pumpAndSettle();
+          expect(backend.clicks, hasLength(1));
+          final movement = backend.clicks.single.$4;
+          expect(
+            (backend.clicks.single.$2, backend.clicks.single.$3),
+            (1, '%3'),
+          );
+          expect((movement.column, movement.row, movement.steps), (4, 0, 1));
+          expect(backend.keys, isEmpty);
+          expect(
+            backend.mouseActions,
+            nativeMouse || !localSelection ? [0, 1] : <int>[],
+          );
+          await tester.pumpWidget(const SizedBox());
+          c.dispose();
+        },
+      );
+    }
+  }
+  testWidgets(
+    'non-mouse alternate-screen TUI gets same-row keyboard fallback',
+    (tester) async {
+      final backend = FakeBackend();
+      final c = TerminalController(backend);
+      await c.start();
+      c.phase = 'Connected';
+      c.generation = 1;
+      c.applyFrame(frame(promptRow(), cursorColumn: 2, alternate: true));
+      final key = GlobalKey<TerminalViewState>();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TerminalView(key: key, controller: c),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final size = key.currentState!.cellSize;
+      final origin = tester.getTopLeft(find.byType(TerminalView));
+      final gesture = await tester.startGesture(
+        origin + Offset(4.5 * size.width, .5 * size.height),
+        kind: ui.PointerDeviceKind.mouse,
+        buttons: kPrimaryMouseButton,
+      );
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(backend.keys.map((v) => v.key), ['ArrowRight']);
+      expect(backend.mouseActions, isEmpty);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
+    },
+  );
+  testWidgets(
+    'pending tmux probe is not replayed and reconnect cannot receive a late mouse pair',
+    (tester) async {
+      final backend = PointerBackend()..pending = Completer<String>();
+      final c = TerminalController(backend);
+      await c.start();
+      c.phase = 'Connected';
+      c.generation = 1;
+      c.tmuxReadonly = false;
+      c.tmuxLocalSelection = true;
+      c.reportTmuxShell('%3', false);
+      final move = rust.TerminalCursorMove(
+        column: 4,
+        row: 0,
+        cursorColumn: 2,
+        cursorRow: 0,
+        steps: 1,
+      );
+      final first = c.clickTmuxCursor(move, mouseForwarded: false);
+      final second = c.clickTmuxCursor(move, mouseForwarded: false);
+      await tester.pump();
+      expect(backend.clicks, hasLength(1));
+      c.generation++;
+      backend.pending!.complete('mouse');
+      await tester.pump();
+      await first;
+      await second;
+      expect(backend.mouseActions, isEmpty);
+      await c.clickTmuxCursor(move, mouseForwarded: false);
+      expect(
+        backend.clicks,
+        hasLength(1),
+        reason: 'old pane metadata cannot cross a reconnect',
+      );
+      c.dispose();
+    },
+  );
   testWidgets('click on a wide glyph right half snaps to its lead', (
     tester,
   ) async {
@@ -80,14 +224,16 @@ void main() {
     controller.applyFrame(frame(promptRow(), cursorColumn: 2));
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: TerminalView(key: key, controller: controller)),
+        home: Scaffold(
+          body: TerminalView(key: key, controller: controller),
+        ),
       ),
     );
     await tester.pumpAndSettle();
     final origin = tester.getTopLeft(find.byType(TerminalView));
     final cell = key.currentState!.cellSize;
-    Offset at(int column, int row) => origin +
-        Offset((column + .5) * cell.width, (row + .5) * cell.height);
+    Offset at(int column, int row) =>
+        origin + Offset((column + .5) * cell.width, (row + .5) * cell.height);
     Future<void> click(Offset position) async {
       final gesture = await tester.startGesture(
         position,
@@ -126,14 +272,15 @@ void main() {
     controller.applyFrame(frame(promptRow(), cursorColumn: 0));
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: TerminalView(key: key, controller: controller)),
+        home: Scaffold(
+          body: TerminalView(key: key, controller: controller),
+        ),
       ),
     );
     await tester.pumpAndSettle();
     final origin = tester.getTopLeft(find.byType(TerminalView));
     final cell = key.currentState!.cellSize;
-    final beyond =
-        origin + Offset((9.5) * cell.width, .5 * cell.height);
+    final beyond = origin + Offset((9.5) * cell.width, .5 * cell.height);
     // Column 9 is beyond the 6-column grid; the click clamps to 文.
     final gesture = await tester.startGesture(
       beyond,
@@ -144,14 +291,8 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
     // $, space and 中 separate the caret from 文: three characters.
-    expect(
-      backend.keys.where((input) => input.key == 'ArrowRight').length,
-      3,
-    );
-    expect(
-      backend.keys.where((input) => input.key == 'ArrowLeft').length,
-      0,
-    );
+    expect(backend.keys.where((input) => input.key == 'ArrowRight').length, 3);
+    expect(backend.keys.where((input) => input.key == 'ArrowLeft').length, 0);
 
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
@@ -169,7 +310,9 @@ void main() {
     controller.applyFrame(frame(promptRow(), cursorColumn: 6));
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: TerminalView(key: key, controller: controller)),
+        home: Scaffold(
+          body: TerminalView(key: key, controller: controller),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -185,10 +328,7 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
     // $, space, 中 — 文 is crossed together with its spacer as one step.
-    expect(
-      backend.keys.where((input) => input.key == 'ArrowLeft').length,
-      3,
-    );
+    expect(backend.keys.where((input) => input.key == 'ArrowLeft').length, 3);
     expect(backend.keys.where((input) => input.key == 'ArrowRight'), isEmpty);
 
     await tester.pumpWidget(const SizedBox());
@@ -207,14 +347,16 @@ void main() {
       controller.applyFrame(frame(promptRow(), cursorColumn: 2));
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: TerminalView(key: key, controller: controller)),
+          home: Scaffold(
+            body: TerminalView(key: key, controller: controller),
+          ),
         ),
       );
       await tester.pumpAndSettle();
       final origin = tester.getTopLeft(find.byType(TerminalView));
       final cell = key.currentState!.cellSize;
-      Offset at(int column, int row) => origin +
-          Offset((column + .5) * cell.width, (row + .5) * cell.height);
+      Offset at(int column, int row) =>
+          origin + Offset((column + .5) * cell.width, (row + .5) * cell.height);
       Future<void> click(Offset position) async {
         final gesture = await tester.startGesture(
           position,
@@ -255,7 +397,9 @@ void main() {
     controller.applyFrame(frame(promptRow(), cursorColumn: 2, mouse: true));
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: TerminalView(key: key, controller: controller)),
+        home: Scaffold(
+          body: TerminalView(key: key, controller: controller),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -289,14 +433,16 @@ void main() {
     controller.applyFrame(frame(promptRow(), cursorColumn: 2));
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: TerminalView(key: key, controller: controller)),
+        home: Scaffold(
+          body: TerminalView(key: key, controller: controller),
+        ),
       ),
     );
     await tester.pumpAndSettle();
     final origin = tester.getTopLeft(find.byType(TerminalView));
     final cell = key.currentState!.cellSize;
-    Offset at(int column, int row) => origin +
-        Offset((column + .5) * cell.width, (row + .5) * cell.height);
+    Offset at(int column, int row) =>
+        origin + Offset((column + .5) * cell.width, (row + .5) * cell.height);
     final gesture = await tester.startGesture(
       at(0, 0),
       kind: ui.PointerDeviceKind.mouse,
