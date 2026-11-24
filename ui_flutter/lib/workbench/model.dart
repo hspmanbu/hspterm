@@ -750,6 +750,14 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
   bool _editorRequested = false;
   @override
   bool get hasActiveEditors => _editors.any((editor) => !editor.closed);
+  Map<String, int> get editorMemoryCounters => {
+    'editors': _editors.length,
+    'editorTextUnits': _editors.fold(
+      0,
+      (sum, editor) => sum + editor.content.text.length,
+    ),
+    'savingEditors': _editors.where((editor) => editor.saving).length,
+  };
   void registerEditor(RemoteEditorController editor) {
     if (_disposed || _shutdown != null) throw StateError('应用正在关闭');
     _editors.add(editor);

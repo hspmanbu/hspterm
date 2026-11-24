@@ -47,7 +47,38 @@ class _PixelGrid {
 
 /// Owns bounded native pictures and shaped glyphs; no persistent frame ticker.
 class TerminalPaintCache {
-  TerminalPaintCache({this.batchAscii = true});
+  TerminalPaintCache({this.batchAscii = true}) {
+    _instances.removeWhere((ref) => ref.target == null);
+    _instances.add(WeakReference(this));
+  }
+  static final _instances = <WeakReference<TerminalPaintCache>>[];
+
+  /// Weak registry: sampling never keeps a closed terminal/cache alive.
+  static Map<String, int> memoryCounters() {
+    var glyphs = 0, rows = 0, pictures = 0, pictureBytes = 0;
+    _instances.removeWhere((ref) => ref.target == null);
+    for (final ref in _instances) {
+      final cache = ref.target;
+      if (cache == null) continue;
+      glyphs += cache.glyphCount;
+      rows += cache.rowCount;
+      for (final row in cache._rows.values) {
+        pictureBytes += row.$2.approximateBytesUsed;
+        pictures++;
+      }
+      if (cache._backgroundPicture case final background?) {
+        pictureBytes += background.approximateBytesUsed;
+        pictures++;
+      }
+    }
+    return {
+      'glyphs': glyphs,
+      'rowPictures': rows,
+      'pictures': pictures,
+      'pictureKiB': pictureBytes ~/ 1024,
+    };
+  }
+
   final bool batchAscii;
   TerminalTypography _typography = const TerminalTypography();
   void configure(TerminalTypography value) {
@@ -391,7 +422,12 @@ class TerminalPaintCache {
     _runs.clear();
   }
 
-  void dispose() => clear();
+  void dispose() {
+    clear();
+    _instances.removeWhere(
+      (ref) => ref.target == null || identical(ref.target, this),
+    );
+  }
 }
 
 class TerminalPainter extends CustomPainter {

@@ -24,7 +24,7 @@ import 'tmux_restore_settings.dart';
 import 'transfer_settings.dart';
 
 import 'dart:async';
-import 'dart:io' show ProcessInfo, File, Platform;
+import 'dart:io' show File, Platform;
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
@@ -138,23 +138,13 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
     });
   }
 
-  void _sampleMemory() {
-    AppRunLog.instance.event(
-      AppLogEvent.memorySample,
-      count: (ProcessInfo.currentRss / 1024).round(),
-      fields: {
-        'bytes': ProcessInfo.currentRss,
-        'maxRssKiB': (ProcessInfo.maxRss / 1024).round(),
-        'kind': 'rssKiB',
-      },
-    );
-  }
+  void _sampleMemory() => unawaited(_diagnostics.sampleMemory());
 
   @override
   void initState() {
     super.initState();
     // Memory samples: 10s for the first five minutes (the observed growth
-    // phase), then once per minute. RSS/maxRSS only, no payloads.
+    // phase), then once per minute. Process/cache counters only, no payloads.
     var fastSamples = 30;
     _sampleMemory();
     _memorySampler = Timer.periodic(

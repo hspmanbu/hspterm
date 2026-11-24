@@ -1,3 +1,5 @@
+import 'package:hspterm/run_log.dart';
+import 'package:hspterm/workbench/runtime_diagnostics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hspterm/prototype/model.dart';
 import 'package:hspterm/src/rust/api.dart' as rust;
@@ -58,6 +60,17 @@ void main() {
         await rust.sampleRemoteResources(id: id, generation: generation),
       );
       expect(sample.memoryTotal, greaterThan(0));
+      expect(sample.network, isNotEmpty);
+      final log = AppRunLog();
+      final diagnostics = RuntimeDiagnostics(() => model, log: log);
+      await diagnostics.sampleMemory();
+      diagnostics.stop();
+      final memoryLog = log.export('');
+      expect(memoryLog, contains('kind=memory'));
+      expect(memoryLog, contains('historyRows='));
+      expect(memoryLog, contains('framePulls='));
+      expect(memoryLog, contains('metricFailures=0'));
+      expect(memoryLog, isNot(contains(ssh.privateKey)));
       await expectLater(
         rust.listRemoteProcesses(id: id, generation: generation),
         throwsA(anything),

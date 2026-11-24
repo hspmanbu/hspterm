@@ -104,6 +104,18 @@ class AppRunLog {
     'queueShare',
     'maxRssKiB',
     'rssKiB',
+    'privateKiB', 'peakPrivateKiB', 'rssDeltaKiB', 'privateDeltaKiB',
+    'rssGrowthKiB',
+    'privateGrowthKiB',
+    'handles',
+    'cpuUs',
+    'uptimeMs',
+    'cpuPercent',
+    'imageCacheKiB', 'imageCacheCount', 'liveImages', 'pendingImages',
+    'glyphs', 'rowPictures', 'pictures', 'pictureKiB',
+    'editors', 'editorTextUnits', 'savingEditors', 'frameCells',
+    'historyDiskKiB', 'historyRows', 'residentCells', 'framePulls', 'cellsSent',
+    'changedRows', 'metricFailures', 'nativeFailures',
     'dirCacheKiB',
     'dirCacheDirs',
     'heapUsedKiB',
@@ -196,6 +208,7 @@ class AppRunLog {
     return 'HSPTerm current-launch log\n'
         'launch-start=${started.toIso8601String()} platform=${Platform.operatingSystem} ui-dropped=$dropped $meta\n'
         'No previous-launch logs are loaded. Native/UI buffers are bounded.\n'
+        'Memory: KiB=1024 bytes; Windows privateKiB=Private Bytes (commit), rssKiB=Working Set; pictureKiB is approximate native picture storage. Counts are not Dart/Rust heap sizes.\n'
         '${rows.map((r) => r.line).join('\n')}\n';
   }
 }

@@ -12,6 +12,7 @@
 #include <flutter/standard_method_codec.h>
 #include "utils.h"
 #include "secure_unlock.h"
+#include "process_memory.h"
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -228,6 +229,24 @@ bool FlutterWindow::OnCreate() {
         integrated_frame_ = false;
         result->Error("window_frame", "无法更新窗口边框；保留系统标题栏"); return;
       }
+    } else if (method == "processMemory") {
+      ProcessMemorySample memory{};
+      if (!ReadProcessMemorySample(&memory)) {
+        result->Error("process_memory", "无法读取当前进程内存统计"); return;
+      }
+      const auto number = [](uint64_t value) {
+        return flutter::EncodableValue(static_cast<int64_t>(value));
+      };
+      result->Success(flutter::EncodableValue(flutter::EncodableMap{
+        {flutter::EncodableValue("rssKiB"), number(memory.working_set_kib)},
+        {flutter::EncodableValue("maxRssKiB"), number(memory.peak_working_set_kib)},
+        {flutter::EncodableValue("privateKiB"), number(memory.private_kib)},
+        {flutter::EncodableValue("peakPrivateKiB"), number(memory.peak_private_kib)},
+        {flutter::EncodableValue("handles"), number(memory.handles)},
+        {flutter::EncodableValue("cpuUs"), number(memory.cpu_us)},
+        {flutter::EncodableValue("uptimeMs"), number(memory.uptime_ms)},
+      }));
+      return;
     } else if (method == "clipboardHasImage") {
       // Check actual Windows formats, before requesting synthesized PNG data.
       // An empty clipboard must not create an upload task or an empty image.

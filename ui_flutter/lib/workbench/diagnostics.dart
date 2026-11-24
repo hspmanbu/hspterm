@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 
 import '../run_log.dart';
+import 'runtime_diagnostics.dart';
 import '../prototype/settings_style.dart';
 
 import '../runtime_errors.dart';
@@ -30,7 +31,10 @@ class NativeDiagnosticsGateway implements DiagnosticsGateway {
   @override
   Future<void> clear() => model.runLocalSettings(rust.clearDiagnostics);
   @override
-  Future<String> exportLog() => model.runLocalSettings(rust.currentRunLog);
+  Future<String> exportLog() async {
+    await RuntimeDiagnostics.captureActiveMemory();
+    return model.runLocalSettings(rust.currentRunLog);
+  }
 }
 
 String diagnosticLabel(DiagnosticCode code) => switch (code) {

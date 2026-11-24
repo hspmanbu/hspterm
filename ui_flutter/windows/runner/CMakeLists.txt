@@ -50,7 +50,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "comctl32.lib" "advapi32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "gdi32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib" "uuid.lib")
-target_link_libraries(${BINARY_NAME} PRIVATE "crypt32.lib" "shell32.lib" "bcrypt.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "crypt32.lib" "shell32.lib" "bcrypt.lib" "psapi.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

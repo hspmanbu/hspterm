@@ -10,14 +10,18 @@
 //! build, buildFinish→rasterStart (raster queue backlog), raster — recorded
 //! in microseconds. Only frames over 250 ms log a single event; every other
 //! janky frame feeds a one-minute aggregate, so a busy session cannot flood
-//! the budget. Memory samples gained maxRss, Dart heap metrics and native
-//! cache counters (directory cache weight, painter glyph/row caches via the
-//! model), letting a future on-device log attribute RSS to a layer.
+//! the budget. Memory samples report process and cache counters, never claim
+//! that Working Set or private commit is the Dart/Rust heap. No VM service or
+//! forced GC is enabled in release builds.
 import 'dart:async';
 import 'dart:io' show Platform, ProcessInfo;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/painting.dart';
+import 'package:flutter/services.dart';
+
+import '../terminal/painter.dart';
 
 import 'dart:ui' show FramePhase;
 
@@ -27,7 +31,34 @@ import 'model.dart';
 /// Reports how late a heartbeat fired. A blocked UI isolate shows up here
 /// as one large drift sample instead of a pile of missing ticks.
 class RuntimeDiagnostics {
-  RuntimeDiagnostics(this._model);
+  RuntimeDiagnostics(
+    this._model, {
+    AppRunLog? log,
+    Future<Map<String, int>> Function()? nativeMemory,
+  }) : _log = log ?? AppRunLog.instance,
+       _nativeMemory = nativeMemory ?? readProcessMemory;
+  final AppRunLog _log;
+  final Future<Map<String, int>> Function() _nativeMemory;
+  static WeakReference<RuntimeDiagnostics>? _active;
+  static Future<void> captureActiveMemory() async =>
+      _active?.target?.sampleMemory();
+  static Future<Map<String, int>> readProcessMemory() async {
+    if (!Platform.isWindows) return {};
+    final values = await const MethodChannel('hspterm/prototype_window')
+        .invokeMapMethod<String, int>('processMemory');
+    if (values == null) throw StateError('Native memory sample unavailable');
+    return values;
+  }
+
+  Future<void>? _memoryWork;
+  bool _stopped = false;
+  int? _baselineRss,
+      _lastRss,
+      _baselinePrivate,
+      _lastPrivate,
+      _lastCpu,
+      _lastTime;
+
   final LiveWorkbenchModel? Function() _model;
 
   static const beat = Duration(seconds: 5);
@@ -48,6 +79,8 @@ class RuntimeDiagnostics {
 
   void start() {
     if (_heartbeat != null) return;
+    _stopped = false;
+    _active = WeakReference(this);
     _nextBeat = DateTime.now().add(beat);
     _heartbeat = Timer.periodic(beat, (_) {
       final now = DateTime.now();
@@ -55,7 +88,7 @@ class RuntimeDiagnostics {
       // Re-anchor after every beat so one long stall yields one record.
       _nextBeat = now.add(beat);
       if (drift > stallThresholdMs) {
-        AppRunLog.instance.event(
+        _log.event(
           AppLogEvent.uiStall,
           count: drift,
           fields: {'driftMs': drift, 'kind': 'heartbeat'},
@@ -90,7 +123,7 @@ class RuntimeDiagnostics {
       _aggMaxUs = totalUs > _aggMaxUs ? totalUs : _aggMaxUs;
       _aggQueueSumUs += vsyncToBuildUs + buildToRasterUs;
       if (totalUs > detailThresholdMs * 1000) {
-        AppRunLog.instance.event(
+        _log.event(
           AppLogEvent.frameJank,
           count: totalUs ~/ 1000,
           fields: {
@@ -108,7 +141,7 @@ class RuntimeDiagnostics {
 
   void _flushAggregate() {
     if (_aggCount == 0) return;
-    AppRunLog.instance.event(
+    _log.event(
       AppLogEvent.frameJank,
       count: _aggCount,
       fields: {
@@ -150,10 +183,135 @@ class RuntimeDiagnostics {
       fields['rssKiB'] = ProcessInfo.currentRss ~/ 1024;
       fields['maxRssKiB'] = ProcessInfo.maxRss ~/ 1024;
     }
-    AppRunLog.instance.event(AppLogEvent.resourceCount, fields: fields);
+    _log.event(AppLogEvent.resourceCount, fields: fields);
+  }
+
+  /// Coalesced, low-frequency sample. Native metrics only take local locks;
+  /// this never starts SSH probing, parses history or copies terminal text.
+  Future<void> sampleMemory() {
+    if (_stopped) return Future.value();
+    return _memoryWork ??= _sampleMemory().whenComplete(
+      () => _memoryWork = null,
+    );
+  }
+
+  Future<void> _sampleMemory() async {
+    final model = _model();
+    final fields = <String, Object>{'kind': 'memory', 'nativeFailures': 0};
+    try {
+      final native = await _nativeMemory();
+      // Accept only numeric, known fields even if the platform bridge changes.
+      for (final key in [
+        'rssKiB',
+        'maxRssKiB',
+        'privateKiB',
+        'peakPrivateKiB',
+        'handles',
+        'cpuUs',
+        'uptimeMs',
+      ]) {
+        if (native[key] case final value? when value >= 0) fields[key] = value;
+      }
+    } catch (_) {
+      fields['nativeFailures'] = 1;
+    }
+    if (_stopped) return;
+    fields.putIfAbsent('rssKiB', () => ProcessInfo.currentRss ~/ 1024);
+    fields.putIfAbsent('maxRssKiB', () => ProcessInfo.maxRss ~/ 1024);
+    final rss = fields['rssKiB'] as int;
+    _baselineRss ??= rss;
+    fields['rssGrowthKiB'] = rss - _baselineRss!;
+    if (_lastRss != null) fields['rssDeltaKiB'] = rss - _lastRss!;
+    _lastRss = rss;
+    if (fields['privateKiB'] case final int private) {
+      _baselinePrivate ??= private;
+      fields['privateGrowthKiB'] = private - _baselinePrivate!;
+      if (_lastPrivate != null) {
+        fields['privateDeltaKiB'] = private - _lastPrivate!;
+      }
+      _lastPrivate = private;
+    }
+    if (fields['cpuUs'] case final int cpu) {
+      final millis = fields['uptimeMs'] as int?;
+      if (millis != null &&
+          _lastTime != null &&
+          millis > _lastTime! &&
+          _lastCpu != null &&
+          cpu >= _lastCpu!) {
+        // 100% = one fully occupied logical CPU, may exceed 100%.
+        fields['cpuPercent'] = (cpu - _lastCpu!) / ((millis - _lastTime!) * 10);
+      }
+      _lastCpu = cpu;
+      _lastTime = millis;
+    }
+    final images = PaintingBinding.instance.imageCache;
+    fields.addAll({
+      'imageCacheKiB': images.currentSizeBytes ~/ 1024,
+      'imageCacheCount': images.currentSize,
+      'liveImages': images.liveImageCount,
+      'pendingImages': images.pendingImageCount,
+    });
+    fields.addAll(TerminalPaintCache.memoryCounters());
+    if (model != null) {
+      fields.addAll(model.editorMemoryCounters);
+      fields.addAll({
+        'terminals': model.sessions.length,
+        'edits': model.localEdits.length,
+        'transfers': model.totalTransferCount,
+      });
+      var cacheBytes = 0, dirs = 0, frameCells = 0, metricFailures = 0;
+      final totals = <String, int>{};
+      for (final s
+          in model.sessions.whereType<LiveTerminalSession>().toList()) {
+        final c = s.controller;
+        cacheBytes += s.directoryCache.estimatedBytes;
+        dirs += s.directoryCache.files.length;
+        frameCells += c.rows.fold<int>(0, (sum, row) => sum + row.length);
+        final id = c.id, generation = c.generation;
+        if (id == null) continue;
+        try {
+          final value = await c.backend.metrics(id);
+          if (_stopped) return;
+          if (c.id != id ||
+              c.generation != generation ||
+              !model.sessions.contains(s)) {
+            continue;
+          }
+          final values = {
+            'historyDiskKiB': value.diskBytes ~/ 1024,
+            'historyRows': value.historyRows,
+            'residentCells': value.residentHistoryCells,
+            'framePulls': value.framePulls,
+            'cellsSent': value.cellsSent,
+            'changedRows': value.changedRowsSent,
+          };
+          for (final entry in values.entries) {
+            totals.update(
+              entry.key,
+              (old) => old + entry.value,
+              ifAbsent: () => entry.value,
+            );
+          }
+        } catch (_) {
+          metricFailures++;
+        }
+      }
+      fields.addAll(totals);
+      fields.addAll({
+        'dirCacheKiB': cacheBytes ~/ 1024,
+        'dirCacheDirs': dirs,
+        'frameCells': frameCells,
+        'metricFailures': metricFailures,
+      });
+    }
+    if (!_stopped) {
+      _log.event(AppLogEvent.memorySample, count: rss, fields: fields);
+    }
   }
 
   void stop() {
+    _stopped = true;
+    if (identical(_active?.target, this)) _active = null;
     _heartbeat?.cancel();
     _heartbeat = null;
     _counts?.cancel();
