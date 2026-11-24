@@ -3347,7 +3347,7 @@ class TemporaryConnectionOptions {
           authentication == other.authentication;
 }
 
-/// No text/commands: bounded geometry for an explicit same-line click.
+/// No text/commands: bounded geometry for an explicit caret click.
 class TerminalCursorMove {
   final int column;
   final int row;

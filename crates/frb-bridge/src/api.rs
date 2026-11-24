@@ -1582,11 +1582,11 @@ pub async fn paste_text(id: u32, text: String, confirmed: bool) -> Result<PasteR
                 .input(TerminalInput::Paste { text, confirmed })
                 .await?
             {
-                InputOutcome::Sent => PasteResult {
+                InputOutcome::Sent { bracketed_paste } => PasteResult {
                     needs_confirmation: false,
                     lines: 0,
                     bytes: 0,
-                    bracketed: false,
+                    bracketed: bracketed_paste,
                 },
                 InputOutcome::Confirm {
                     lines,
@@ -4741,7 +4741,7 @@ pub async fn paste_clipboard_image_path(id: u32, generation: u64, path: String) 
                         }
                     )
                     .await?,
-                InputOutcome::Sent
+                InputOutcome::Sent { .. }
             ),
             "图片路径粘贴未确认，未自动重试"
         );
@@ -7183,7 +7183,7 @@ pub async fn configure_remote_inspection(
     crate::public_errors::finish(outcome)
 }
 
-/// No text/commands: bounded geometry for an explicit same-line click.
+/// No text/commands: bounded geometry for an explicit caret click.
 pub struct TerminalCursorMove {
     pub column: u16,
     pub row: u16,

@@ -14,6 +14,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge.dart'
 import '../src/rust/api.dart' as rust;
 import '../src/rust/tmux.dart' as tmx;
 import 'backend.dart';
+import 'caret_navigation.dart';
 import 'notifications.dart';
 
 typedef TerminalTransportInfo = ({
@@ -124,6 +125,7 @@ class TerminalController extends ChangeNotifier {
     if (shell && (_tmuxPane != pane || !_tmuxShell)) {
       _shutdownIntent.cancelLine();
     }
+    if (_tmuxPane != pane) _clearCaretEdit();
     _tmuxPane = pane;
     _tmuxPaneGeneration = generation;
     _tmuxShell = shell;
@@ -456,6 +458,9 @@ class TerminalController extends ChangeNotifier {
             _shutdownIntent.pending) {
           manualReconnectRequired = true;
         }
+        if (generation != event.generation || event.text != 'Connected') {
+          _clearCaretEdit();
+        }
         generation = event.generation;
         phase = event.text ?? phase;
         error = manualReconnectRequired && phase == 'Disconnected'
@@ -500,6 +505,7 @@ class TerminalController extends ChangeNotifier {
             ? null
             : event.text == 'readonly';
         if (event.generation == generation) {
+          _clearCaretEdit();
           tmuxReadonly = _pendingTmuxMode;
           _shutdownIntent.invalidate();
           _tmuxPane = null;
@@ -712,6 +718,7 @@ class TerminalController extends ChangeNotifier {
       rows: frame.rows,
       sizeLocked: frame.sizeLocked,
     );
+    _observeCaretEcho(frame);
     frameCount++;
     notifyListeners();
   }
@@ -783,6 +790,106 @@ class TerminalController extends ChangeNotifier {
     }
   }
 
+  ConfirmedCaretEdit? _caretEdit;
+  (({int generation, rust.RenderFrame frame}), String)? _pendingCaretEcho;
+  Timer? _caretEchoTimeout;
+
+  void _clearCaretEdit() {
+    _caretEdit = null;
+    _pendingCaretEcho = null;
+    _caretEchoTimeout?.cancel();
+    _caretEchoTimeout = null;
+  }
+
+  void _observeCaretEcho(rust.RenderFrame frame) {
+    if (_caretEdit case final edit?) {
+      if (!frame.cursorVisible ||
+          frame.displayOffset != 0 ||
+          (tmuxReadonly == null && frame.mouseReporting) ||
+          !edit.contains(rows, Point(frame.cursorColumn, frame.cursorRow))) {
+        _clearCaretEdit();
+      }
+    }
+    final pending = _pendingCaretEcho;
+    if (pending == null) return;
+    final (before, text) = pending;
+    final old = before.frame;
+    if (before.generation != generation ||
+        frame.displayOffset != 0 ||
+        frame.columns != old.columns ||
+        frame.rows != old.rows ||
+        frame.historyLines != old.historyLines ||
+        frame.alternateScreen != old.alternateScreen ||
+        (tmuxReadonly == null && frame.mouseReporting)) {
+      _clearCaretEdit();
+      return;
+    }
+    if (frame.contentRevision == old.contentRevision || !frame.cursorVisible) {
+      return;
+    }
+    final edit = confirmCaretPaste(
+      rows,
+      Point(old.cursorColumn, old.cursorRow),
+      Point(frame.cursorColumn, frame.cursorRow),
+      text,
+    );
+    if (edit != null) {
+      _clearCaretEdit();
+      _caretEdit = edit;
+    }
+  }
+
+  int _caretSteps(rust.RenderFrame frame, Point<int> cell) => caretDistance(
+    rows,
+    Point(frame.cursorColumn, frame.cursorRow),
+    cell,
+    edit: _caretEdit,
+  );
+
+  bool _currentCaretFrame(rust.RenderFrame frame) {
+    final current = metadata;
+    return visible &&
+        !composing &&
+        current != null &&
+        current.displayOffset == 0 &&
+        current.contentRevision == frame.contentRevision &&
+        current.columns == frame.columns &&
+        current.rows == frame.rows &&
+        current.cursorRow == frame.cursorRow &&
+        current.cursorColumn == frame.cursorColumn &&
+        current.cursorVisible == frame.cursorVisible &&
+        current.alternateScreen == frame.alternateScreen &&
+        current.mouseReporting == frame.mouseReporting;
+  }
+
+  Future<void> moveCaret(rust.RenderFrame frame, Point<int> cell) =>
+      _ordered((id) async {
+        if (!_currentCaretFrame(frame) ||
+            tmuxReadonly != null ||
+            frame.mouseReporting) {
+          return;
+        }
+        final steps = _caretSteps(frame, cell);
+        if (steps == 0) return;
+        final input = rust.KeyboardInput(
+          key: steps > 0 ? 'ArrowRight' : 'ArrowLeft',
+          modifiers: 0,
+          kind: 0,
+        );
+        final expected = generation;
+        _trackPowerKey(input);
+        for (var i = 0; i < steps.abs(); i++) {
+          if (!connected ||
+              generation != expected ||
+              metadata?.displayOffset != 0 ||
+              metadata?.mouseReporting != false ||
+              metadata?.alternateScreen != frame.alternateScreen) {
+            break;
+          }
+          await backend.key(id, input);
+        }
+      });
+
   Future<void> key(rust.KeyboardInput input) async {
     final value = id;
     if (value == null) return;
@@ -801,6 +908,7 @@ class TerminalController extends ChangeNotifier {
           input.modifiers == 1) {
         if (tmuxReadonly == true || input.kind == 2) return;
         await _ordered((id) async {
+          _clearCaretEdit();
           if (_shutdownInputEligible) {
             _shutdownIntent.enter();
           } else {
@@ -811,6 +919,7 @@ class TerminalController extends ChangeNotifier {
         return;
       }
       await _ordered((id) async {
+        if (input.kind != 2) _clearCaretEdit();
         _trackPowerKey(input);
         await backend.key(id, input);
       });
@@ -824,6 +933,7 @@ class TerminalController extends ChangeNotifier {
     if (value != null && connected && text.isNotEmpty) {
       try {
         await _ordered((id) async {
+          _clearCaretEdit();
           if (_shutdownInputEligible) {
             _shutdownIntent.text(text);
           } else {
@@ -852,6 +962,7 @@ class TerminalController extends ChangeNotifier {
               generation != expectedGeneration) {
             throw StateError('图片粘贴所属连接已改变，未输入');
           }
+          _clearCaretEdit();
           await send();
           result.complete();
         })
@@ -872,7 +983,39 @@ class TerminalController extends ChangeNotifier {
               generation != expected) {
             throw StateError('粘贴所属连接已结束');
           }
+          final before = metadata;
+          final pane = _tmuxPane;
+          _clearCaretEdit();
           final pasted = await backend.paste(value, text, confirmed);
+          if (pasted.bracketed &&
+              !pasted.needsConfirmation &&
+              before != null &&
+              before.cursorVisible &&
+              before.displayOffset == 0 &&
+              text.length <= 2048 &&
+              visible &&
+              connected &&
+              expected == generation &&
+              pane == _tmuxPane &&
+              tmuxReadonly != true) {
+            final normalized = text
+                .replaceAll('\r\n', '\n')
+                .replaceAll('\r', '\n');
+            if (normalized.contains('\n') &&
+                normalized.trim().isNotEmpty &&
+                !RegExp(r'[\x00-\x09\x0b-\x1f\x7f-\x9f]')
+                    .hasMatch(normalized)) {
+              _pendingCaretEcho = (
+                (generation: expected, frame: before),
+                normalized,
+              );
+              _caretEchoTimeout = Timer(
+                const Duration(seconds: 2),
+                _clearCaretEdit,
+              );
+              if (metadata case final latest?) _observeCaretEcho(latest);
+            }
+          }
           if (!pasted.needsConfirmation) {
             if (_shutdownInputEligible) {
               _shutdownIntent.text(text);
@@ -899,7 +1042,8 @@ class TerminalController extends ChangeNotifier {
   );
   bool _tmuxClickPending = false;
   Future<void> clickTmuxCursor(
-    rust.TerminalCursorMove movement, {
+    rust.RenderFrame frame,
+    Point<int> cell, {
     required bool mouseForwarded,
   }) {
     final pointer = backend, pane = _tmuxPane, expected = generation;
@@ -914,9 +1058,22 @@ class TerminalController extends ChangeNotifier {
     // Ordering includes any native click pair; subsequent typing cannot race
     // the probe. Extra clicks while awaiting it are not accumulated or replayed.
     return _ordered((id) async {
-      if (tmuxReadonly != false || _tmuxPane != pane) return;
+      if (tmuxReadonly != false ||
+          _tmuxPane != pane ||
+          !_currentCaretFrame(frame)) {
+        return;
+      }
+      final click = rust.TerminalCursorMove(
+        column: cell.x,
+        row: cell.y,
+        cursorColumn: frame.cursorColumn,
+        cursorRow: frame.cursorRow,
+        steps: !frame.cursorVisible && cell.y != frame.cursorRow
+            ? 0
+            : _caretSteps(frame, cell).abs(),
+      );
       final route = await (pointer as TerminalTmuxPointerBackend)
-          .tmuxClickCursor(id, expected, pane, movement);
+          .tmuxClickCursor(id, expected, pane, click);
       if (route == 'mouse' &&
           tmuxReadonly == false &&
           _tmuxPane == pane &&
@@ -924,13 +1081,13 @@ class TerminalController extends ChangeNotifier {
           !_disposed &&
           connected &&
           generation == expected) {
-        await backend.mouse(id, movement.column, movement.row, 0, 0, 0);
+        await backend.mouse(id, cell.x, cell.y, 0, 0, 0);
         if (!_disposed &&
             connected &&
             generation == expected &&
             tmuxReadonly == false &&
             _tmuxPane == pane) {
-          await backend.mouse(id, movement.column, movement.row, 1, 0, 0);
+          await backend.mouse(id, cell.x, cell.y, 1, 0, 0);
         }
       }
     }).whenComplete(() => _tmuxClickPending = false);
@@ -1170,6 +1327,7 @@ class TerminalController extends ChangeNotifier {
     if (value) {
       _scheduleResize();
     } else {
+      _clearCaretEdit();
       _resizeTimer?.cancel();
     }
     final terminal = id;
@@ -1261,6 +1419,7 @@ class TerminalController extends ChangeNotifier {
     if (!_disposed) {
       _disposed = true;
       phase = 'Closing';
+      _clearCaretEdit();
       _connectNoticeEpoch++;
       _resizeTimer?.cancel();
       _searchTimer?.cancel();
@@ -1320,6 +1479,7 @@ class TerminalController extends ChangeNotifier {
     // The workbench retains retiring controllers and awaits shutdown itself.
     // Dispose must not emit an unhandled error or erase its retryable owner.
     _notifiersDisposed = true;
+    _clearCaretEdit();
     unawaited(shutdown().catchError((Object _) {}));
     forwardingChanges.dispose();
     agentChanges.dispose();

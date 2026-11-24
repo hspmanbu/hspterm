@@ -98,7 +98,9 @@ pub enum TerminalInput {
 }
 #[derive(Debug, PartialEq, Eq)]
 pub enum InputOutcome {
-    Sent,
+    Sent {
+        bracketed_paste: bool,
+    },
     Confirm {
         lines: usize,
         bytes: usize,
@@ -1112,9 +1114,11 @@ async fn run(
                             drop(reply.send(Err(SshError::Disconnected)));
                             continue;
                         }
-                        let encoded = {
+                        let (encoded, bracketed_paste) = {
                             let terminal = terminal.lock();
-                            match input {
+                            let bracketed_paste = matches!(&input, TerminalInput::Paste { .. })
+                                && terminal.bracketed_paste();
+                            let encoded = match input {
                                 TerminalInput::Key(event) => {
                                     terminal.encode_key(&event).map(|bytes| {
                                         terminal.observe_integration_key(&event, &bytes);
@@ -1137,7 +1141,8 @@ async fn run(
                                 TerminalInput::Focus(focus) => {
                                     Ok(PastePlan::Ready(terminal.focus_bytes(focus)))
                                 }
-                            }
+                            };
+                            (encoded, bracketed_paste)
                         };
                         let result = match encoded {
                             Ok(PastePlan::Confirm {
@@ -1150,7 +1155,10 @@ async fn run(
                                 bracketed,
                             }),
                             Ok(PastePlan::Ready(bytes)) => match connection.as_ref() {
-                                Some(conn) => conn.write(&bytes).await.map(|_| InputOutcome::Sent),
+                                Some(conn) => conn
+                                    .write(&bytes)
+                                    .await
+                                    .map(|_| InputOutcome::Sent { bracketed_paste }),
                                 None => Err(SshError::Disconnected),
                             },
                             Err(error) => Err(error.into()),

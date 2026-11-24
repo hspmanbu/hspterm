@@ -767,61 +767,26 @@ class TerminalViewState extends State<TerminalView>
   /// plain-shell proof ready, leftover TUI mouse mode gets no events.
   bool get _forwardRemoteMouse => _capture && !c.shellInputReady;
 
-  /// Same-row keyboard fallback for applications without mouse reporting.
-  /// tmux's outer mode is not the inner app's mode: the native operation
-  /// probes it afresh and guards identity/geometry/mode in tmux's own queue.
+  /// Local caret navigation and the tmux inner application's mouse routing.
   void _clickToCursor(Point<int> cell, {bool mouseForwarded = false}) {
     final frame = c.metadata;
     if (frame == null ||
         !c.connected ||
         c.id == null ||
-        frame.displayOffset != 0) {
+        frame.displayOffset != 0 ||
+        c.composing) {
       return;
     }
-    final tmux = c.tmuxReadonly != null;
-    if (!tmux &&
-        (frame.mouseReporting ||
-            frame.alternateScreen && !frame.cursorVisible)) {
+    if (c.tmuxReadonly != null) {
+      _run(c.clickTmuxCursor(frame, cell, mouseForwarded: mouseForwarded));
       return;
     }
-    if (!tmux && cell.y != frame.cursorRow) return;
-    final cells = frame.cursorRow >= 0 && frame.cursorRow < c.rows.length
-        ? c.rows[frame.cursorRow]
-        : const <rust.RenderCell>[];
-    if (cells.isEmpty) return;
-    int snap(int column) {
-      final value = column.clamp(0, cells.length - 1);
-      return cells[value].flags & 64 != 0 && value > 0 ? value - 1 : value;
-    }
-
-    final target = snap(cell.x), cursor = snap(frame.cursorColumn);
-    var steps = 0;
-    if (cell.y == frame.cursorRow) {
-      for (var x = min(cursor, target); x < max(cursor, target); x++) {
-        if (cells[x].flags & (64 | 1024) == 0) steps++;
-      }
-    }
-    if (tmux) {
-      _run(
-        c.clickTmuxCursor(
-          rust.TerminalCursorMove(
-            column: cell.x,
-            row: cell.y,
-            cursorColumn: frame.cursorColumn,
-            cursorRow: frame.cursorRow,
-            steps: steps,
-          ),
-          mouseForwarded: mouseForwarded,
-        ),
-      );
+    if (frame.mouseReporting ||
+        (!frame.cursorVisible &&
+            (frame.alternateScreen || cell.y != frame.cursorRow))) {
       return;
     }
-    if (steps == 0) return;
-    _snapToBottomForInput();
-    final key = target > cursor ? 'ArrowRight' : 'ArrowLeft';
-    for (var i = 0; i < steps; i++) {
-      _run(c.key(rust.KeyboardInput(key: key, modifiers: 0, kind: 0)));
-    }
+    _run(c.moveCaret(frame, cell));
   }
 
   void down(PointerDownEvent event) {
@@ -1132,8 +1097,7 @@ class TerminalViewState extends State<TerminalView>
                     _anchor = null;
                     _button = 3;
                     if (selected) _copySelectionIfWanted();
-                    // A no-drag plain click on the cursor's row becomes
-                    // caret movement instead of an empty selection.
+                    // A plain click can position the caret without starting a drag.
                     if (plainPress && pressCell == _point(e.localPosition)) {
                       _clickToCursor(pressCell, mouseForwarded: forwarded);
                     }

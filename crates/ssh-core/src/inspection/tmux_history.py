@@ -36,9 +36,10 @@ def click_cursor(request, target, pane, mode):
         return 'mouse'
     x, y, expected_x, expected_y, steps = [click[k] for k in
         ('column', 'row', 'cursor_column', 'cursor_row', 'steps')]
-    if (not cursor or y != expected_y or expected_y != top + cy
-            or expected_x != left + cx or not left <= x < left + width
-            or not 0 < steps <= abs(x - expected_x) <= width):
+    distance = (y - expected_y) * width + x - expected_x
+    if (not cursor or expected_y != top + cy or expected_x != left + cx
+            or not top <= y < top + height or not left <= x < left + width
+            or abs(y - expected_y) >= 16 or not 0 < steps <= min(abs(distance), 512)):
         return 'ignored'
     def both(a, b):
         return '#{&&:%s,%s}' % (a, b)
@@ -52,7 +53,7 @@ def click_cursor(request, target, pane, mode):
         condition = both(condition, '#{==:#{%s},%s}' % (key, value))
     # Atomic tmux-queue guard: a pane switch, program mouse-mode change,
     # resize or cursor change cancels the move. Never replay an unknown ACK.
-    action = 'send-keys -t %s -N %d %s' % (pane, steps, 'Right' if x > expected_x else 'Left')
+    action = 'send-keys -t %s -N %d %s' % (pane, steps, 'Right' if distance > 0 else 'Left')
     run('if-shell', '-F', '-t', target, condition, action, '')
     return 'handled'
 

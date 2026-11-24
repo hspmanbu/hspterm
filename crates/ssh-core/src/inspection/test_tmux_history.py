@@ -45,6 +45,16 @@ class HistoryTests(unittest.TestCase):
         self.assertIn('#{pane_id},%3', calls[-1][-3])
         self.assertIn('#{session_created},456', calls[-1][-3])
 
+    def test_cross_row_direction_uses_the_row_before_the_column(self):
+        for click, key in [
+            (dict(column=1, row=4, cursor_column=5, cursor_row=3, steps=20), 'Right'),
+            (dict(column=12, row=2, cursor_column=5, cursor_row=3, steps=20), 'Left'),
+        ]:
+            result, calls = self.invoke(dict(pane='%3', click=click),
+                ['123|456|%3|80|0|24||100', '%3|0|0|80|24|5|3|1|0|0'])
+            self.assertEqual(result, dict(pointer='handled'))
+            self.assertEqual(calls[-1][-2], 'send-keys -t %3 -N 20 ' + key)
+
     def test_native_mouse_routes_to_application_without_injecting_keys(self):
         click = dict(column=8, row=10, cursor_column=5, cursor_row=3, steps=0)
         result, calls = self.invoke(dict(pane='%3', click=click),
@@ -60,7 +70,7 @@ class HistoryTests(unittest.TestCase):
             ({}, '%3|0|0|80|24|6|3|1|0|0', {}),
             ({}, '%3|0|0|80|24|5|3|0|0|0', {}),
             ({}, '%3|0|0|80|24|5|3|1|0|1', {}),
-            ({}, '%3|0|0|80|24|5|3|1|0|0', {'row': 4}),
+            ({}, '%3|0|0|80|24|5|3|1|0|0', {'row': 24}),
             ({}, '%3|0|0|80|24|5|3|1|0|0', {'steps': 99}),
         ]:
             request = dict(pane='%3', click=dict(original, **change), **extra)
