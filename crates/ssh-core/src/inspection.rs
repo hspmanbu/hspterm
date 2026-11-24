@@ -48,6 +48,8 @@ pub struct Sample {
     pub memory_available: u64,
     pub disk_total: u64,
     pub disk_available: u64,
+    #[serde(default)]
+    pub network: String,
     pub rx: u64,
     pub tx: u64,
 }
@@ -87,6 +89,11 @@ impl Sample {
         let result: Self = serde_json::from_slice(raw).map_err(|_| InspectionError::Unavailable)?;
         if result.version != 1
             || !valid_boot(&result.boot)
+            || result.network.len() > 2048
+            || !result
+                .network
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"_.-:,".contains(&c))
             || result.cpu_idle > result.cpu_total
             || result.memory_total == 0
             || result.memory_available > result.memory_total
@@ -777,6 +784,7 @@ mod tests {
             memory_available: 50,
             disk_total: 1000,
             disk_available: 10,
+            network: "eth0:2".into(),
             rx: 12,
             tx: 40,
         };

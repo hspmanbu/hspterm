@@ -74,11 +74,15 @@ int _number(Map<String, dynamic> value, String key) {
   return n;
 }
 
-Map<String, dynamic> _document(String raw, Set<String> keys) {
+Map<String, dynamic> _document(
+  String raw,
+  Set<String> keys, {
+  Set<String> optional = const {},
+}) {
   if (raw.length > 256 * 1024) throw const FormatException('远端检查数据超过容量');
   final v = jsonDecode(raw) as Map<String, dynamic>;
-  if (v.length != keys.length ||
-      !v.keys.every(keys.contains) ||
+  if (!keys.every(v.containsKey) ||
+      !v.keys.every((key) => keys.contains(key) || optional.contains(key)) ||
       v['version'] != 1 ||
       v['boot'] is! String ||
       !RegExp(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$')
@@ -100,8 +104,9 @@ class RemoteResourceSample {
     this.diskAvailable,
     this.rx,
     this.tx,
+    this.network,
   );
-  final String boot;
+  final String boot, network;
   final int millis,
       cpuTotal,
       cpuIdle,
@@ -112,19 +117,23 @@ class RemoteResourceSample {
       rx,
       tx;
   factory RemoteResourceSample.parse(String raw) {
-    final v = _document(raw, {
-      'version',
-      'boot',
-      'millis',
-      'cpu_total',
-      'cpu_idle',
-      'memory_total',
-      'memory_available',
-      'disk_total',
-      'disk_available',
-      'rx',
-      'tx',
-    });
+    final v = _document(
+      raw,
+      {
+        'version',
+        'boot',
+        'millis',
+        'cpu_total',
+        'cpu_idle',
+        'memory_total',
+        'memory_available',
+        'disk_total',
+        'disk_available',
+        'rx',
+        'tx',
+      },
+      optional: const {'network'},
+    );
     final s = RemoteResourceSample._(
       v['boot'] as String,
       _number(v, 'millis'),
@@ -136,8 +145,13 @@ class RemoteResourceSample {
       _number(v, 'disk_available'),
       _number(v, 'rx'),
       _number(v, 'tx'),
+      v['network'] == null && !v.containsKey('network')
+          ? 'legacy'
+          : v['network'] as String,
     );
-    if (s.cpuIdle > s.cpuTotal ||
+    if (s.network.length > 2048 ||
+        !RegExp(r'^[a-zA-Z0-9_.:,\-]*$').hasMatch(s.network) ||
+        s.cpuIdle > s.cpuTotal ||
         s.memoryTotal == 0 ||
         s.memoryAvailable > s.memoryTotal ||
         s.diskTotal == 0 ||
@@ -158,6 +172,7 @@ class RemoteResourceSummary {
     if (total > 0 && idle >= 0 && idle <= total) {
       cpu = 100 * (total - idle) / total;
     }
+    if (sample.network.isEmpty || sample.network != previous.network) return;
     if (sample.rx >= previous.rx) {
       rxPerSecond = (sample.rx - previous.rx) * 1000 / elapsed;
     }
@@ -171,7 +186,7 @@ class RemoteResourceSummary {
       'CPU ${cpu == null ? '—' : '${cpu!.toStringAsFixed(0)}%'} · '
       '内存 ${((sample.memoryTotal - sample.memoryAvailable) * 100 / sample.memoryTotal).toStringAsFixed(0)}% · '
       '根盘 ${((sample.diskTotal - sample.diskAvailable) * 100 / sample.diskTotal).toStringAsFixed(0)}% · '
-      '↓${_rate(rxPerSecond)} ↑${_rate(txPerSecond)}';
+      '收↓${_rate(rxPerSecond)} 发↑${_rate(txPerSecond)}';
   static String _rate(double? n) => n == null
       ? '—'
       : n >= 1048576
@@ -385,6 +400,8 @@ class RemoteInspectionController extends ChangeNotifier {
   void setActive(bool value) {
     if (active == value || _disposed) return;
     active = value;
+    // Never carry a rate interval across time spent in the background.
+    summary = null;
     _timer?.cancel();
     _timer = null;
     if (value) _schedule(immediate: true);
@@ -500,6 +517,8 @@ class RemoteInspectionController extends ChangeNotifier {
           // degrade to an explicit reconnect hint once the channel stays owned.
           if (appMessage(e) == '远端检查正在处理或等待旧通道结束；未开始新请求') {
             _busyStreak += 1;
+            if (summary case final old?)
+              summary = RemoteResourceSummary(old.sample, null);
             if (_busyStreak >= _busyStreakLimit) {
               error = '远端检查通道未释放，建议重连会话';
             }

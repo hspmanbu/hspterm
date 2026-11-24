@@ -179,7 +179,9 @@ class _WorkbenchConnectionStatusState extends State<WorkbenchConnectionStatus>
                         key: const ValueKey('remote-inspection-status'),
                         onTap: () => showRemoteInspection(context, source),
                         child: Tooltip(
-                          message: resource ?? inspection.error ?? '资源采样中',
+                          message: resource == null
+                              ? inspection.error ?? '资源采样中'
+                              : '$resource\n默认出口：${inspection.summary!.sample.network}\n服务器接收↓ / 发送↑，包含该网卡全部流量；与 iftop 比较时请选择同一网卡。',
                           child: SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             reverse: true,

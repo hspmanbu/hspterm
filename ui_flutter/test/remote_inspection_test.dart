@@ -15,6 +15,7 @@ String _sample({
   int total = 100,
   int idle = 20,
   String? boot,
+  String network = "eth0:2",
 }) => jsonEncode({
   'version': 1,
   'boot': boot ?? '01234567-89ab-cdef-0123-456789abcdef',
@@ -25,6 +26,7 @@ String _sample({
   'memory_available': 256,
   'disk_total': 2048,
   'disk_available': 512,
+  'network': network,
   'rx': total * 1024,
   'tx': total * 512,
 });
@@ -137,7 +139,8 @@ void main() {
         expect(c.metrics, true);
         expect(gateway.samples, 1);
         gateway.sampleBusy = false;
-        await tester.pump(const Duration(seconds: 5));
+        // The first refused probe doubles the five-second polling interval.
+        await tester.pump(const Duration(seconds: 10));
         expect(gateway.samples, 2);
         expect(c.summary, isNotNull);
         gateway.sampleInvalid = true;
@@ -210,6 +213,25 @@ void main() {
       await closeTerminal(tester, terminal);
     },
   );
+  test('interface changes reset rates without resetting CPU', () {
+    final previous = RemoteResourceSample.parse(_sample());
+    for (final scope in ['eth1:3', 'eth0:99', '']) {
+      final next = RemoteResourceSample.parse(
+        _sample(millis: 6000, total: 200, idle: 40, network: scope),
+      );
+      final summary = RemoteResourceSummary(next, previous);
+      expect(summary.cpu, 80);
+      expect(summary.rxPerSecond, isNull);
+      expect(summary.txPerSecond, isNull);
+    }
+    final current = RemoteResourceSample.parse(
+      _sample(millis: 6000, total: 200, idle: 40),
+    );
+    expect(
+      RemoteResourceSummary(current, previous).label,
+      contains('收↓20.0KiB/s 发↑10.0KiB/s'),
+    );
+  });
   test('adjacent monotonic samples calculate rates and refuse boot changes, resets and stale intervals', () {
     final a = RemoteResourceSample.parse(_sample());
     final b = RemoteResourceSample.parse(
