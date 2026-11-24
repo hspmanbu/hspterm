@@ -108,7 +108,9 @@ void main() {
     final c = TerminalController(backend);
     await c.start();
     c.phase = 'Connected';
-    c.applyFrame(fixture());
+    // A plain-shell click legitimately emits caret-positioning arrows.
+    // Use actual TUI mouse capture for this keyboard/IME protocol test.
+    c.applyFrame(fixture(mouse: true));
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(body: TerminalView(controller: c)),
