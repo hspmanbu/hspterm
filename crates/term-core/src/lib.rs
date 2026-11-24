@@ -834,13 +834,13 @@ impl Terminal {
     }
     pub fn document(&self) -> Result<SearchDocument, TerminalError> {
         self.history.check()?;
-        Ok(SearchDocument {
-            revision: self.content_revision,
-            columns: self.size.columns,
-            history_lines: self.term.grid().history_size(),
-            grid: self.term.grid().clone(),
-            check: self.history.fault_checker(),
-        })
+        Ok(SearchDocument::capture(
+            self.content_revision,
+            self.size.columns,
+            self.term.grid().history_size(),
+            self.term.grid(),
+            self.history.fault_checker(),
+        ))
     }
     pub fn seek(&mut self, top_row: usize) -> Result<(), TerminalError> {
         let history = self.term.grid().history_size();

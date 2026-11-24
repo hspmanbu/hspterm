@@ -347,11 +347,11 @@ mod tests {
     fn offsets_never_point_inside_a_wide_cell_or_a_combining_sequence() {
         let mut terminal = Terminal::new(Size::new(12, 5).unwrap(), 100).unwrap();
         terminal.feed("中e\u{301}".as_bytes()).unwrap();
-        let document = terminal.document().unwrap();
+        let grid = terminal.term.grid();
         let locations: Vec<_> = (0..4).map(|column| TextPoint { row: 0, column }).collect();
-        let (before, mapped) = offsets(&document.grid, 12, &locations).unwrap();
+        let (before, mapped) = offsets(grid, 12, &locations).unwrap();
         assert_eq!(mapped, vec![Some(0), None, Some(3), Some(6)]);
-        let (after, mapped) = points(&document.grid, 12, &[0, 3, 4, 6]).unwrap();
+        let (after, mapped) = points(grid, 12, &[0, 3, 4, 6]).unwrap();
         assert!(before == after);
         assert_eq!(
             mapped,
@@ -369,10 +369,10 @@ mod tests {
         let mut b = Terminal::new(Size::new(12, 8).unwrap(), 100).unwrap();
         a.feed(b"xy").unwrap();
         b.feed(b"xy").unwrap();
-        let a = a.document().unwrap();
-        let b = b.document().unwrap();
+        let a_grid = a.term.grid();
+        let b_grid = b.term.grid();
         let (one, mapped) = offsets(
-            &a.grid,
+            a_grid,
             12,
             &[
                 TextPoint { row: 0, column: 3 },
@@ -381,7 +381,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let two = scan(&b.grid, 12, |_, _| {}).unwrap();
+        let two = scan(b_grid, 12, |_, _| {}).unwrap();
         assert!(one == two);
         assert_eq!(one.bytes, 3);
         assert_eq!(mapped, vec![None, Some(3), None]);

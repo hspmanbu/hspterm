@@ -204,6 +204,10 @@ impl<T> Row<T> {
     pub fn owned_cells(&self) -> Vec<T> where T: Clone {
         match &self.page { Some(page) => page.load(), None => self.inner.clone() }
     }
+    /// Share the immutable cold page without copying mutable row bookkeeping
+    /// or the viewport's decoded cache into a short-lived search/export view.
+    #[cfg(feature = "hspterm-history")]
+    pub fn frozen_page(&self) -> Option<Arc<dyn RowBacking<T>>> { self.page.clone() }
     #[cfg(feature = "hspterm-history")]
     pub fn resident_cells(&self) -> usize {
         if self.page.is_some() { self.resident.get().map_or(0, Vec::len) } else { self.inner.len() }
