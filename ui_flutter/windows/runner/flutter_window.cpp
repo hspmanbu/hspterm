@@ -228,6 +228,15 @@ bool FlutterWindow::OnCreate() {
         integrated_frame_ = false;
         result->Error("window_frame", "无法更新窗口边框；保留系统标题栏"); return;
       }
+    } else if (method == "clipboardHasImage") {
+      // Check actual Windows formats, before requesting synthesized PNG data.
+      // An empty clipboard must not create an upload task or an empty image.
+      const UINT png = RegisterClipboardFormatW(L"PNG");
+      result->Success(flutter::EncodableValue(
+          IsClipboardFormatAvailable(CF_DIB) ||
+          IsClipboardFormatAvailable(CF_DIBV5) ||
+          (png != 0 && IsClipboardFormatAvailable(png))));
+      return;
     } else if (method == "minimize") {
       ShowWindow(window, SW_MINIMIZE);
     } else if (method == "maximize") {

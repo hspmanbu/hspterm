@@ -4805,6 +4805,19 @@ pub async fn clipboard_image_progress(
     crate::public_errors::finish(outcome)
 }
 
+/// Requests cancellation of only the matching image operation. The upload
+/// future still owns ACK draining and channel cleanup; false means not started.
+pub async fn cancel_clipboard_image(id: u32, generation: u64, local_path: String) -> Result<bool> {
+    /* HSPTERM_PUBLIC_ERROR_BOUNDARY */
+    let outcome: Result<_> = crate::public_errors::guard(async move {
+        Ok(entry(id)?
+            .image_uploads
+            .cancel(generation, std::path::Path::new(&local_path)))
+    })
+    .await;
+    crate::public_errors::finish(outcome)
+}
+
 pub async fn upload_clipboard_image(
     id: u32,
     generation: u64,

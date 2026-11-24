@@ -154,6 +154,7 @@ void main() {
       await render(LocalEditStatus.downloading, 1024, 2048);
       expect(find.text('50% · 1.0 KiB / 2.0 KiB'), findsOneWidget);
       await render(LocalEditStatus.uploading, 1048576, 2097152);
+      expect(find.byTooltip('取消上传'), findsOneWidget);
       expect(find.text('50% · 1.0 MiB / 2.0 MiB'), findsOneWidget);
       await render(LocalEditStatus.downloading, 10, null);
       expect(

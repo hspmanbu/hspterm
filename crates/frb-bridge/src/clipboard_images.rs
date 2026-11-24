@@ -18,10 +18,16 @@ struct Progress {
     total: u64,
 }
 
+struct Active {
+    generation: u64,
+    local: PathBuf,
+    stop: CancellationToken,
+}
+
 #[derive(Default)]
 pub(crate) struct Uploads {
     gate: tokio::sync::Mutex<()>,
-    active: Mutex<Option<CancellationToken>>,
+    active: Mutex<Option<Active>>,
     channels: crate::transfer_channels::Channels,
     progress: Mutex<Option<Progress>>,
 }
@@ -54,7 +60,11 @@ impl Uploads {
             {
                 bail!("原图片粘贴会话已断开或改变，未上传");
             }
-            *active = Some(stop.clone());
+            *active = Some(Active {
+                generation,
+                local: local.to_owned(),
+                stop: stop.clone(),
+            });
             self.progress.lock().take();
         }
         let mut states = session.subscribe();
@@ -112,9 +122,21 @@ impl Uploads {
         self.active.lock().take();
         outcome
     }
+    pub(crate) fn cancel(&self, generation: u64, local: &Path) -> bool {
+        let active = self.active.lock();
+        if let Some(work) = active
+            .as_ref()
+            .filter(|work| work.generation == generation && work.local == local)
+        {
+            work.stop.cancel();
+            return true;
+        }
+        false
+    }
+
     pub(crate) async fn stop(&self) -> Result<()> {
         if let Some(stop) = self.active.lock().as_ref() {
-            stop.cancel();
+            stop.stop.cancel();
         }
         let _gate = self.gate.lock().await;
         self.channels.retire().await
@@ -124,6 +146,23 @@ impl Uploads {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cancel_is_bound_to_both_generation_and_source_file() {
+        let uploads = Uploads::default();
+        let stop = CancellationToken::new();
+        *uploads.active.lock() = Some(Active {
+            generation: 7,
+            local: PathBuf::from("one.png"),
+            stop: stop.clone(),
+        });
+        assert!(!uploads.cancel(8, Path::new("one.png")));
+        assert!(!uploads.cancel(7, Path::new("two.png")));
+        assert!(!stop.is_cancelled());
+        assert!(uploads.cancel(7, Path::new("one.png")));
+        assert!(stop.is_cancelled());
+        uploads.active.lock().take();
+        assert!(!uploads.cancel(7, Path::new("one.png")));
+    }
     #[test]
     fn snapshots_are_bound_to_generation_and_the_exact_local_upload() {
         let uploads = Uploads::default();

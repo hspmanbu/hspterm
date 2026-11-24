@@ -7,7 +7,15 @@ class ImageUploadTask {
   int done = 0;
   int? total;
   String state = '读取剪贴板', error = '';
-  bool ended = false;
+  bool ended = false, cancelRequested = false;
+  Future<void> Function()? onCancel;
+  Future<void> cancel() async {
+    if (ended || cancelRequested) return;
+    cancelRequested = true;
+    state = '正在取消';
+    await onCancel?.call();
+  }
+
   bool get succeeded => ended && error.isEmpty && path != null;
   void apply(Map<String, dynamic> snapshot) {
     if (ended || snapshot.isEmpty) return;
@@ -26,6 +34,6 @@ class ImageUploadTask {
     path = remote;
     done = bytes;
     total = size;
-    state = '上传中';
+    if (!cancelRequested) state = '上传中';
   }
 }

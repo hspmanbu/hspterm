@@ -124,6 +124,61 @@ void main() {
     },
   );
   testWidgets(
+    'cancel image upload stops the owned operation and never inserts a path',
+    (tester) async {
+      final original = session('Original', 1, 4);
+      final model = ImageModel([original])..selected = original;
+      late BuildContext context;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (c) {
+                context = c;
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      );
+      var cancels = 0, pastes = 0;
+      await tester.runAsync(
+        () => pasteClipboardImage(
+          context,
+          model,
+          original,
+          read: (file, _) async {
+            await file.writeAsBytes(List.filled(20, 1));
+            return true;
+          },
+          upload: (_, _, path) async {
+            final task = model.imageUploads.single;
+            await task.cancel();
+            throw StateError('owned upload stopped after ACK');
+          },
+          cancel: (id, generation, path) async {
+            expect((id, generation), (1, 4));
+            expect(File(path).existsSync(), true);
+            cancels++;
+            return true;
+          },
+          paste: (_, _, _) async {
+            pastes++;
+          },
+        ),
+      );
+      expect(cancels, 1);
+      expect(pastes, 0);
+      final task = model.imageUploads.single;
+      expect(task.ended, true);
+      expect(task.state, '已取消');
+      expect(task.onCancel, isNull);
+      await tester.pumpWidget(const SizedBox());
+      await drainAsync(tester, model.shutdown());
+      model.dispose();
+    },
+  );
+  testWidgets(
     'image upload queue updates ACK percentage and remote destination',
     (tester) async {
       final source = session('Image', 1, 4);
@@ -298,28 +353,29 @@ void main() {
       String? local;
       ImageUploadTask? published;
       await tester.runAsync(
-        () => pasteClipboardImage(
-          context,
-          model,
-          original,
-          read: (file, current) async {
-            local = file.path;
-            await file.writeAsBytes(List.filled(20, 1));
-            return true;
-          },
-          upload: (id, generation, path) async {
-            expect((id, generation), (1, 4));
-            model.selected = other;
-            return '/tmp/private/clipboard.png';
-          },
-          paste: (_, _, path) async {
-            pasted.add(path);
-          },
-        ).then((_) {
-          for (final task in model.imageUploads) {
-            if (task.session == original.id) published = task;
-          }
-        }),
+        () =>
+            pasteClipboardImage(
+              context,
+              model,
+              original,
+              read: (file, current) async {
+                local = file.path;
+                await file.writeAsBytes(List.filled(20, 1));
+                return true;
+              },
+              upload: (id, generation, path) async {
+                expect((id, generation), (1, 4));
+                model.selected = other;
+                return '/tmp/private/clipboard.png';
+              },
+              paste: (_, _, path) async {
+                pasted.add(path);
+              },
+            ).then((_) {
+              for (final task in model.imageUploads) {
+                if (task.session == original.id) published = task;
+              }
+            }),
       );
       await tester.pumpAndSettle();
       expect(pasted, isEmpty);
@@ -331,12 +387,15 @@ void main() {
       // Deleting through the model removes only this app's temp file and the
       // finished tile; a path outside the temp dirs is refused.
       final kept = published!;
-      await model.deleteImageUploadLocal(kept);
+      await tester.runAsync(() => model.deleteImageUploadLocal(kept));
       expect(File(local!).existsSync(), false);
       expect(model.imageUploads, isNot(contains(kept)));
       final foreign = ImageUploadTask(original.id, 'Original')
         ..localPath = '/definitely/not/a/hspterm/clipboard.png';
-      await expectLater(model.deleteImageUploadLocal(foreign), throwsStateError);
+      await expectLater(
+        model.deleteImageUploadLocal(foreign),
+        throwsStateError,
+      );
       expect(model.beginImagePaste(original.id), true);
       model.endImagePaste(original.id);
       await tester.pumpWidget(const SizedBox());
@@ -345,7 +404,7 @@ void main() {
     },
   );
   testWidgets(
-    'an empty clipboard never enqueues an upload tile and explains itself once',
+    'an empty clipboard is a quiet no-op without a phantom upload tile',
     (tester) async {
       final original = session('Original', 1, 4);
       final model = ImageModel([original])..selected = original;
@@ -367,7 +426,10 @@ void main() {
           context,
           model,
           original,
-          read: (file, current) async => false,
+          read: (file, current) async {
+            expect(model.imageUploads, isEmpty);
+            return false;
+          },
           upload: (id, generation, path) async {
             throw StateError('must not upload without a readable image');
           },
@@ -375,7 +437,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(model.imageUploads, isEmpty);
-      expect(find.textContaining('剪贴板中没有图片'), findsOneWidget);
+      expect(find.textContaining('剪贴板中没有图片'), findsNothing);
       expect(model.beginImagePaste(original.id), true);
       model.endImagePaste(original.id);
       await tester.pumpWidget(const SizedBox());

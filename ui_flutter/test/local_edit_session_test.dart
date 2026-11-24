@@ -199,6 +199,32 @@ void main() {
     return taskDir.listSync().single as File;
   }
 
+  test('cancel upload drains the acknowledged chunk, skips replace and keeps the draft', () async {
+    final source = await connectedSession();
+    final edit = await launchFor(source, "a.txt");
+    await edit.localFile.writeAsString('new unsynced draft');
+    gateway.holdUploads = true;
+    final work = edit.retry();
+    while (gateway.uploadGate == null) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    var stopped = false;
+    final cancel = edit.cancelUpload().then((_) => stopped = true);
+    expect(edit.cancellingUpload, true);
+    expect(stopped, false, reason: 'must not drop an outstanding write');
+    gateway.uploadGate!.complete();
+    await work;
+    await cancel;
+    expect(edit.status, LocalEditStatus.cancelled);
+    expect(gateway.renames, isEmpty);
+    expect(await edit.localFile.readAsString(), 'new unsynced draft');
+    gateway.holdUploads = false;
+    await edit.retry();
+    expect(edit.status, LocalEditStatus.editing);
+    expect(gateway.renames, hasLength(1));
+    await source.controller.shutdown();
+    source.controller.dispose();
+  });
   test('reopening the same transport file retires its old editor and keeps its draft', () async {
     final source = await connectedSession();
     final registry = LocalEditRegistry();

@@ -1,4 +1,5 @@
 import 'image_upload_task.dart';
+import 'transfer_eta.dart';
 import 'local_file_actions.dart';
 import 'staging_cleanup.dart';
 import 'transfer_connections.dart';
@@ -76,7 +77,8 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         .where(
           (e) =>
               e.status == LocalEditStatus.conflicted ||
-              e.status == LocalEditStatus.failed,
+              e.status == LocalEditStatus.failed ||
+              e.status == LocalEditStatus.cancelled,
         )
         .length;
     final context = this.context;
@@ -174,6 +176,12 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
                 ),
               ],
             )
+          : !task.ended
+          ? Tool(
+              Icons.close,
+              task.cancelRequested ? '正在取消图片上传' : '取消图片上传',
+              task.cancelRequested ? null : () => run(task.cancel()),
+            )
           : null,
     );
   }
@@ -189,6 +197,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         ? 1.0
         : (edit.progressDone / total).clamp(0.0, 1.0);
     final failed =
+        edit.status == LocalEditStatus.cancelled ||
         edit.status == LocalEditStatus.failed ||
         edit.status == LocalEditStatus.conflicted;
     // Subtitle carries only host + full remote path (task 3a); the same
@@ -201,7 +210,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 10),
       leading: const Icon(Icons.edit_document, size: 18),
       title: Text(
-        edit.displayName,
+        '${edit.displayName}${edit.status == LocalEditStatus.cancelled ? ' · 已取消上传' : ''}',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 12),
@@ -236,6 +245,12 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (edit.status == LocalEditStatus.uploading)
+            Tool(
+              Icons.close,
+              edit.cancellingUpload ? '正在取消上传' : '取消上传',
+              edit.cancellingUpload ? null : () => run(edit.cancelUpload()),
+            ),
           if (failed) Tool(Icons.refresh, '重试上传', () => run(edit.retry())),
           Tool(
             Icons.open_in_new,
@@ -752,7 +767,7 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
         ? '直传/中转混合 · 速度 —'
         : speed == null
         ? '速度/剩余 —'
-        : '${bytes(speed.round())}/s · ${rate?.remainingSeconds == null ? '—' : '约 ${rate!.remainingSeconds} 秒'}';
+        : '${bytes(speed.round())}/s · ${transferEta(rate?.remainingSeconds)}';
     final blocked = _operations.contains(t.id) || t.state == 'Stopping';
     final error = t.state == 'Failed' || t.state == 'Partial';
     final color = error
@@ -827,6 +842,13 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
                           size: 13,
                         ),
                     ],
+                    if (t.upload && !ended(t) && t.state != 'ExportReady')
+                      Tool(
+                        Icons.close,
+                        '取消上传',
+                        blocked ? null : () => run(action(t, 'cancel')),
+                        size: 13,
+                      ),
                     if (uncertainMove(t))
                       Tool(
                         Icons.fact_check_outlined,
@@ -1060,10 +1082,11 @@ class _LiveTransferQueueState extends State<LiveTransferQueue> {
     // (images, edits, transfers) so the panel never flickers on equal stamps.
     final groups = [imageRows, editRows, transferRows];
     final stamps = [_imagesTouched, _editsTouched, _transfersTouched];
-    final order = [0, 1, 2]..sort((a, b) {
-      final difference = stamps[b].compareTo(stamps[a]);
-      return difference != 0 ? difference : a.compareTo(b);
-    });
+    final order = [0, 1, 2]
+      ..sort((a, b) {
+        final difference = stamps[b].compareTo(stamps[a]);
+        return difference != 0 ? difference : a.compareTo(b);
+      });
     final rows = <Object>[for (final index in order) ...groups[index]];
     return Column(
       children: [

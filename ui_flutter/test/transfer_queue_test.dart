@@ -79,6 +79,35 @@ class QueueFixture extends LiveWorkbenchModel {
 }
 
 void main() {
+  testWidgets('file folder paused and remote uploads expose per-item cancel', (
+    tester,
+  ) async {
+    final model = QueueFixture()..allTasks = true;
+    model.transferTasks = [
+      task(0),
+      task(1, folder: true),
+      task(2, state: 'Paused'),
+      task(3, remoteMove: true),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: LiveTransferQueue(model: model)),
+      ),
+    );
+    expect(find.byTooltip('取消上传'), findsNWidgets(4));
+    for (var i = 0; i < 4; i++) {
+      await tester.tap(find.byTooltip('取消上传').at(i));
+      await tester.pump();
+    }
+    expect(model.actions, [
+      'task-3:cancel',
+      'task-2:cancel',
+      'task-1:cancel',
+      'task-0:cancel',
+    ]);
+    await tester.pumpWidget(const SizedBox());
+    model.dispose();
+  });
   testWidgets(
     'completed downloads open their own file or folder without SSH or a new transfer',
     (tester) async {

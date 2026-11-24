@@ -47,6 +47,12 @@ Future<void> writeClipboardImageStream(
 }
 
 Future<bool> readClipboardPng(File target, bool Function() current) async {
+  if (Platform.isWindows &&
+      !await const MethodChannel('hspterm/prototype_window')
+          .invokeMethod<bool>('clipboardHasImage')
+          .then((value) => value == true)) {
+    return false;
+  }
   // Explicit ownership is important: SystemClipboard.read() leaves disposal
   // to finalizers, retaining native DIB/PNG snapshots during allocation bursts.
   final reader = await raw.ClipboardReader.instance.newClipboardReader();
@@ -88,6 +94,7 @@ Future<bool> readClipboardPng(File target, bool Function() current) async {
 
 typedef ClipboardImageReader = Future<bool> Function(File, bool Function());
 typedef ClipboardImageUploader = Future<String> Function(int, int, String);
+typedef ClipboardImageCanceller = Future<bool> Function(int, int, String);
 typedef ClipboardImagePaster = Future<void> Function(int, int, String);
 
 /// Original focus/id/generation stay pinned over clipboard and network awaits.
@@ -99,6 +106,7 @@ Future<void> pasteClipboardImage(
   ClipboardImageReader? read,
   ClipboardImageUploader? upload,
   ClipboardImagePaster? paste,
+  ClipboardImageCanceller? cancel,
   Future<String> Function(int, int, String)? progressReader,
 }) async {
   final controller = source.controller;
@@ -114,11 +122,26 @@ Future<void> pasteClipboardImage(
   if (!model.beginImagePaste(source.id)) return;
   Directory? directory;
   final task = ImageUploadTask(source.id, source.host.name);
-  model.publishImageUpload(task);
   Timer? progressTimer;
   Future<void>? progressWork;
   var observing = true, polling = false;
   String? localImage;
+  bool uploading = false, cancellationAccepted = false;
+  Future<void> requestCancellation() async {
+    if (!uploading || cancellationAccepted || localImage == null) return;
+    cancellationAccepted =
+        await (cancel?.call(id, generation, localImage!) ??
+            rust.cancelClipboardImage(
+              id: id,
+              generation: generation,
+              localPath: localImage!,
+            ));
+  }
+
+  task.onCancel = () async {
+    model.publishImageUpload(task);
+    await requestCancellation();
+  };
   void poll() {
     if (!observing || polling || localImage == null) return;
     if (model.isClosing) {
@@ -128,6 +151,7 @@ Future<void> pasteClipboardImage(
     polling = true;
     progressWork = () async {
       try {
+        if (task.cancelRequested) await requestCancellation();
         final raw =
             await (progressReader?.call(id, generation, localImage!) ??
                 rust.clipboardImageProgress(
@@ -156,14 +180,12 @@ Future<void> pasteClipboardImage(
         '${directory!.path}${Platform.pathSeparator}clipboard.png',
       );
       // Probe the clipboard BEFORE publishing a queue tile: with no readable
-      // image the paste stops here with a notice and nothing is enqueued.
-      if (!await (read ?? readClipboardPng)(file, current)) {
-        if (context.mounted) showAppNotice(context, '剪贴板中没有图片');
-        return;
-      }
+      // image the paste is a quiet no-op and nothing is enqueued.
+      if (!await (read ?? readClipboardPng)(file, current)) return;
       if (!current()) throw StateError('原终端已改变，未上传图片');
       localImage = file.path;
       task.total = await file.length();
+      if (task.cancelRequested) return;
       task.state = '等待上传';
       model.publishImageUpload(task);
       if (upload == null || progressReader != null) {
@@ -172,6 +194,7 @@ Future<void> pasteClipboardImage(
           (_) => poll(),
         );
       }
+      uploading = true;
       final path =
           await (upload?.call(id, generation, file.path) ??
               rust.uploadClipboardImage(
@@ -190,10 +213,12 @@ Future<void> pasteClipboardImage(
       // or delete it); failure paths below still clean the temp directory.
       task.localPath = file.path;
       task.done = task.total ?? 0;
-      task.state = '已上传';
+      uploading = false;
+      task.state = task.cancelRequested ? '已上传，未输入' : '已上传';
       task.ended = true;
       model.publishImageUpload(task);
 
+      if (task.cancelRequested) return;
       if (!current()) {
         if (context.mounted) {
           showAppNotice(
@@ -227,11 +252,13 @@ Future<void> pasteClipboardImage(
     });
   } catch (error) {
     if (!task.ended) {
-      task.error = '上传失败';
-      task.state = '上传失败';
+      task.error = task.cancelRequested ? '已取消' : '上传失败';
+      task.state = task.cancelRequested ? '已取消' : '上传失败';
     }
-    rethrow;
+    if (!task.cancelRequested) rethrow;
   } finally {
+    uploading = false;
+    task.onCancel = null;
     observing = false;
     progressTimer?.cancel();
     await progressWork;

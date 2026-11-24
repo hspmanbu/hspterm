@@ -1166,6 +1166,18 @@ Future<String> clipboardImageProgress({
   localPath: localPath,
 );
 
+/// Requests cancellation of only the matching image operation. The upload
+/// future still owns ACK draining and channel cleanup; false means not started.
+Future<bool> cancelClipboardImage({
+  required int id,
+  required int generation,
+  required String localPath,
+}) => RustLib.instance.api.crateApiCancelClipboardImage(
+  id: id,
+  generation: generation,
+  localPath: localPath,
+);
+
 Future<String> uploadClipboardImage({
   required int id,
   required int generation,

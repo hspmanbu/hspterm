@@ -308,6 +308,7 @@ enum LocalEditStatus {
   uploading,
   conflicted,
   failed,
+  cancelled,
   closed,
 }
 
@@ -598,6 +599,23 @@ class LocalEditSession extends ChangeNotifier {
     await _upload();
   }
 
+  bool _uploadCancelled = false;
+  bool get cancellingUpload => _uploading && _uploadCancelled;
+
+  /// Stop between acknowledged chunks; never drop an outstanding SFTP write.
+  /// The sibling temp is removed by the upload's existing finally, and the
+  /// unsynced local draft remains available for an explicit retry.
+  Future<void> cancelUpload() async {
+    if (!_uploading || _uploadCancelled) return;
+    _uploadCancelled = true;
+    notifyListeners();
+    await _inFlightUpload;
+  }
+
+  void _checkUploadCancellation() {
+    if (_uploadCancelled) throw const _LocalEditUploadCancelled();
+  }
+
   Future<void> retry() => _upload();
 
   Future<void> _upload() {
@@ -610,6 +628,7 @@ class LocalEditSession extends ChangeNotifier {
   Future<void> _uploadInner() async {
     if (_disposed || _uploading) return;
     _uploading = true;
+    _uploadCancelled = false;
     File? snapshot;
     try {
       final current = _session.controller.id == _native
@@ -675,8 +694,12 @@ class LocalEditSession extends ChangeNotifier {
           current,
           tempName,
           snapshot,
-          onProgress: _setProgress,
+          onProgress: (done, total) {
+            _setProgress(done, total);
+            _checkUploadCancellation();
+          },
         );
+        _checkUploadCancellation();
         final outcome = await _gateway.replaceAtomic(
           _native,
           current,
@@ -736,6 +759,7 @@ class LocalEditSession extends ChangeNotifier {
           if (!allowed) {
             throw StateError('未获替换授权');
           }
+          _checkUploadCancellation();
           await _gateway.replaceConfirmed(
             _native,
             current,
@@ -772,6 +796,12 @@ class LocalEditSession extends ChangeNotifier {
         terminal: _native,
         generation: current,
         fields: {'bytes': _originSize, 'result': 'ok'},
+      );
+    } on _LocalEditUploadCancelled {
+      _setStatus(LocalEditStatus.cancelled);
+      _noticeAndLog(
+        '已取消上传，本地草稿保留${_pendingTemp == null ? '' : '；远端临时文件 $_pendingTemp 待清理'}',
+        AppLogEvent.editUploadFailed,
       );
     } catch (error) {
       _setStatus(LocalEditStatus.failed);
@@ -1123,4 +1153,8 @@ Future<void> openLocalEdit(
       showAppNotice(context, '本地编辑打开失败：$error', level: AppNoticeLevel.error);
     }
   }
+}
+
+class _LocalEditUploadCancelled implements Exception {
+  const _LocalEditUploadCancelled();
 }

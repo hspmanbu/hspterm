@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hspterm/prototype/model.dart';
 import 'package:hspterm/src/rust/api.dart' as rust;
+import 'package:hspterm/src/rust/transfers.dart' show TransferPreferences;
 import 'package:hspterm/terminal/backend.dart';
 import 'package:hspterm/workbench/model.dart';
 
@@ -66,13 +68,82 @@ void main() {
           ])).stdout.toString().trim(),
           '600',
         );
+        // Images now use exclusive clipboardNNN.png files in safe /tmp;
+        // never assume a private subdirectory or recursively delete /tmp.
+        expect(path, matches(r'/clipboard[0-9]+\.png$'));
+        await rust.saveTransferPreferences(
+          value: const TransferPreferences(
+            concurrency: 2,
+            uploadBytesPerSecond: 32768,
+            downloadBytesPerSecond: 0,
+          ),
+        );
+        final large = File('${ssh.directory.path}/cancel.png');
+        final handle = await large.open(mode: FileMode.write);
+        await handle.writeFrom(bytes);
+        await handle.truncate(1024 * 1024);
+        await handle.close();
+        final work = rust.uploadClipboardImage(
+          id: id,
+          generation: generation,
+          localPath: large.path,
+        );
+        final stopped = expectLater(work, throwsA(anything));
+        String? cancelledPath;
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (true) {
+          final progress = jsonDecode(
+            await rust.clipboardImageProgress(
+              id: id,
+              generation: generation,
+              localPath: large.path,
+            ),
+          ) as Map<String, dynamic>;
+          if (progress.isNotEmpty && (progress['done'] as int) > 0) {
+            cancelledPath = progress['path'] as String;
+            break;
+          }
+          if (DateTime.now().isAfter(deadline)) {
+            throw TimeoutException('first acknowledged image chunk');
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
         expect(
-          (await Process.run('stat', [
-            '-c',
-            '%a',
-            File(path).parent.path,
-          ])).stdout.toString().trim(),
-          '700',
+          await rust.cancelClipboardImage(
+            id: id,
+            generation: generation + 1,
+            localPath: large.path,
+          ),
+          false,
+        );
+        expect(
+          await rust.cancelClipboardImage(
+            id: id,
+            generation: generation,
+            localPath: large.path,
+          ),
+          true,
+        );
+        await stopped;
+        expect(
+          File(cancelledPath).existsSync(),
+          false,
+          reason: 'cancelled incomplete image is cleaned only after ACK drain',
+        );
+        expect(
+          await rust.cancelClipboardImage(
+            id: id,
+            generation: generation,
+            localPath: large.path,
+          ),
+          false,
+        );
+        await rust.saveTransferPreferences(
+          value: const TransferPreferences(
+            concurrency: 2,
+            uploadBytesPerSecond: 0,
+            downloadBytesPerSecond: 0,
+          ),
         );
         final marker = File('${ssh.directory.path}/must-not-execute');
         await rust.pasteClipboardImagePath(
@@ -126,7 +197,7 @@ void main() {
         model.dispose();
 
         if (path != null && File(path).existsSync()) {
-          await File(path).parent.delete(recursive: true);
+          await File(path).delete();
         }
         await ssh.close();
       }
