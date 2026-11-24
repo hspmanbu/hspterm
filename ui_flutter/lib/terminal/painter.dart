@@ -63,11 +63,11 @@ class TerminalPaintCache {
       glyphs += cache.glyphCount;
       rows += cache.rowCount;
       for (final row in cache._rows.values) {
-        pictureBytes += row.$2.approximateBytesUsed;
+        pictureBytes += row.bytes;
         pictures++;
       }
       if (cache._backgroundPicture case final background?) {
-        pictureBytes += background.approximateBytesUsed;
+        pictureBytes += background.bytes;
         pictures++;
       }
     }
@@ -89,8 +89,8 @@ class TerminalPaintCache {
 
   final _glyphs = <(String, int, int, double), TextPainter>{};
   final _runs = <(String, int, int, double), TextPainter>{};
-  final _rows = <int, (int, ui.Picture)>{};
-  ui.Picture? _backgroundPicture;
+  var _rows = <int, ({int version, ui.Picture picture, int bytes})>{};
+  ({ui.Picture picture, int bytes})? _backgroundPicture;
   List<int> _backgroundVersions = const [];
   TerminalController? _backgroundOwner;
   Size _backgroundCell = Size.zero;
@@ -174,20 +174,16 @@ class TerminalPaintCache {
     List<double>? viewportTransform,
   }) {
     final pixels = _PixelGrid(target, devicePixelRatio, viewportTransform);
-    if (_backgroundPicture != null &&
+    final old = _backgroundPicture;
+    if (old != null &&
         identical(_backgroundOwner, controller) &&
         _backgroundCell == cell &&
         _backgroundPixels == pixels.key &&
         listEquals(_backgroundVersions, controller.rowVersions)) {
-      target.drawPicture(_backgroundPicture!);
+      target.drawPicture(old.picture);
       return;
     }
-    _backgroundPicture?.dispose();
-    _backgroundOwner = controller;
-    _backgroundCell = cell;
-    _backgroundPixels = pixels.key;
-    _backgroundVersions = List.of(controller.rowVersions);
-    backgroundBuilds++;
+    final versions = List<int>.of(controller.rowVersions);
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     final active = <(int, int, int), Rect>{};
@@ -225,8 +221,20 @@ class TerminalPaintCache {
     for (final entry in active.entries) {
       draw(entry.key, entry.value);
     }
-    _backgroundPicture = recorder.endRecording();
-    target.drawPicture(_backgroundPicture!);
+    // Publish a complete recording before retiring its predecessor. If
+    // recording throws, the cache still owns a live picture with its old key.
+    final picture = recorder.endRecording();
+    _backgroundPicture = (
+      picture: picture,
+      bytes: picture.approximateBytesUsed,
+    );
+    _backgroundOwner = controller;
+    _backgroundCell = cell;
+    _backgroundPixels = pixels.key;
+    _backgroundVersions = versions;
+    backgroundBuilds++;
+    old?.picture.dispose();
+    target.drawPicture(picture);
   }
 
   void _prepare(double fontSize, Size cell) {
@@ -245,8 +253,8 @@ class TerminalPaintCache {
   ) {
     _prepare(fontSize, cell);
     final old = _rows[index];
-    if (old != null && old.$1 == controller.rowVersions[index]) return old.$2;
-    old?.$2.dispose();
+    final version = controller.rowVersions[index];
+    if (old != null && old.version == version) return old.picture;
     // Separate row pictures meet at fractional physical pixels on scaled
     // displays. Solid grid edges must not blend with the underlying screen.
     final recorder = ui.PictureRecorder(), paint = Paint()..isAntiAlias = false;
@@ -254,6 +262,7 @@ class TerminalPaintCache {
     final cells = controller.rows[index];
     // Only foreground belongs in per-row pictures. Backgrounds are painted
     // across the viewport in one pass so cached row textures cannot leave seams.
+    var asciiRunEnd = 0;
     for (var x = 0; x < cells.length; x++) {
       final c = cells[x];
       final inverse = c.flags & 1 != 0;
@@ -273,6 +282,7 @@ class TerminalPaintCache {
       }
       final wide = c.flags & 32 != 0 ? 2 : 1;
       if (batchAscii &&
+          x >= asciiRunEnd &&
           c.flags & ~147 == 0 &&
           c.text.length == 1 &&
           c.text.codeUnitAt(0) >= 32 &&
@@ -290,6 +300,9 @@ class TerminalPaintCache {
           }
           end++;
         }
+        // If the run cannot fit the cell grid, draw its cells individually.
+        // Do not scan and shape the same run's suffix for each remaining cell.
+        asciiRunEnd = end;
         if (end - x >= (_typography.ligatures ? 2 : 3)) {
           final text = cells.sublist(x, end).map((c) => c.text).join();
           if (text.trim().isEmpty) {
@@ -392,26 +405,33 @@ class TerminalPaintCache {
       canvas.restore();
     }
     final picture = recorder.endRecording();
-    _rows[index] = (controller.rowVersions[index], picture);
+    _rows[index] = (
+      version: version,
+      picture: picture,
+      bytes: picture.approximateBytesUsed,
+    );
+    old?.picture.dispose();
     rowBuilds++;
     final stale = _rows.keys.where((i) => i >= controller.rows.length).toList();
     for (final i in stale) {
-      _rows.remove(i)?.$2.dispose();
+      _rows.remove(i)?.picture.dispose();
     }
     return picture;
   }
 
   void clear() {
-    _backgroundPicture?.dispose();
+    final background = _backgroundPicture;
+    final rows = _rows;
     _backgroundPicture = null;
     _backgroundOwner = null;
     _backgroundVersions = const [];
+    _rows = {};
     _sameWordKey = null;
     _sameWords = const [];
-    for (final row in _rows.values) {
-      row.$2.dispose();
+    background?.picture.dispose();
+    for (final row in rows.values) {
+      row.picture.dispose();
     }
-    _rows.clear();
     for (final p in _glyphs.values) {
       p.dispose();
     }

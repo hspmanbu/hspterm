@@ -9,7 +9,64 @@ import 'package:hspterm/terminal/painter.dart';
 
 import 'support/fake_backend.dart';
 
+class _FaultingPaintCache extends TerminalPaintCache {
+  bool fail = false;
+  int runAttempts = 0;
+
+  @override
+  TextPainter glyph(String text, int color, int flags, double fontSize) {
+    if (fail) throw StateError('synthetic shaping failure');
+    if (text.length > 1) runAttempts++;
+    return super.glyph(text, color, flags, fontSize);
+  }
+}
+
 void main() {
+  testWidgets(
+    'failed row rebuild leaves a valid picture for diagnostics and reuse',
+    (tester) async {
+      final c = TerminalController(FakeBackend());
+      final cache = _FaultingPaintCache();
+      addTearDown(c.dispose);
+      addTearDown(cache.dispose);
+      c.applyFrame(fixture(line: 'M       '));
+      const cell = Size(12, 16);
+      final original = cache.row(c, 0, 14, cell);
+      final originalVersion = c.rowVersions[0];
+      final counters = TerminalPaintCache.memoryCounters();
+
+      c.rowVersions[0]++;
+      cache.fail = true;
+      expect(() => cache.row(c, 0, 14, cell), throwsStateError);
+      expect(original.debugDisposed, isFalse);
+      expect(TerminalPaintCache.memoryCounters(), counters);
+      c.rowVersions[0] = originalVersion;
+      expect(identical(cache.row(c, 0, 14, cell), original), isTrue);
+
+      cache.fail = false;
+      c.rowVersions[0]++;
+      final replacement = cache.row(c, 0, 14, cell);
+      expect(original.debugDisposed, isTrue);
+      expect(replacement.debugDisposed, isFalse);
+    },
+  );
+
+  testWidgets('a mismatched ASCII run only tries grouped shaping once', (
+    tester,
+  ) async {
+    final c = TerminalController(FakeBackend());
+    final cache = _FaultingPaintCache();
+    addTearDown(c.dispose);
+    addTearDown(cache.dispose);
+    c.applyFrame(fixture(line: 'ABCDEFGH'));
+
+    // Deliberately narrower than the font's glyph widths. Each character
+    // should use the per-cell path after a single failed grouping attempt.
+    cache.row(c, 0, 14, const Size(1, 16));
+    expect(cache.runAttempts, 1);
+    expect(cache.glyphCount, 9);
+  });
+
   for (final inverse in [false, true]) {
     for (final selected in [false, true]) {
       testWidgets(
