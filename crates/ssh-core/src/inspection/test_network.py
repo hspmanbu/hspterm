@@ -38,6 +38,16 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(self.sample(route, rows, {'tun0': 8}), ('tun0:8', 123, 456))
         self.assertEqual(self.sample(route, rows, {'tun0': 9}), ('tun0:9', 123, 456))
 
+    def test_missing_sysfs_disables_only_network_not_the_probe(self):
+        def read(path, limit=65536):
+            if path == '/proc/net/route':
+                return b'header\neth0 00000000 00000000 0001 0 0 0 00000000\n'
+            if path == '/proc/net/dev':
+                return b'header\nheader\n' + self.dev('eth0', 10, 20)
+            raise FileNotFoundError(path)
+        with patch.dict(namespace, read=read):
+            self.assertEqual(namespace['network']()[:3], ('', 0, 0))
+
     def test_no_default_reports_no_trustworthy_scope_not_fake_total(self):
         self.assertEqual(self.sample(b'', self.dev('eth0', 10, 20)), ('', 0, 0))
 

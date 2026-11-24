@@ -41,7 +41,8 @@ def network():
         for line in read('/proc/net/route').splitlines()[1:]:
             fields = line.split()
             if (len(fields) >= 8 and fields[1] == b'00000000'
-                    and fields[7] == b'00000000' and int(fields[3], 16) & 1):
+                    and fields[7] == b'00000000' and int(fields[3], 16) & 1
+                    and not int(fields[3], 16) & 0x200):
                 candidates.append((int(fields[6]), fields[0]))
     except FileNotFoundError:
         pass
@@ -76,7 +77,11 @@ def network():
                 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-'
                 for c in text):
             raise ValueError('interface')
-        index = int(read('/sys/class/net/%s/ifindex' % text, 32))
+        try:
+            index = int(read('/sys/class/net/%s/ifindex' % text, 32))
+        except (OSError, ValueError):
+            # Restricted sysfs must not disable CPU/memory/disk sampling.
+            return '', 0, 0, time.monotonic_ns() // 1000000
         identities.append('%s:%d' % (text, index))
         rx += int(devices[name][0])
         tx += int(devices[name][8])

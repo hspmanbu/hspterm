@@ -517,8 +517,9 @@ class RemoteInspectionController extends ChangeNotifier {
           // degrade to an explicit reconnect hint once the channel stays owned.
           if (appMessage(e) == '远端检查正在处理或等待旧通道结束；未开始新请求') {
             _busyStreak += 1;
-            if (summary case final old?)
+            if (summary case final old?) {
               summary = RemoteResourceSummary(old.sample, null);
+            }
             if (_busyStreak >= _busyStreakLimit) {
               error = '远端检查通道未释放，建议重连会话';
             }
