@@ -93,7 +93,13 @@ fn collect(root: &Path) -> io::Result<usize> {
         if let Some(owner) = owner {
             match owner.try_lock_exclusive() {
                 Ok(()) => drop(owner),
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+                // On Windows fs2 reports ERROR_LOCK_VIOLATION for a live run.
+                Err(e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
+                {
+                    continue;
+                }
                 Err(e) => return Err(e),
             }
         }
