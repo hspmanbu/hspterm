@@ -36,8 +36,15 @@ int caretDistance(
   final first = direction > 0 ? cursor : click;
   final last = direction > 0 ? click : cursor;
   if (last.y - first.y >= _maxRows) return 0;
-  final verified =
-      edit != null && edit.contains(rows, first) && edit.contains(rows, last);
+  // Read the optional proof only in the checked branch. In Release AOT, the
+  // previous loop could load edit.start.y before checking the proof.
+  List<int> editEnds = const [];
+  var editStartRow = 0;
+  if (edit != null && edit.contains(rows, first) && edit.contains(rows, last)) {
+    editEnds = edit.ends;
+    editStartRow = edit.start.y;
+  }
+  final verified = editEnds.isNotEmpty;
   var steps = 0;
   for (var y = first.y; y <= last.y; y++) {
     if (!_validRow(rows, y)) return 0;
@@ -56,9 +63,17 @@ int caretDistance(
       end = min(end, max(used, cursor.y == y ? cursor.x : 0));
     }
     final hardEnd = y < last.y && !_wraps(row);
-    if (hardEnd && !verified) return 0;
-    if (verified && end > edit.ends[y - edit.start.y] && !hardEnd) return 0;
-    final stop = hardEnd ? edit!.ends[y - edit.start.y] : end;
+    var stop = end;
+    if (verified) {
+      final editEnd = editEnds[y - editStartRow];
+      if (hardEnd) {
+        stop = editEnd;
+      } else if (end > editEnd) {
+        return 0;
+      }
+    } else if (hardEnd) {
+      return 0;
+    }
     for (var x = start; x < stop; x++) {
       if (row[x].flags & _hidden != 0) return 0;
       if (row[x].flags & _nonCharacter == 0) steps++;
