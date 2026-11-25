@@ -53,6 +53,8 @@ tmux 中的历史滚动条对应 tmux 实际保存的缓冲区，需要远端 Py
 
 请保留同目录的 DLL 和 `data` 文件夹。构建产物有保存期限，过期后需要重新构建。
 
+Windows 版默认关闭 Impeller 以降低内存占用。如需开启进行对照，可运行 `.\hspterm.exe --enable-impeller`。
+
 Windows 拖放、高 DPI、输入法及远端 TUI 的兼容性仍在修复和测试中。配置同步也需要在实际服务环境下验证。
 
 ## 编译

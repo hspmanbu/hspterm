@@ -30,13 +30,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   flutter::DartProject project(L"data");
 
   auto arguments = GetCommandLineArguments();
-  // The runner must set the renderer before creating the Flutter engine.
-  const auto first_removed =
+  // Default to the lower-memory Windows renderer. Keep the old opt-out
+  // compatible with shortcuts and strip both native flags before Dart starts.
+  const auto disabled =
       std::remove(arguments.begin(), arguments.end(), "--no-enable-impeller");
-  if (first_removed != arguments.end()) {
-    project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
-    arguments.erase(first_removed, arguments.end());
-  }
+  const bool force_disabled = disabled != arguments.end();
+  arguments.erase(disabled, arguments.end());
+  const auto enabled =
+      std::remove(arguments.begin(), arguments.end(), "--enable-impeller");
+  project.set_impeller_switch(!force_disabled && enabled != arguments.end()
+                                  ? flutter::ImpellerSwitch::Enabled
+                                  : flutter::ImpellerSwitch::Disabled);
+  arguments.erase(enabled, arguments.end());
   project.set_dart_entrypoint_arguments(std::move(arguments));
 
   FlutterWindow window(project);
