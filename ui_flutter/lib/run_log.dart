@@ -102,15 +102,11 @@ class AppRunLog {
     'avgTotalUs',
     'maxTotalUs',
     'queueShare',
-    'maxRssKiB',
-    'rssKiB',
-    'privateKiB', 'peakPrivateKiB', 'rssDeltaKiB', 'privateDeltaKiB',
+    ...processMemoryKeys,
+    'rssDeltaKiB', 'privateDeltaKiB',
     'rssGrowthKiB',
     'privateGrowthKiB',
-    'handles',
-    'cpuUs',
-    'uptimeMs',
-    'impellerOptOut',
+    'memoryTrigger',
     'cpuPercent',
     'imageCacheKiB', 'imageCacheCount', 'liveImages', 'pendingImages',
     'glyphs', 'rowPictures', 'pictures', 'pictureKiB',
@@ -125,6 +121,32 @@ class AppRunLog {
     'terminals',
     'edits',
     'transfers',
+  };
+
+  static const processMemoryKeys = {
+    'rssKiB',
+    'maxRssKiB',
+    'privateKiB',
+    'peakPrivateKiB',
+    'privateWsKiB',
+    'sharedCommitKiB',
+    'handles',
+    'cpuUs',
+    'uptimeMs',
+    'impellerOptOut',
+    'pageFaults',
+    'systemCommitKiB',
+    'systemCommitLimitKiB',
+    'systemAvailableKiB',
+    'virtualMapComplete',
+    'virtualPrivateKiB',
+    'virtualImageKiB',
+    'virtualMappedKiB',
+    'writeCombinedCommitKiB',
+    'writeCombinedWsComplete',
+    'writeCombinedWsKiB',
+    'writeCombinedLockedKiB',
+    'memoryScanMs',
   };
 
   void event(
@@ -209,7 +231,9 @@ class AppRunLog {
     return 'HSPTerm current-launch log\n'
         'launch-start=${started.toIso8601String()} platform=${Platform.operatingSystem} ui-dropped=$dropped $meta\n'
         'No previous-launch logs are loaded. Native/UI buffers are bounded.\n'
-        'Memory: KiB=1024 bytes; Windows privateKiB=Private Bytes (commit), rssKiB=Working Set; pictureKiB is approximate native picture storage. Counts are not Dart/Rust heap sizes.\n'
+        'Memory: KiB=1024 bytes. On Windows privateKiB=Private Bytes (commit), rssKiB=Working Set, privateWsKiB=private Working Set.\n'
+        'virtual*KiB describes committed address ranges by mapping type. writeCombined* describes tagged private pages; it is not a GPU total. Missing detail with a 0 complete flag means the scan was incomplete.\n'
+        'pictureKiB is approximate native picture storage. Cache and process counters do not measure the full Dart/Rust heaps.\n'
         '${rows.map((r) => r.line).join('\n')}\n';
   }
 }

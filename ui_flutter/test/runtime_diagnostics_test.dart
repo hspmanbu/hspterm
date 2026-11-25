@@ -29,14 +29,23 @@ void main() {
           'cpuUs': n * 500000,
           'uptimeMs': n * 1000,
           'impellerOptOut': 1,
+          'privateWsKiB': 1024,
+          'systemAvailableKiB': 100_000,
+          'virtualMapComplete': 1,
+          'virtualPrivateKiB': 256,
+          'writeCombinedCommitKiB': 128,
+          'writeCombinedWsComplete': n == 1 ? 1 : 0,
+          if (n == 1) 'writeCombinedWsKiB': 64,
+          'writeCombinedLockedKiB': -1,
+          'address': 12345,
         };
       },
     );
     final cache = TerminalPaintCache();
     cache.glyph('A', 0xffffffff, 0, 14);
-    await diagnostics.sampleMemory();
+    await diagnostics.sampleMemory(trigger: MemorySampleTrigger.startup);
     cache.dispose();
-    await diagnostics.sampleMemory();
+    await diagnostics.sampleMemory(trigger: MemorySampleTrigger.vaultReady);
     final text = log.export('');
     expect(text, contains('privateGrowthKiB=32'));
     expect(text, contains('rssDeltaKiB=16'));
@@ -45,6 +54,20 @@ void main() {
     expect(text, contains('glyphs=0'));
     expect(text, contains('handles=42'));
     expect(text, contains('impellerOptOut=1'));
+    expect(text, contains('memoryTrigger=startup'));
+    expect(text, contains('memoryTrigger=vaultReady'));
+    expect(text, contains('privateWsKiB=1024'));
+    expect(text, contains('systemAvailableKiB=100000'));
+    expect(text, contains('virtualPrivateKiB=256'));
+    expect(text, contains('writeCombinedCommitKiB=128'));
+    expect(text, contains('writeCombinedWsKiB=64'));
+    final recent = text
+        .split('\n')
+        .lastWhere((line) => line.contains('memoryTrigger=vaultReady'));
+    expect(recent, contains('writeCombinedWsComplete=0'));
+    expect(recent, isNot(contains('writeCombinedWsKiB=')));
+    expect(text, isNot(contains('writeCombinedLockedKiB=')));
+    expect(text, isNot(contains('address=')));
     expect(text, isNot(contains('heapUsedKiB=')));
     diagnostics.stop();
   });

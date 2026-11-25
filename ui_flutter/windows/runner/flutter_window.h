@@ -8,10 +8,13 @@
 #include <windows.h>
 #include <commctrl.h>
 
+#include <future>
 #include <memory>
+#include <optional>
 
 #include "win32_window.h"
 #include "explorer_drop.h"
+#include "process_memory.h"
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -37,6 +40,8 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> window_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> secure_unlock_;
   std::unique_ptr<ExplorerDropBridge> explorer_drop_;
+  std::future<std::optional<ProcessMemorySample>> memory_sample_;
+  std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> memory_reply_;
   bool integrated_frame_ = false;
   RECT maximize_button_ = {};
   bool child_subclassed_ = false;
@@ -49,6 +54,7 @@ class FlutterWindow : public Win32Window {
   void RestorePlacement();
   void SavePlacement();
   void ArmRenderHealthCheck();
+  void CompleteMemorySample(HWND hwnd);
   static LRESULT CALLBACK ChildWindowProc(HWND, UINT, WPARAM, LPARAM,
                                           UINT_PTR, DWORD_PTR);
 };

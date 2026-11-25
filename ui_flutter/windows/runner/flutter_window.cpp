@@ -1,5 +1,7 @@
 #include "flutter_window.h"
 
+#include <chrono>
+#include <exception>
 #include <optional>
 #include <set>
 #include <algorithm>
@@ -12,7 +14,6 @@
 #include <flutter/standard_method_codec.h>
 #include "utils.h"
 #include "secure_unlock.h"
-#include "process_memory.h"
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -26,6 +27,7 @@ struct FontCatalog {
 // ArmRenderHealthCheck when the GPU/display environment changes.
 constexpr UINT_PTR kRenderHealthTimerId = 0x48535054;  // "HSPT"
 constexpr UINT kRenderHealthTimeoutMs = 10000;
+constexpr UINT_PTR kMemorySampleTimerId = 0x48534d45;
 
 // Reveals |path| in Explorer via the documented shell API: opens the parent
 // folder with the item preselected, reusing the shell's own window. This is
@@ -230,24 +232,28 @@ bool FlutterWindow::OnCreate() {
         result->Error("window_frame", "无法更新窗口边框；保留系统标题栏"); return;
       }
     } else if (method == "processMemory") {
-      ProcessMemorySample memory{};
-      if (!ReadProcessMemorySample(&memory)) {
-        result->Error("process_memory", "无法读取当前进程内存统计"); return;
+      if (memory_sample_.valid()) {
+        result->Error("process_memory", "内存采样正在进行");
+        return;
       }
-      const auto number = [](uint64_t value) {
-        return flutter::EncodableValue(static_cast<int64_t>(value));
-      };
-      result->Success(flutter::EncodableValue(flutter::EncodableMap{
-        {flutter::EncodableValue("rssKiB"), number(memory.working_set_kib)},
-        {flutter::EncodableValue("maxRssKiB"), number(memory.peak_working_set_kib)},
-        {flutter::EncodableValue("privateKiB"), number(memory.private_kib)},
-        {flutter::EncodableValue("peakPrivateKiB"), number(memory.peak_private_kib)},
-        {flutter::EncodableValue("handles"), number(memory.handles)},
-        {flutter::EncodableValue("cpuUs"), number(memory.cpu_us)},
-        {flutter::EncodableValue("uptimeMs"), number(memory.uptime_ms)},
-        {flutter::EncodableValue("impellerOptOut"),
-         number(project_.impeller_switch() == flutter::ImpellerSwitch::Disabled)},
-      }));
+      if (!SetTimer(window, kMemorySampleTimerId, 25, nullptr)) {
+        result->Error("process_memory", "无法启动内存采样");
+        return;
+      }
+      try {
+        // The walk can take tens of milliseconds. Only the Flutter reply
+        // runs on the platform thread, and the worker owns no window objects.
+        memory_sample_ = std::async(
+            std::launch::async, []() -> std::optional<ProcessMemorySample> {
+              ProcessMemorySample memory;
+              if (ReadProcessMemorySample(&memory)) return memory;
+              return std::nullopt;
+            });
+        memory_reply_ = std::move(result);
+      } catch (const std::exception&) {
+        KillTimer(window, kMemorySampleTimerId);
+        result->Error("process_memory", "无法启动内存采样");
+      }
       return;
     } else if (method == "clipboardHasImage") {
       // Check actual Windows formats, before requesting synthesized PNG data.
@@ -468,12 +474,78 @@ bool FlutterWindow::OnCreate() {
   return true;
 }
 
+void FlutterWindow::CompleteMemorySample(HWND hwnd) {
+  if (!memory_sample_.valid() ||
+      memory_sample_.wait_for(std::chrono::milliseconds(0)) !=
+          std::future_status::ready) {
+    return;
+  }
+  KillTimer(hwnd, kMemorySampleTimerId);
+  auto reply = std::move(memory_reply_);
+  std::optional<ProcessMemorySample> sample;
+  try {
+    sample = memory_sample_.get();
+  } catch (const std::exception&) {
+    reply->Error("process_memory", "内存采样未完成");
+    return;
+  }
+  if (!sample) {
+    reply->Error("process_memory", "无法读取当前进程内存统计");
+    return;
+  }
+  const auto& memory = *sample;
+  const auto& address = memory.address_space;
+  flutter::EncodableMap values;
+  const auto add = [&values](const char* key, uint64_t number) {
+    values.emplace(flutter::EncodableValue(key),
+                   flutter::EncodableValue(static_cast<int64_t>(number)));
+  };
+  add("rssKiB", memory.working_set_kib);
+  add("maxRssKiB", memory.peak_working_set_kib);
+  add("privateKiB", memory.private_kib);
+  add("peakPrivateKiB", memory.peak_private_kib);
+  add("handles", memory.handles);
+  add("cpuUs", memory.cpu_us);
+  add("uptimeMs", memory.uptime_ms);
+  add("impellerOptOut",
+      project_.impeller_switch() == flutter::ImpellerSwitch::Disabled);
+  add("pageFaults", memory.page_faults);
+  add("memoryScanMs", memory.scan_ms);
+  add("virtualMapComplete", address.complete);
+  add("writeCombinedWsComplete", address.residency_complete);
+  if (memory.extended_available) {
+    add("privateWsKiB", memory.private_working_set_kib);
+    add("sharedCommitKiB", memory.shared_commit_kib);
+  }
+  if (memory.system_available) {
+    add("systemCommitKiB", memory.system_commit_kib);
+    add("systemCommitLimitKiB", memory.system_commit_limit_kib);
+    add("systemAvailableKiB", memory.system_available_kib);
+  }
+  if (address.complete) {
+    add("virtualPrivateKiB", address.private_kib);
+    add("virtualImageKiB", address.image_kib);
+    add("virtualMappedKiB", address.mapped_kib);
+    add("writeCombinedCommitKiB", address.write_combined_kib);
+  }
+  if (address.residency_complete) {
+    add("writeCombinedWsKiB", address.write_combined_resident_kib);
+    add("writeCombinedLockedKiB", address.write_combined_locked_kib);
+  }
+  reply->Success(flutter::EncodableValue(std::move(values)));
+}
+
 void FlutterWindow::OnDestroy() {
   // WM_DESTROY follows the framework's accepted close, never a cancelled close.
   SavePlacement();
   // Disarm the render-health watchdog before the engine (and its pending
   // next-frame callback) goes away.
   render_check_armed_ = false;
+  if (memory_reply_) {
+    auto reply = std::move(memory_reply_);
+    reply->Error("process_memory", "窗口正在关闭");
+  }
+  memory_sample_ = {};
   if (child_subclassed_ && flutter_controller_) {
     RemoveWindowSubclass(flutter_controller_->view()->GetNativeWindow(), ChildWindowProc, 1);
     child_subclassed_ = false;
@@ -508,10 +580,15 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   // Capture accepted-close geometry while this handle still exists.
   if (message == WM_DESTROY) {
     SavePlacement();
+    KillTimer(hwnd, kMemorySampleTimerId);
     if (render_check_armed_) {
       KillTimer(hwnd, kRenderHealthTimerId);
       render_check_armed_ = false;
     }
+  }
+  if (message == WM_TIMER && wparam == kMemorySampleTimerId) {
+    CompleteMemorySample(hwnd);
+    return 0;
   }
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {

@@ -101,6 +101,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
   )
   _tmuxRequest;
   Timer? _memorySampler;
+  Timer? _memoryAfterUnlock;
   late final RuntimeDiagnostics _diagnostics = RuntimeDiagnostics(() => m);
 
   bool _syncDialogOpen = false;
@@ -138,7 +139,9 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
     });
   }
 
-  void _sampleMemory() => unawaited(_diagnostics.sampleMemory());
+  void _sampleMemory([
+    MemorySampleTrigger trigger = MemorySampleTrigger.periodic,
+  ]) => unawaited(_diagnostics.sampleMemory(trigger: trigger));
 
   @override
   void initState() {
@@ -146,23 +149,17 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
     // Memory samples: 10s for the first five minutes (the observed growth
     // phase), then once per minute. Process/cache counters only, no payloads.
     var fastSamples = 30;
-    _sampleMemory();
-    _memorySampler = Timer.periodic(
-      fastSamples > 0
-          ? const Duration(seconds: 10)
-          : const Duration(minutes: 1),
-      (_) {
-        if (fastSamples == 0) {
-          _memorySampler?.cancel();
-          _memorySampler = Timer.periodic(
-            const Duration(minutes: 1),
-            (_) => _sampleMemory(),
-          );
-        }
-        fastSamples--;
-        _sampleMemory();
-      },
-    );
+    _sampleMemory(MemorySampleTrigger.startup);
+    _memorySampler = Timer.periodic(const Duration(seconds: 10), (_) {
+      _sampleMemory();
+      if (--fastSamples == 0) {
+        _memorySampler?.cancel();
+        _memorySampler = Timer.periodic(
+          const Duration(minutes: 1),
+          (_) => _sampleMemory(),
+        );
+      }
+    });
     // Threshold-gated stall/jank/counts instrumentation (round-8 feedback).
     _diagnostics.start();
     _noticeHub = TerminalNoticeHub(
@@ -530,7 +527,18 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
         m.reportOperation(error);
       }
       await m.refreshTransfers();
-      if (mounted && !_lockedClosing) setState(() => _unlocked = true);
+      if (mounted && !_lockedClosing) {
+        setState(() => _unlocked = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _lockedClosing) return;
+          _sampleMemory(MemorySampleTrigger.vaultReady);
+          _memoryAfterUnlock?.cancel();
+          _memoryAfterUnlock = Timer(
+            const Duration(seconds: 2),
+            () => _sampleMemory(MemorySampleTrigger.vaultSettled),
+          );
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _error = '无法打开加密配置：$error');
     } finally {
@@ -541,6 +549,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
   @override
   void dispose() {
     _memorySampler?.cancel();
+    _memoryAfterUnlock?.cancel();
     _diagnostics.stop();
     m.configurationSync.removeListener(_syncChanged);
     m.removeListener(_bindNotices);

@@ -28,6 +28,8 @@ import 'dart:ui' show FramePhase;
 import '../run_log.dart';
 import 'model.dart';
 
+enum MemorySampleTrigger { periodic, startup, vaultReady, vaultSettled, export }
+
 /// Reports how late a heartbeat fired. A blocked UI isolate shows up here
 /// as one large drift sample instead of a pile of missing ticks.
 class RuntimeDiagnostics {
@@ -41,7 +43,7 @@ class RuntimeDiagnostics {
   final Future<Map<String, int>> Function() _nativeMemory;
   static WeakReference<RuntimeDiagnostics>? _active;
   static Future<void> captureActiveMemory() async =>
-      _active?.target?.sampleMemory();
+      _active?.target?.sampleMemory(trigger: MemorySampleTrigger.export);
   static Future<Map<String, int>> readProcessMemory() async {
     if (!Platform.isWindows) return {};
     final values = await const MethodChannel('hspterm/prototype_window')
@@ -188,29 +190,25 @@ class RuntimeDiagnostics {
 
   /// Coalesced, low-frequency sample. Native metrics only take local locks;
   /// this never starts SSH probing, parses history or copies terminal text.
-  Future<void> sampleMemory() {
+  Future<void> sampleMemory({
+    MemorySampleTrigger trigger = MemorySampleTrigger.periodic,
+  }) {
     if (_stopped) return Future.value();
-    return _memoryWork ??= _sampleMemory().whenComplete(
-      () => _memoryWork = null,
-    );
+    return _memoryWork ??= _sampleMemory(trigger)
+        .whenComplete(() => _memoryWork = null);
   }
 
-  Future<void> _sampleMemory() async {
+  Future<void> _sampleMemory(MemorySampleTrigger trigger) async {
     final model = _model();
-    final fields = <String, Object>{'kind': 'memory', 'nativeFailures': 0};
+    final fields = <String, Object>{
+      'kind': 'memory',
+      'memoryTrigger': trigger.name,
+      'nativeFailures': 0,
+    };
     try {
       final native = await _nativeMemory();
       // Accept only numeric, known fields even if the platform bridge changes.
-      for (final key in [
-        'rssKiB',
-        'maxRssKiB',
-        'privateKiB',
-        'peakPrivateKiB',
-        'handles',
-        'cpuUs',
-        'uptimeMs',
-        'impellerOptOut',
-      ]) {
+      for (final key in AppRunLog.processMemoryKeys) {
         if (native[key] case final value? when value >= 0) fields[key] = value;
       }
     } catch (_) {
