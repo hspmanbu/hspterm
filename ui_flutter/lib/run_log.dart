@@ -83,7 +83,7 @@ class AppRunLog {
 
   /// Structured, allowlisted fields rendered as `key=value`. Only these
   /// keys may appear; no free-form text crosses this boundary.
-  static const fieldKeys = {
+  static final fieldKeys = Set<String>.unmodifiable({
     'durationMs',
     'bytes',
     'result',
@@ -103,6 +103,7 @@ class AppRunLog {
     'maxTotalUs',
     'queueShare',
     ...processMemoryKeys,
+    ...memoryBreakdownDeltaKeys.values,
     'rssDeltaKiB', 'privateDeltaKiB',
     'rssGrowthKiB',
     'privateGrowthKiB',
@@ -124,7 +125,7 @@ class AppRunLog {
     'terminals',
     'edits',
     'transfers',
-  };
+  });
 
   static const processMemoryKeys = {
     'rssKiB',
@@ -145,11 +146,37 @@ class AppRunLog {
     'virtualPrivateKiB',
     'virtualImageKiB',
     'virtualMappedKiB',
+    'privateNonWcCommitKiB',
+    'privateReserveKiB',
+    'privateExecutableKiB',
+    'privateSmallAllocKiB',
+    'privateMediumAllocKiB',
+    'privateLargeAllocKiB',
+    'privateLargestAllocKiB',
+    'privateLargeAllocCount',
+    'defaultHeapAvailable',
+    'defaultHeapAllocatedKiB',
+    'defaultHeapCommitKiB',
+    'defaultHeapReserveKiB',
+    'dxgiComplete',
+    'dxgiSampledAdapters',
+    'dxgiLocalKiB',
+    'dxgiNonlocalKiB',
     'writeCombinedCommitKiB',
     'writeCombinedWsComplete',
     'writeCombinedWsKiB',
     'writeCombinedLockedKiB',
     'memoryScanMs',
+  };
+
+  static const memoryBreakdownDeltaKeys = {
+    'writeCombinedCommitKiB': 'writeCombinedCommitDeltaKiB',
+    'writeCombinedWsKiB': 'writeCombinedWsDeltaKiB',
+    'privateNonWcCommitKiB': 'privateNonWcCommitDeltaKiB',
+    'defaultHeapAllocatedKiB': 'defaultHeapAllocatedDeltaKiB',
+    'defaultHeapCommitKiB': 'defaultHeapCommitDeltaKiB',
+    'dxgiLocalKiB': 'dxgiLocalDeltaKiB',
+    'dxgiNonlocalKiB': 'dxgiNonlocalDeltaKiB',
   };
 
   void event(
@@ -236,6 +263,8 @@ class AppRunLog {
         'No previous-launch logs are loaded. Native/UI buffers are bounded.\n'
         'Memory: KiB=1024 bytes. On Windows privateKiB=Private Bytes (commit), rssKiB=Working Set, privateWsKiB=private Working Set.\n'
         'virtual*KiB describes committed address ranges by mapping type. writeCombined* describes tagged private pages; it is not a GPU total. Missing detail with a 0 complete flag means the scan was incomplete.\n'
+        'private*AllocKiB groups committed non-write-combined private pages by allocation base: small <1 MiB, medium <16 MiB, large >=16 MiB. Reserve is virtual address space.\n'
+        'defaultHeap* covers the Win32 default process heap. dxgi* covers current process video memory for node 0 of sampled hardware adapters. These counters overlap with other fields and cannot be summed with Working Set or commit.\n'
         'pictureKiB is approximate native picture storage. Cache and process counters do not measure the full Dart/Rust heaps.\n'
         '${rows.map((r) => r.line).join('\n')}\n';
   }

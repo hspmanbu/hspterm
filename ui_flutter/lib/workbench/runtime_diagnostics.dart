@@ -69,6 +69,7 @@ class RuntimeDiagnostics {
   bool _connectionStarted = false, _connectionReady = false;
   bool _terminalPainted = false;
   Timer? _terminalSettle;
+  final _lastMemoryBreakdown = <String, int>{};
   bool _stopped = false;
   int? _baselineRss,
       _lastRss,
@@ -308,6 +309,13 @@ class RuntimeDiagnostics {
         fields['privateDeltaKiB'] = private - _lastPrivate!;
       }
       _lastPrivate = private;
+    }
+    for (final entry in AppRunLog.memoryBreakdownDeltaKeys.entries) {
+      final previous = _lastMemoryBreakdown.remove(entry.key);
+      if (fields[entry.key] case final int current) {
+        _lastMemoryBreakdown[entry.key] = current;
+        if (previous != null) fields[entry.value] = current - previous;
+      }
     }
     if (fields['cpuUs'] case final int cpu) {
       final millis = fields['uptimeMs'] as int?;

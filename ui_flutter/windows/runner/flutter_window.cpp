@@ -517,6 +517,9 @@ void FlutterWindow::CompleteMemorySample(HWND hwnd) {
   add("memoryScanMs", memory.scan_ms);
   add("virtualMapComplete", address.complete);
   add("writeCombinedWsComplete", address.residency_complete);
+  add("defaultHeapAvailable", memory.default_heap.available);
+  add("dxgiComplete", memory.gpu.complete);
+  add("dxgiSampledAdapters", memory.gpu.sampled_adapters);
   if (memory.extended_available) {
     add("privateWsKiB", memory.private_working_set_kib);
     add("sharedCommitKiB", memory.shared_commit_kib);
@@ -530,7 +533,25 @@ void FlutterWindow::CompleteMemorySample(HWND hwnd) {
     add("virtualPrivateKiB", address.private_kib);
     add("virtualImageKiB", address.image_kib);
     add("virtualMappedKiB", address.mapped_kib);
+    add("privateNonWcCommitKiB", address.private_kib - address.write_combined_kib);
+    add("privateReserveKiB", address.private_reserved_kib);
+    add("privateExecutableKiB", address.private_executable_kib);
     add("writeCombinedCommitKiB", address.write_combined_kib);
+    const auto& normal = address.private_normal_allocations;
+    add("privateSmallAllocKiB", normal.small_kib);
+    add("privateMediumAllocKiB", normal.medium_kib);
+    add("privateLargeAllocKiB", normal.large_kib);
+    add("privateLargestAllocKiB", normal.largest_kib);
+    add("privateLargeAllocCount", normal.large_count);
+  }
+  if (memory.default_heap.available) {
+    add("defaultHeapAllocatedKiB", memory.default_heap.allocated_kib);
+    add("defaultHeapCommitKiB", memory.default_heap.committed_kib);
+    add("defaultHeapReserveKiB", memory.default_heap.reserved_kib);
+  }
+  if (memory.gpu.complete) {
+    add("dxgiLocalKiB", memory.gpu.local_kib);
+    add("dxgiNonlocalKiB", memory.gpu.nonlocal_kib);
   }
   if (address.residency_complete) {
     add("writeCombinedWsKiB", address.write_combined_resident_kib);

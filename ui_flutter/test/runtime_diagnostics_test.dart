@@ -33,6 +33,16 @@ void main() {
           'systemAvailableKiB': 100_000,
           'virtualMapComplete': 1,
           'virtualPrivateKiB': 256,
+          'privateNonWcCommitKiB': 128 + 32 * n,
+          'privateSmallAllocKiB': 64,
+          'privateLargestAllocKiB': 80,
+          'defaultHeapAvailable': 1,
+          'defaultHeapAllocatedKiB': 80 + 8 * n,
+          'defaultHeapCommitKiB': 100 + 10 * n,
+          'dxgiComplete': 1,
+          'dxgiSampledAdapters': 2,
+          'dxgiLocalKiB': 500 - 20 * n,
+          'dxgiNonlocalKiB': 250 + 5 * n,
           'writeCombinedCommitKiB': 128,
           'writeCombinedWsComplete': n == 1 ? 1 : 0,
           if (n == 1) 'writeCombinedWsKiB': 64,
@@ -59,6 +69,13 @@ void main() {
     expect(text, contains('privateWsKiB=1024'));
     expect(text, contains('systemAvailableKiB=100000'));
     expect(text, contains('virtualPrivateKiB=256'));
+    expect(text, contains('privateLargestAllocKiB=80'));
+    expect(text, contains('privateNonWcCommitDeltaKiB=32'));
+    expect(text, contains('defaultHeapAllocatedDeltaKiB=8'));
+    expect(text, contains('defaultHeapCommitDeltaKiB=10'));
+    expect(text, contains('dxgiSampledAdapters=2'));
+    expect(text, contains('dxgiLocalDeltaKiB=-20'));
+    expect(text, contains('dxgiNonlocalDeltaKiB=5'));
     expect(text, contains('writeCombinedCommitKiB=128'));
     expect(text, contains('writeCombinedWsKiB=64'));
     final recent = text
@@ -71,6 +88,43 @@ void main() {
     expect(text, isNot(contains('heapUsedKiB=')));
     diagnostics.stop();
   });
+  test(
+    'memory breakdown does not compute deltas across a missing sample',
+    () async {
+      final log = AppRunLog();
+      var n = 0;
+      final diagnostics = RuntimeDiagnostics(
+        () => null,
+        log: log,
+        nativeMemory: () async {
+          n++;
+          return n == 2
+              ? {'dxgiComplete': 0, 'defaultHeapAvailable': 0}
+              : {
+                  'dxgiComplete': 1,
+                  'dxgiLocalKiB': 100 * n,
+                  'defaultHeapAvailable': 1,
+                  'defaultHeapCommitKiB': 10 * n,
+                };
+        },
+      );
+      for (var i = 0; i < 4; i++) {
+        await diagnostics.sampleMemory();
+      }
+      final samples = log.export('').split('\n');
+      final restarted = samples.singleWhere(
+        (line) => line.contains('dxgiLocalKiB=300'),
+      );
+      expect(restarted, isNot(contains('dxgiLocalDeltaKiB=')));
+      expect(restarted, isNot(contains('defaultHeapCommitDeltaKiB=')));
+      final comparable = samples.singleWhere(
+        (line) => line.contains('dxgiLocalKiB=400'),
+      );
+      expect(comparable, contains('dxgiLocalDeltaKiB=100'));
+      expect(comparable, contains('defaultHeapCommitDeltaKiB=10'));
+      diagnostics.stop();
+    },
+  );
   test(
     'overlapping memory requests coalesce and stop discards late results',
     () async {
