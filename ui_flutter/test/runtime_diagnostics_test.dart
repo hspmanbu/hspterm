@@ -28,6 +28,7 @@ void main() {
           'handles': 42,
           'cpuUs': n * 500000,
           'uptimeMs': n * 1000,
+          'impellerOptOut': 1,
         };
       },
     );
@@ -43,6 +44,7 @@ void main() {
     expect(text, contains('glyphs=1'));
     expect(text, contains('glyphs=0'));
     expect(text, contains('handles=42'));
+    expect(text, contains('impellerOptOut=1'));
     expect(text, isNot(contains('heapUsedKiB=')));
     diagnostics.stop();
   });

@@ -3,6 +3,8 @@
 #include <windows.h>
 #include <ole2.h>
 
+#include <algorithm>
+
 #include "flutter_window.h"
 #include "utils.h"
 
@@ -27,10 +29,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   flutter::DartProject project(L"data");
 
-  std::vector<std::string> command_line_arguments =
-      GetCommandLineArguments();
-
-  project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
+  auto arguments = GetCommandLineArguments();
+  // The runner must set the renderer before creating the Flutter engine.
+  const auto first_removed =
+      std::remove(arguments.begin(), arguments.end(), "--no-enable-impeller");
+  if (first_removed != arguments.end()) {
+    project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
+    arguments.erase(first_removed, arguments.end());
+  }
+  project.set_dart_entrypoint_arguments(std::move(arguments));
 
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);

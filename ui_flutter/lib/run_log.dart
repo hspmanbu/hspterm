@@ -110,6 +110,7 @@ class AppRunLog {
     'handles',
     'cpuUs',
     'uptimeMs',
+    'impellerOptOut',
     'cpuPercent',
     'imageCacheKiB', 'imageCacheCount', 'liveImages', 'pendingImages',
     'glyphs', 'rowPictures', 'pictures', 'pictureKiB',

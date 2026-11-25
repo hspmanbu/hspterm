@@ -209,6 +209,7 @@ class RuntimeDiagnostics {
         'handles',
         'cpuUs',
         'uptimeMs',
+        'impellerOptOut',
       ]) {
         if (native[key] case final value? when value >= 0) fields[key] = value;
       }

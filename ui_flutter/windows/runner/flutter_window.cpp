@@ -245,6 +245,8 @@ bool FlutterWindow::OnCreate() {
         {flutter::EncodableValue("handles"), number(memory.handles)},
         {flutter::EncodableValue("cpuUs"), number(memory.cpu_us)},
         {flutter::EncodableValue("uptimeMs"), number(memory.uptime_ms)},
+        {flutter::EncodableValue("impellerOptOut"),
+         number(project_.impeller_switch() == flutter::ImpellerSwitch::Disabled)},
       }));
       return;
     } else if (method == "clipboardHasImage") {
