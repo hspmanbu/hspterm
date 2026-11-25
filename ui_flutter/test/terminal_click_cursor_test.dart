@@ -320,6 +320,34 @@ void main() {
       c.dispose();
     },
   );
+  test(
+    'ignored tmux click is not replayed and the next click can run',
+    () async {
+      final backend = PointerBackend()..route = 'ignored';
+      final c = TerminalController(backend);
+      await c.start();
+      try {
+        c.phase = 'Connected';
+        c.generation = 1;
+        c.tmuxReadonly = false;
+        c.reportTmuxShell('%3', false);
+        final original = frame(promptRow(), cursorColumn: 2, mouse: true);
+        c.applyFrame(original);
+        const target = Point(4, 0);
+        await c.clickTmuxCursor(original, target, mouseForwarded: false);
+        expect(backend.clicks, hasLength(1));
+        expect(backend.mouseActions, isEmpty);
+        expect(backend.keys, isEmpty);
+
+        backend.route = 'mouse';
+        await c.clickTmuxCursor(original, target, mouseForwarded: false);
+        expect(backend.clicks, hasLength(2));
+        expect(backend.mouseActions, hasLength(2));
+      } finally {
+        c.dispose();
+      }
+    },
+  );
   testWidgets(
     'pending tmux probe is not replayed and reconnect cannot receive a late mouse pair',
     (tester) async {

@@ -7204,7 +7204,7 @@ pub async fn terminal_tmux_click_cursor(
     let outcome: Result<_> = crate::public_errors::guard(async move {
         let target = entry(id)?;
         let inspector = target.session.inspector_for(generation).await?;
-        let value = inspector
+        let value = match inspector
             .tmux_click_cursor(
                 pane,
                 hspterm_ssh_core::inspection::CursorMove {
@@ -7216,7 +7216,18 @@ pub async fn terminal_tmux_click_cursor(
                 },
                 tokio_util::sync::CancellationToken::new(),
             )
-            .await?;
+            .await
+        {
+            Ok(value) => value,
+            Err(hspterm_ssh_core::SshError::Inspection(
+                hspterm_ssh_core::inspection::InspectionError::Busy,
+            )) => {
+                // No probe or input reached tmux. Drop this best-effort click
+                // without a popup or an unsafe replay into the active pane.
+                return Ok("ignored".to_owned());
+            }
+            Err(error) => return Err(error.into()),
+        };
         ensure!(
             target.session.status().generation == generation
                 && target.session.status().phase == SessionPhase::Connected,
