@@ -1,5 +1,6 @@
 use super::*;
 use crate::bookmarks::{Bookmark, BookmarkRepository};
+use crate::ssh_proxy::{ProxyKind, ProxySettings};
 fn bookmark(v: &mut Vault, host: &str, path: &str) -> Bookmark {
     BookmarkRepository::new(v)
         .save(Bookmark {
@@ -85,6 +86,45 @@ fn independent_same_endpoint_adopts_cloud_settings_preserves_local_id_and_all_bo
         "mutation journal must use canonical cloud IDs"
     );
 }
+
+#[test]
+fn partially_overlapping_hosts_match_equivalent_proxy_addresses_but_keep_distinct_routes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut a = vault(dir.path(), "proxy-cloud.vault");
+    let mut b = vault(dir.path(), "proxy-local.vault");
+    let proxy = |address: &str, port| ProxySettings {
+        kind: ProxyKind::Socks5,
+        address: address.into(),
+        port,
+        authenticate: false,
+    };
+    let mut cloud = host(&mut a, "Cloud shared");
+    cloud.proxy = Some(proxy("[2001:db8::42]", 1080));
+    Repository::new(&mut a).save(cloud.clone(), None).unwrap();
+    let mut cloud_only = host(&mut a, "Cloud only");
+    cloud_only.address = "other-sync-fixture.invalid".into();
+    Repository::new(&mut a).save(cloud_only, None).unwrap();
+
+    let mut local = host(&mut b, "Local shared");
+    let empty = Document::empty(COLLECTION).unwrap();
+    let remote = empty.capture(&a, ACTOR_A, NOW).unwrap();
+    for (port, same_route) in [(1080, true), (1081, false)] {
+        local.proxy = Some(proxy("2001:0DB8:0:0:0:0:0:0042", port));
+        Repository::new(&mut b).save(local.clone(), None).unwrap();
+        let mut proposal = empty.capture(&b, ACTOR_B, NOW + 1).unwrap();
+        proposal
+            .align_hosts(&mut empty.clone(), &mut remote.clone())
+            .unwrap();
+        let local_ids: Vec<_> = proposal
+            .items
+            .iter()
+            .filter(|i| crate::repository::valid_id(&i.id, "host"))
+            .map(|i| &i.id)
+            .collect();
+        assert_eq!(local_ids, [if same_route { &cloud.id } else { &local.id }]);
+    }
+}
+
 #[test]
 fn bookmark_three_way_merge_keeps_independent_additions_and_propagates_removals() {
     let dir = tempfile::tempdir().unwrap();

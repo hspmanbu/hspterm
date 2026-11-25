@@ -11,16 +11,23 @@ fn host(item: &Item) -> Option<HostRecord> {
     }
     serde_json::from_slice(item.value.as_ref()?.records.get(&item.id)?).ok()
 }
-fn endpoint(h: &HostRecord) -> (String, u16, String) {
-    let address = h
-        .address
-        .trim()
+fn normalized_ip(address: &str) -> Option<String> {
+    address
         .trim_start_matches('[')
-        .trim_end_matches(']');
-    let address = address
+        .trim_end_matches(']')
         .parse::<std::net::IpAddr>()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|_| address.trim_end_matches('.').to_ascii_lowercase());
+        .ok()
+        .map(|ip| ip.to_string())
+}
+fn endpoint(h: &HostRecord) -> (String, u16, String) {
+    let address = h.address.trim();
+    let address = normalized_ip(address).unwrap_or_else(|| {
+        address
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .trim_end_matches('.')
+            .to_ascii_lowercase()
+    });
     (address, h.port, h.username.clone())
 }
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -43,7 +50,9 @@ fn identity(h: &HostRecord, hosts: &BTreeMap<String, HostRecord>) -> Option<Iden
                 crate::ssh_proxy::ProxyKind::HttpConnect => 0,
                 crate::ssh_proxy::ProxyKind::Socks5 => 1,
             };
-            (kind, p.address.to_ascii_lowercase(), p.port)
+            let address =
+                normalized_ip(&p.address).unwrap_or_else(|| p.address.to_ascii_lowercase());
+            (kind, address, p.port)
         });
     Some(Identity {
         endpoint: endpoint(h),

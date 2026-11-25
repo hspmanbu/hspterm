@@ -374,7 +374,7 @@ async fn first_sync_collection_creation_is_explicit_single_and_fail_closed() {
         let request = worker.await.unwrap();
         let text = String::from_utf8_lossy(&request).to_lowercase();
         assert!(text.starts_with("mkcol / http/1.1\r\n"), "{status}");
-        assert!(text.contains("authorization: *** "), "{status}");
+        assert!(text.contains("authorization: basic "), "{status}");
     }
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!(
