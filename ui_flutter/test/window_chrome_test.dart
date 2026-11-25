@@ -5,10 +5,37 @@ import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:hspterm/prototype/model.dart';
 import 'package:hspterm/prototype/tabs.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hspterm/prototype/app.dart';
 import 'package:hspterm/prototype/window_chrome.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('workbench reuses the native frame prepared before the vault', (
+    tester,
+  ) async {
+    final calls = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      prototypeWindow,
+      (call) async {
+        calls.add(call.method);
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        prototypeWindow,
+        null,
+      ),
+    );
+    expect(await initializeWindowFrame(), isTrue);
+    await tester.pumpWidget(const PrototypeApp(frameInitialized: true));
+    await tester.pumpAndSettle();
+    expect(calls.where((name) => name == 'initialize'), hasLength(1));
+    await tester.tap(find.byTooltip('最小化窗口'));
+    await tester.pump();
+    expect(calls, contains('minimize'));
+  });
+
   testWidgets(
     'Windows maximize region reports scaled physical client bounds once and clears on disposal',
     (tester) async {

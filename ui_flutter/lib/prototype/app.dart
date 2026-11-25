@@ -21,10 +21,28 @@ import 'window_chrome.dart';
 
 const prototypeWindow = MethodChannel('hspterm/prototype_window');
 
+Future<bool> initializeWindowFrame() async {
+  try {
+    await prototypeWindow.invokeMethod<void>('initialize');
+    AppRunLog.instance.event(AppLogEvent.windowReady);
+    return true;
+  } on MissingPluginException {
+    return false;
+  } on PlatformException catch (error, stack) {
+    AppRunLog.instance.event(
+      AppLogEvent.windowFailed,
+      error: error,
+      stack: stack,
+    );
+    return false;
+  }
+}
+
 class PrototypeApp extends StatefulWidget {
   const PrototypeApp({
     super.key,
     this.model,
+    this.frameInitialized = false,
     this.terminalBuilder,
     this.sidebarBuilder,
     this.transferSettingsBuilder,
@@ -46,6 +64,7 @@ class PrototypeApp extends StatefulWidget {
     this.sftpViewSettingsBuilder,
   });
   final WorkbenchModel? model;
+  final bool frameInitialized;
   final TerminalSurfaceBuilder? terminalBuilder;
   final WidgetBuilder? sidebarBuilder;
   final WidgetBuilder? transferSettingsBuilder;
@@ -84,7 +103,7 @@ class PrototypeAppState extends State<PrototypeApp> {
     super.initState();
     m = widget.model ?? WorkbenchModel();
     _lifecycle = AppLifecycleListener(onExitRequested: _requestExit);
-    unawaited(_initializeWindow());
+    if (!widget.frameInitialized) unawaited(initializeWindowFrame());
   }
 
   @override
@@ -120,22 +139,6 @@ class PrototypeAppState extends State<PrototypeApp> {
 
   Future<void> tab(String id) async {
     await activateTab(id);
-  }
-
-  Future<void> _initializeWindow() async {
-    try {
-      await prototypeWindow.invokeMethod<void>('initialize');
-      AppRunLog.instance.event(AppLogEvent.windowReady);
-    } on MissingPluginException {
-      // A runner without optional custom-frame support retains system controls.
-    } on PlatformException catch (error, stack) {
-      AppRunLog.instance.event(
-        AppLogEvent.windowFailed,
-        error: error,
-        stack: stack,
-      );
-      // System decorations remain available if optional window hints fail.
-    }
   }
 
   Future<AppExitResponse> _requestExit() {
@@ -442,25 +445,8 @@ class PrototypeAppState extends State<PrototypeApp> {
                           ),
                         ],
                       ),
-                      Tool(
-                        Icons.remove,
-                        '最小化窗口',
-                        () => window(context, 'minimize'),
-                        size: 15,
-                      ),
-                      NativeMaximizeRegion(
-                        child: Tool(
-                          Icons.crop_square,
-                          '最大化 / 还原窗口',
-                          () => window(context, 'maximize'),
-                          size: 13,
-                        ),
-                      ),
-                      Tool(
-                        Icons.close,
-                        '关闭窗口',
-                        () => window(context, 'close'),
-                        size: 16,
+                      WindowCaptionButtons(
+                        onAction: (action) => window(context, action),
                       ),
                     ],
                   ),

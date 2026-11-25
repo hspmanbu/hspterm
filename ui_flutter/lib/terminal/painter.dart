@@ -47,6 +47,8 @@ class _PixelGrid {
 
 /// Owns bounded native pictures and shaped glyphs; no persistent frame ticker.
 class TerminalPaintCache {
+  static const _runLimit = 96;
+
   TerminalPaintCache({this.batchAscii = true}) {
     _instances.removeWhere((ref) => ref.target == null);
     _instances.add(WeakReference(this));
@@ -89,6 +91,7 @@ class TerminalPaintCache {
 
   final _glyphs = <(String, int, int, double), TextPainter>{};
   final _runs = <(String, int, int, double), TextPainter>{};
+  final _unfitAsciiRuns = <(String, int)>{};
   var _rows = <int, ({int version, ui.Picture picture, int bytes})>{};
   ({ui.Picture picture, int bytes})? _backgroundPicture;
   List<int> _backgroundVersions = const [];
@@ -158,10 +161,33 @@ class TerminalPaintCache {
     // Halved glyph budget (2026-11-06 memory pass): 2048 single-cell
     // painters + 96 run painters per view keep the most recent working set
     // while bounding retained paragraphs on multi-pane layouts.
-    if (storage.length > (identical(storage, _runs) ? 96 : 2048)) {
+    if (storage.length > (identical(storage, _runs) ? _runLimit : 2048)) {
       storage.remove(storage.keys.first)?.dispose();
     }
     return painter;
+  }
+
+  TextPainter? _fitAsciiRun(
+    String text,
+    int color,
+    int flags,
+    double fontSize,
+  ) {
+    final style = flags & 6;
+    final key = (text, style);
+    // Color cannot change the fit. Font or cell changes clear this cache.
+    if (_unfitAsciiRuns.contains(key)) return null;
+    final run = glyph(text, color, flags, fontSize);
+    if ((run.width - _cellSize.width * text.length).abs() < .01) return run;
+
+    // No picture ever used this paragraph. Retain only the failed fit result
+    // so updates with the same text do not allocate another native paragraph.
+    _runs.remove((text, color, style, fontSize))?.dispose();
+    _unfitAsciiRuns.add(key);
+    if (_unfitAsciiRuns.length > _runLimit) {
+      _unfitAsciiRuns.remove(_unfitAsciiRuns.first);
+    }
+    return null;
   }
 
   /// Merge vertically identical color runs before recording any glyph row.
@@ -309,10 +335,10 @@ class TerminalPaintCache {
             x = end - 1;
             continue;
           }
-          final run = this.glyph(text, fg, c.flags, fontSize);
+          final run = _fitAsciiRun(text, fg, c.flags, fontSize);
           // Font fallback/metrics must agree with the fixed terminal grid.
           // Otherwise use the individually clipped cell path below.
-          if ((run.width - cell.width * (end - x)).abs() < .01) {
+          if (run != null) {
             canvas.save();
             canvas.clipRect(
               Rect.fromLTWH(rect.left, 0, cell.width * (end - x), cell.height),
@@ -440,6 +466,7 @@ class TerminalPaintCache {
       p.dispose();
     }
     _runs.clear();
+    _unfitAsciiRuns.clear();
   }
 
   void dispose() {
@@ -462,6 +489,7 @@ class TerminalPainter extends CustomPainter {
     this.typography = const TerminalTypography(),
     this.devicePixelRatio = 1,
     this.viewportTransform,
+    this.onConnectedPaint,
   }) : super(repaint: Listenable.merge([controller, blink, preedit]));
   final TerminalController controller;
   final TerminalPaintCache cache;
@@ -475,6 +503,7 @@ class TerminalPainter extends CustomPainter {
   // RepaintBoundary recordings start at (0,0); their Canvas transform omits
   // ancestor offsets. Obtain the real logical viewport transform at paint.
   final List<double>? Function()? viewportTransform;
+  final VoidCallback? onConnectedPaint;
   @override
   void paint(Canvas canvas, Size size) {
     if (!controller.visible) return;
@@ -700,6 +729,7 @@ class TerminalPainter extends CustomPainter {
       text.dispose();
     }
     canvas.restore();
+    if (frame != null && controller.connected) onConnectedPaint?.call();
   }
 
   @override

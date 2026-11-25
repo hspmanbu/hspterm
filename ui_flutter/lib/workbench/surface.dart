@@ -24,6 +24,7 @@ class LiveTerminalSurface extends StatefulWidget {
     this.onOpenLink,
     this.onPasteImage,
     this.onDropPaths,
+    this.onFirstConnectedPaint,
   });
   final LiveTerminalSession session;
   final Future<void> Function()? onPasteImage;
@@ -35,6 +36,7 @@ class LiveTerminalSurface extends StatefulWidget {
   final Future<void> Function(String)? onLocatePath;
   final Future<void> Function(TerminalLink)? onOpenLink;
   final Future<void> Function(List<String>, int)? onDropPaths;
+  final VoidCallback? onFirstConnectedPaint;
   @override
   State<LiveTerminalSurface> createState() => _LiveTerminalSurfaceState();
 }
@@ -177,6 +179,7 @@ class _LiveTerminalSurfaceState extends State<LiveTerminalSurface> {
                   onLocatePath: widget.onLocatePath,
                   onOpenLink: widget.onOpenLink,
                   onPasteImage: widget.onPasteImage,
+                  onFirstConnectedPaint: widget.onFirstConnectedPaint,
                 ),
               ),
             ),

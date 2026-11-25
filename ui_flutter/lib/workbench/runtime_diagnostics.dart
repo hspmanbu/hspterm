@@ -14,6 +14,7 @@
 //! that Working Set or private commit is the Dart/Rust heap. No VM service or
 //! forced GC is enabled in release builds.
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io' show Platform, ProcessInfo;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
@@ -28,7 +29,17 @@ import 'dart:ui' show FramePhase;
 import '../run_log.dart';
 import 'model.dart';
 
-enum MemorySampleTrigger { periodic, startup, vaultReady, vaultSettled, export }
+enum MemorySampleTrigger {
+  periodic,
+  startup,
+  vaultReady,
+  vaultSettled,
+  firstSshConnecting,
+  firstSshConnected,
+  firstTerminalPaint,
+  firstTerminalSettled,
+  export,
+}
 
 /// Reports how late a heartbeat fired. A blocked UI isolate shows up here
 /// as one large drift sample instead of a pile of missing ticks.
@@ -53,6 +64,11 @@ class RuntimeDiagnostics {
   }
 
   Future<void>? _memoryWork;
+  final _milestones = Queue<(MemorySampleTrigger, DateTime)>();
+  LiveWorkbenchModel? _connectionModel;
+  bool _connectionStarted = false, _connectionReady = false;
+  bool _terminalPainted = false;
+  Timer? _terminalSettle;
   bool _stopped = false;
   int? _baselineRss,
       _lastRss,
@@ -83,6 +99,11 @@ class RuntimeDiagnostics {
     if (_heartbeat != null) return;
     _stopped = false;
     _active = WeakReference(this);
+    if (!_connectionReady) {
+      _connectionModel = _model();
+      _connectionModel?.addListener(_firstConnectionChanged);
+      _firstConnectionChanged();
+    }
     _nextBeat = DateTime.now().add(beat);
     _heartbeat = Timer.periodic(beat, (_) {
       final now = DateTime.now();
@@ -194,16 +215,74 @@ class RuntimeDiagnostics {
     MemorySampleTrigger trigger = MemorySampleTrigger.periodic,
   }) {
     if (_stopped) return Future.value();
-    return _memoryWork ??= _sampleMemory(trigger)
-        .whenComplete(() => _memoryWork = null);
+    return _memoryWork ??= _startMemorySample(trigger);
   }
 
-  Future<void> _sampleMemory(MemorySampleTrigger trigger) async {
+  void _firstConnectionChanged() {
+    final sessions = _connectionModel?.sessions
+        .whereType<LiveTerminalSession>();
+    if (sessions == null) return;
+    if (!_connectionStarted &&
+        sessions.any((s) => s.controller.phase == 'Connecting')) {
+      _connectionStarted = true;
+      _sampleMilestone(MemorySampleTrigger.firstSshConnecting);
+    }
+    if (sessions.any((s) => s.controller.connected)) {
+      _connectionReady = true;
+      _sampleMilestone(MemorySampleTrigger.firstSshConnected);
+      _connectionModel?.removeListener(_firstConnectionChanged);
+      _connectionModel = null;
+    }
+  }
+
+  void firstConnectedPaint() {
+    if (_stopped || _terminalPainted) return;
+    _terminalPainted = true;
+    _sampleMilestone(MemorySampleTrigger.firstTerminalPaint);
+    _terminalSettle = Timer(
+      const Duration(seconds: 2),
+      () => _sampleMilestone(MemorySampleTrigger.firstTerminalSettled),
+    );
+  }
+
+  void _sampleMilestone(MemorySampleTrigger trigger) {
+    if (_stopped) return;
+    // Each milestone fires at most once per launch. Keep its label even if
+    // another sample is in flight and report any resulting capture delay.
+    if (_memoryWork != null) {
+      _milestones.addLast((trigger, DateTime.now()));
+    } else {
+      _memoryWork = _startMemorySample(trigger);
+    }
+  }
+
+  Future<void> _startMemorySample(
+    MemorySampleTrigger trigger, [
+    DateTime? requested,
+  ]) => _sampleMemory(trigger, requested).whenComplete(() {
+    _memoryWork = null;
+    if (!_stopped && _milestones.isNotEmpty) {
+      final (next, at) = _milestones.removeFirst();
+      _memoryWork = _startMemorySample(next, at);
+    }
+  });
+
+  Future<void> _sampleMemory(
+    MemorySampleTrigger trigger,
+    DateTime? requested,
+  ) async {
     final model = _model();
+    final viewport = SchedulerBinding.instance.platformDispatcher.implicitView;
     final fields = <String, Object>{
       'kind': 'memory',
       'memoryTrigger': trigger.name,
       'nativeFailures': 0,
+      if (requested != null)
+        'memoryDelayMs': DateTime.now().difference(requested).inMilliseconds,
+      if (viewport != null) ...{
+        'viewWidthPx': viewport.physicalSize.width.toInt(),
+        'viewHeightPx': viewport.physicalSize.height.toInt(),
+      },
     };
     try {
       final native = await _nativeMemory();
@@ -310,6 +389,10 @@ class RuntimeDiagnostics {
 
   void stop() {
     _stopped = true;
+    _connectionModel?.removeListener(_firstConnectionChanged);
+    _connectionModel = null;
+    _terminalSettle?.cancel();
+    _milestones.clear();
     if (identical(_active?.target, this)) _active = null;
     _heartbeat?.cancel();
     _heartbeat = null;

@@ -216,6 +216,10 @@ bool FlutterWindow::OnCreate() {
     if (window == nullptr) { result->Error("window_closed", "窗口已关闭"); return; }
     const auto& method = call.method_name();
     if (method == "initialize") {
+      if (integrated_frame_) {
+        result->Success();
+        return;
+      }
       if (!child_subclassed_) {
         result->Error("window_frame", "无法安装边框命中处理，保留原生窗口边框"); return;
       }

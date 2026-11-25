@@ -35,6 +35,7 @@ import '../prototype/app.dart';
 import '../prototype/model.dart' show DemoHost, WorkPage;
 import '../prototype/design.dart';
 import '../prototype/files.dart';
+import '../prototype/window_chrome.dart';
 import '../src/rust/api.dart' as rust;
 import 'model.dart';
 import 'runtime_diagnostics.dart';
@@ -60,11 +61,13 @@ class WorkbenchApp extends StatefulWidget {
   const WorkbenchApp({
     super.key,
     this.model,
+    this.frameInitialized = false,
     this.vaultPath,
     this.fileOpener,
     this.backupFiles = const NativeConfigurationBackupFiles(),
   });
   final LiveWorkbenchModel? model;
+  final bool frameInitialized;
   final String? vaultPath;
   final Future<void> Function(String)? fileOpener;
   final ConfigurationBackupFiles backupFiles;
@@ -588,6 +591,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
       return PrototypeApp(
         key: _workbench,
         model: m,
+        frameInitialized: widget.frameInitialized,
         appearanceSettingsBuilder: (_) =>
             AppearanceStatusPanel(controller: m.appearance),
         sftpViewSettingsBuilder: (_) =>
@@ -667,6 +671,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
           key: ValueKey('live-${session.id}'),
           session: session as LiveTerminalSession,
           focused: m.focus == session,
+          onFirstConnectedPaint: _diagnostics.firstConnectedPaint,
           fontSize: m.typography.forHost(session.host.id).size,
           typography: m.typography.forHost(session.host.id),
           typographyNotice: m.typography.hostNotice(session.host.id),
@@ -764,6 +769,7 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
       debugShowCheckedModeBanner: false,
       theme: Desk.theme(false),
       home: Scaffold(
+        appBar: widget.frameInitialized ? const _VaultCaption() : null,
         body: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -858,4 +864,51 @@ class _WorkbenchAppState extends State<WorkbenchApp> {
       ),
     );
   }
+}
+
+class _VaultCaption extends StatelessWidget implements PreferredSizeWidget {
+  const _VaultCaption();
+
+  @override
+  Size get preferredSize => const Size.fromHeight(43);
+
+  Future<void> _action(BuildContext context, String method) async {
+    try {
+      await prototypeWindow.invokeMethod<void>(method);
+    } on PlatformException catch (error, stack) {
+      AppRunLog.instance.event(
+        AppLogEvent.windowFailed,
+        error: error,
+        stack: stack,
+      );
+      if (context.mounted) {
+        showAppNotice(context, '原生窗口操作不可用。', level: AppNoticeLevel.error);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    color: Theme.of(context).colorScheme.surface,
+    child: SizedBox(
+      height: preferredSize.height,
+      child: Row(
+        children: [
+          Expanded(
+            child: WindowDragRegion(
+              onAction: (method) => _action(context, method),
+              child: const Padding(
+                padding: EdgeInsets.only(left: 14),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('HSPTerm'),
+                ),
+              ),
+            ),
+          ),
+          WindowCaptionButtons(onAction: (method) => _action(context, method)),
+        ],
+      ),
+    ),
+  );
 }

@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:hspterm/prototype/model.dart';
+import 'package:hspterm/run_log.dart';
 import 'package:hspterm/src/rust/api.dart' as rust;
 import 'package:hspterm/terminal/backend.dart';
 import 'package:hspterm/workbench/app.dart';
@@ -103,6 +104,14 @@ void main() {
           () => c.transportInfo.value.columns != null,
           'terminal frame dimensions, visible=${c.visible}, frames=${c.frameCount}',
         );
+        await until(() {
+          final log = AppRunLog.instance.export('');
+          return log.contains('memoryTrigger=firstTerminalSettled');
+        }, 'first terminal memory milestones');
+        final memoryLog = AppRunLog.instance.export('');
+        expect(memoryLog, contains('memoryTrigger=firstSshConnecting'));
+        expect(memoryLog, contains('memoryTrigger=firstSshConnected'));
+        expect(memoryLog, contains('memoryTrigger=firstTerminalPaint'));
         await until(
           () => c.transportInfo.value.rttMicros != null,
           'heartbeat RTT, phase=${c.phase}',

@@ -51,7 +51,7 @@ void main() {
     },
   );
 
-  testWidgets('a mismatched ASCII run only tries grouped shaping once', (
+  testWidgets('mismatched ASCII runs retain only their fit result', (
     tester,
   ) async {
     final c = TerminalController(FakeBackend());
@@ -64,7 +64,14 @@ void main() {
     // should use the per-cell path after a single failed grouping attempt.
     cache.row(c, 0, 14, const Size(1, 16));
     expect(cache.runAttempts, 1);
-    expect(cache.glyphCount, 9);
+    expect(cache.glyphCount, 8);
+    c.rowVersions[0]++;
+    cache.row(c, 0, 14, const Size(1, 16));
+    expect(cache.runAttempts, 1);
+    expect(cache.glyphCount, 8);
+
+    cache.row(c, 0, 14, const Size(2, 16));
+    expect(cache.runAttempts, 2, reason: 'geometry invalidates the cached fit');
   });
 
   for (final inverse in [false, true]) {

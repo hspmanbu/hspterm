@@ -95,6 +95,39 @@ void main() {
     },
   );
 
+  testWidgets('first paint samples survive an overlapping periodic sample', (
+    tester,
+  ) async {
+    final log = AppRunLog();
+    final pending = Completer<Map<String, int>>();
+    var requests = 0;
+    final diagnostics = RuntimeDiagnostics(
+      () => null,
+      log: log,
+      nativeMemory: () => ++requests == 1 ? pending.future : Future.value({}),
+    );
+    addTearDown(diagnostics.stop);
+    final periodic = diagnostics.sampleMemory();
+    diagnostics.firstConnectedPaint();
+    diagnostics.firstConnectedPaint();
+    expect(requests, 1);
+    pending.complete({});
+    await periodic;
+    await tester.pump();
+    expect(requests, 2);
+    final first = log
+        .export('')
+        .split('\n')
+        .singleWhere(
+          (line) => line.contains('memoryTrigger=firstTerminalPaint'),
+        );
+    expect(first, contains('memoryDelayMs='));
+    expect(first, contains('viewWidthPx='));
+    await tester.pump(const Duration(seconds: 2));
+    expect(requests, 3);
+    expect(log.export(''), contains('memoryTrigger=firstTerminalSettled'));
+  });
+
   test(
     'janky frames are logged with build/raster times, smooth ones are not',
     () {

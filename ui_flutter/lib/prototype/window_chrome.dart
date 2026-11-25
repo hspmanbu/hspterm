@@ -1,8 +1,32 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
+
+import 'design.dart';
+
+class WindowCaptionButtons extends StatelessWidget {
+  const WindowCaptionButtons({super.key, required this.onAction});
+  final Future<void> Function(String) onAction;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Tool(Icons.remove, '最小化窗口', () => onAction('minimize'), size: 15),
+      NativeMaximizeRegion(
+        child: Tool(
+          Icons.crop_square,
+          '最大化 / 还原窗口',
+          () => onAction('maximize'),
+          size: 13,
+        ),
+      ),
+      Tool(Icons.close, '关闭窗口', () => onAction('close'), size: 16),
+    ],
+  );
+}
 
 /// Native hit testing needs physical client coordinates; no screen position or
 /// guessed titlebar button width is persisted. Linux/Phase 2 stay unaffected.

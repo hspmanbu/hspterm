@@ -92,6 +92,32 @@ class PointerBackend extends FakeBackend implements TerminalTmuxPointerBackend {
 }
 
 void main() {
+  testWidgets('connected paint milestone belongs to the first painted grid', (
+    tester,
+  ) async {
+    final c = TerminalController(FakeBackend());
+    c.applyFrame(frame(promptRow(), cursorColumn: 2));
+    var paints = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TerminalView(
+          controller: c,
+          onFirstConnectedPaint: () => paints++,
+        ),
+      ),
+    );
+    expect(paints, 0);
+    c.phase = 'Connected';
+    c.applyFrame(frame(promptRow(), cursorColumn: 2, revision: 2));
+    await tester.pump();
+    expect(paints, 1);
+    c.applyFrame(frame(promptRow(), cursorColumn: 4, revision: 3));
+    await tester.pump();
+    expect(paints, 1);
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
+
   test('soft wraps count wide glyphs and wrap placeholders only once', () {
     final rows = [
       [

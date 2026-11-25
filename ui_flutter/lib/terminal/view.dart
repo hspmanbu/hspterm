@@ -33,9 +33,11 @@ class TerminalView extends StatefulWidget {
     this.onLocatePath,
     this.onOpenLink,
     this.onPasteImage,
+    this.onFirstConnectedPaint,
   });
   final TerminalController controller;
   final Future<void> Function()? onPasteImage;
+  final VoidCallback? onFirstConnectedPaint;
   final double fontSize;
   final TerminalTypography? typography;
   final Future<void> Function(String)? onLocatePath;
@@ -46,6 +48,19 @@ class TerminalView extends StatefulWidget {
 
 class TerminalViewState extends State<TerminalView>
     with WidgetsBindingObserver, TextInputClient {
+  bool _reportedConnectedPaint = false;
+
+  void _connectedPaint() {
+    if (_reportedConnectedPaint || widget.onFirstConnectedPaint == null) return;
+    _reportedConnectedPaint = true;
+    final controller = c;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && identical(c, controller)) {
+        widget.onFirstConnectedPaint?.call();
+      }
+    });
+  }
+
   final _paintKey = GlobalKey();
   List<double>? _viewportTransform() {
     final box = _paintKey.currentContext?.findRenderObject();
@@ -237,6 +252,7 @@ class TerminalViewState extends State<TerminalView>
   void didUpdateWidget(TerminalView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != c) {
+      _reportedConnectedPaint = false;
       oldWidget.controller.composing = false;
       oldWidget.controller.removeListener(_changed);
       _suggestions.dispose();
@@ -1196,6 +1212,7 @@ class TerminalViewState extends State<TerminalView>
                             context,
                           ),
                           viewportTransform: _viewportTransform,
+                          onConnectedPaint: _connectedPaint,
                         ),
                         child: const SizedBox.expand(),
                       ),
