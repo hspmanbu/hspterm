@@ -16,6 +16,11 @@ async fn explicit_inspection_preserves_pty_and_only_signals_the_disposable_origi
     let inspector = connection.inspector().unwrap();
     let sample = inspector.sample(CancellationToken::new()).await.unwrap();
     assert!(sample.memory_total > 0);
+    assert!(
+        sample
+            .cpu_iowait
+            .is_some_and(|wait| wait <= sample.cpu_idle)
+    );
     let mut child = DisposableProcess(
         Command::new("sleep")
             .arg("60")

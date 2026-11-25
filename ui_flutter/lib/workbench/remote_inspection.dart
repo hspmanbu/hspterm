@@ -98,6 +98,7 @@ class RemoteResourceSample {
     this.millis,
     this.cpuTotal,
     this.cpuIdle,
+    this.cpuIoWait,
     this.memoryTotal,
     this.memoryAvailable,
     this.diskTotal,
@@ -107,6 +108,7 @@ class RemoteResourceSample {
     this.network,
   );
   final String boot, network;
+  final int? cpuIoWait;
   final int millis,
       cpuTotal,
       cpuIdle,
@@ -132,13 +134,14 @@ class RemoteResourceSample {
         'rx',
         'tx',
       },
-      optional: const {'network'},
+      optional: const {'network', 'cpu_iowait'},
     );
     final s = RemoteResourceSample._(
       v['boot'] as String,
       _number(v, 'millis'),
       _number(v, 'cpu_total'),
       _number(v, 'cpu_idle'),
+      v.containsKey('cpu_iowait') ? _number(v, 'cpu_iowait') : null,
       _number(v, 'memory_total'),
       _number(v, 'memory_available'),
       _number(v, 'disk_total'),
@@ -152,6 +155,7 @@ class RemoteResourceSample {
     if (s.network.length > 2048 ||
         !RegExp(r'^[a-zA-Z0-9_.:,\-]*$').hasMatch(s.network) ||
         s.cpuIdle > s.cpuTotal ||
+        (s.cpuIoWait ?? 0) > s.cpuIdle ||
         s.memoryTotal == 0 ||
         s.memoryAvailable > s.memoryTotal ||
         s.diskTotal == 0 ||
@@ -164,23 +168,50 @@ class RemoteResourceSample {
 
 class RemoteResourceSummary {
   RemoteResourceSummary(this.sample, RemoteResourceSample? previous) {
-    if (previous == null || previous.boot != sample.boot) return;
+    if (previous == null || previous.boot != sample.boot) {
+      _missing.add(previous == null ? '等待第二个资源样本' : '远端已重启，等待新基准');
+      return;
+    }
     final elapsed = sample.millis - previous.millis;
-    final total = sample.cpuTotal - previous.cpuTotal;
-    final idle = sample.cpuIdle - previous.cpuIdle;
-    if (elapsed < 1000 || elapsed > 30000) return;
+    if (elapsed < 1000 || elapsed > 30000) {
+      _missing.add('采样间隔超出 1–30 秒，等待下一个样本');
+      return;
+    }
+    // Linux can recalculate iowait downwards while the CPU remains healthy.
+    // Discard negative wait ticks from both deltas. Positive wait stays idle.
+    final waitCorrection =
+        sample.cpuIoWait != null && previous.cpuIoWait != null
+        ? math.max(0, previous.cpuIoWait! - sample.cpuIoWait!)
+        : 0;
+    final total = sample.cpuTotal - previous.cpuTotal + waitCorrection;
+    final idle = sample.cpuIdle - previous.cpuIdle + waitCorrection;
     if (total > 0 && idle >= 0 && idle <= total) {
       cpu = 100 * (total - idle) / total;
+    } else {
+      _missing.add('CPU 计数未更新或已重置');
     }
-    if (sample.network.isEmpty || sample.network != previous.network) return;
+    if (sample.network.isEmpty) {
+      _missing.add('远端没有可读取的默认出口计数器');
+      return;
+    }
+    if (sample.network != previous.network) {
+      _missing.add('默认出口已变化或恢复，等待下一次流量采样');
+      return;
+    }
     if (sample.rx >= previous.rx) {
       rxPerSecond = (sample.rx - previous.rx) * 1000 / elapsed;
+    } else {
+      _missing.add('远端接收计数已重置');
     }
     if (sample.tx >= previous.tx) {
       txPerSecond = (sample.tx - previous.tx) * 1000 / elapsed;
+    } else {
+      _missing.add('远端发送计数已重置');
     }
   }
   final RemoteResourceSample sample;
+  final _missing = <String>[];
+  String get availabilityDetails => _missing.join('\n');
   double? cpu, rxPerSecond, txPerSecond;
   String get label =>
       'CPU ${cpu == null ? '—' : '${cpu!.toStringAsFixed(0)}%'} · '
@@ -346,6 +377,7 @@ class RemoteInspectionController extends ChangeNotifier {
   bool metrics = false, processesAllowed = false, active = false;
   bool _closing = false, _disposed = false;
   int _epoch = 0;
+  int _activityEpoch = 0;
   // Consecutive native Busy refusals (the bounded inspection channel is still
   // owned). Each one doubles the next poll delay up to 60s; past the limit the
   // controller stops polling with an explicit reconnect hint instead of
@@ -356,6 +388,8 @@ class RemoteInspectionController extends ChangeNotifier {
   Timer? _timer;
   Future<void>? _work, _configuration;
   RemoteResourceSummary? summary;
+  bool _sampleDelayed = false;
+  bool get sampleDelayed => _sampleDelayed && summary != null;
   RemoteProcessList? processList;
   String? error, result;
   bool get busy => _work != null || _configuration != null;
@@ -385,6 +419,7 @@ class RemoteInspectionController extends ChangeNotifier {
     metrics = false;
     processesAllowed = false;
     _busyStreak = 0;
+    _sampleDelayed = false;
     summary = null;
     processList = null;
     result = null;
@@ -400,7 +435,9 @@ class RemoteInspectionController extends ChangeNotifier {
   void setActive(bool value) {
     if (active == value || _disposed) return;
     active = value;
+    ++_activityEpoch;
     // Never carry a rate interval across time spent in the background.
+    _sampleDelayed = false;
     summary = null;
     _timer?.cancel();
     _timer = null;
@@ -454,6 +491,7 @@ class RemoteInspectionController extends ChangeNotifier {
     // waiting for an in-flight sample/list so it can actually revoke that work.
     this.metrics = false;
     processesAllowed = false;
+    _sampleDelayed = false;
     summary = null;
     processList = null;
     result = null;
@@ -490,7 +528,10 @@ class RemoteInspectionController extends ChangeNotifier {
     return done.future;
   }
 
-  Future<void> _run(Future<void> Function(InspectionSource, int) action) {
+  Future<void> _run(
+    Future<void> Function(InspectionSource, int) action, {
+    bool Function()? currentActivity,
+  }) {
     if (busy) return Future.error(StateError('原终端远端检查正在处理'));
     final source = _capture();
     if (_source?.id != source.id || _source?.generation != source.generation) {
@@ -507,19 +548,19 @@ class RemoteInspectionController extends ChangeNotifier {
     unawaited(() async {
       try {
         await action(source, epoch);
-        _busyStreak = 0;
+        if (_accept(source, epoch) && (currentActivity?.call() ?? true)) {
+          _busyStreak = 0;
+        }
         done.complete();
       } catch (e, stack) {
-        if (_current(source) && epoch == _epoch) {
+        if (_accept(source, epoch) && (currentActivity?.call() ?? true)) {
           // tmux metadata and resource requests share a bounded native channel.
           // Busy is a definite refusal before execution, never an unknown ACK:
           // back off exponentially instead of a fixed-period silent retry, and
           // degrade to an explicit reconnect hint once the channel stays owned.
           if (appMessage(e) == '远端检查正在处理或等待旧通道结束；未开始新请求') {
             _busyStreak += 1;
-            if (summary case final old?) {
-              summary = RemoteResourceSummary(old.sample, null);
-            }
+            if (currentActivity != null) _sampleDelayed = true;
             if (_busyStreak >= _busyStreakLimit) {
               error = '远端检查通道未释放，建议重连会话';
             }
@@ -532,7 +573,7 @@ class RemoteInspectionController extends ChangeNotifier {
       } finally {
         _work = null;
         _notify();
-        _schedule();
+        _schedule(immediate: currentActivity?.call() == false);
       }
     }());
     return done.future;
@@ -542,12 +583,15 @@ class RemoteInspectionController extends ChangeNotifier {
       !_closing && epoch == _epoch && _current(s);
   Future<void> refreshMetrics() {
     if (!metrics) return Future.error(StateError('尚未启用资源检查'));
+    final activity = _activityEpoch;
+    bool currentActivity() => activity == _activityEpoch;
     return _run((s, epoch) async {
       final sample = RemoteResourceSample.parse(await gateway.sample(s));
-      if (_accept(s, epoch)) {
+      if (_accept(s, epoch) && currentActivity()) {
         summary = RemoteResourceSummary(sample, summary?.sample);
+        _sampleDelayed = false;
       }
-    });
+    }, currentActivity: currentActivity);
   }
 
   Future<void> refreshProcesses() {

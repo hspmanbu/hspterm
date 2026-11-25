@@ -55,6 +55,21 @@ class NetworkTests(unittest.TestCase):
         route = b'0'*32 + b' 00 ' + b'0'*32 + b' 00 ' + b'0'*32 + b' 00000064 0 0 00000001 eth0\n'
         self.assertEqual(self.sample(b'', self.dev('eth0', 9, 7), ipv6=route), ('eth0:2', 9, 7))
 
+    def test_missing_ipv4_device_does_not_hide_a_working_ipv6_default(self):
+        ipv4 = (b'lo 00000000 00000000 0001 0 0 0 00000000\n'
+                b'gone0 00000000 00000000 0001 0 0 0 00000000\n')
+        ipv6 = b'0'*32 + b' 00 ' + b'0'*32 + b' 00 ' + b'0'*32 + b' 00000064 0 0 00000001 eth0\n'
+        rows = self.dev('eth0', 9, 7) + self.dev('lo', 400, 500)
+        self.assertEqual(self.sample(ipv4, rows, ipv6=ipv6), ('eth0:2', 9, 7))
+
+    def test_unreadable_proc_net_dev_leaves_other_metrics_available(self):
+        with patch.dict(namespace, read=mock_unreadable):
+            self.assertEqual(namespace['network']()[:3], ('', 0, 0))
+
+
+def mock_unreadable(path, limit=65536):
+    raise PermissionError(path)
+
 
 if __name__ == '__main__':
     unittest.main()

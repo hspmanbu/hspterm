@@ -54,6 +54,8 @@ pub struct Sample {
     pub millis: u64,
     pub cpu_total: u64,
     pub cpu_idle: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_iowait: Option<u64>,
     pub memory_total: u64,
     pub memory_available: u64,
     pub disk_total: u64,
@@ -105,6 +107,7 @@ impl Sample {
                 .bytes()
                 .all(|c| c.is_ascii_alphanumeric() || b"_.-:,".contains(&c))
             || result.cpu_idle > result.cpu_total
+            || result.cpu_iowait.is_some_and(|wait| wait > result.cpu_idle)
             || result.memory_total == 0
             || result.memory_available > result.memory_total
             || result.disk_total == 0
@@ -819,6 +822,7 @@ mod tests {
             millis: 100,
             cpu_total: 40,
             cpu_idle: 10,
+            cpu_iowait: Some(3),
             memory_total: 100,
             memory_available: 50,
             disk_total: 1000,
@@ -827,6 +831,10 @@ mod tests {
             rx: 12,
             tx: 40,
         };
+        assert!(Sample::parse(&serde_json::to_vec(&s).unwrap()).is_ok());
+        s.cpu_iowait = Some(11);
+        assert!(Sample::parse(&serde_json::to_vec(&s).unwrap()).is_err());
+        s.cpu_iowait = None;
         assert!(Sample::parse(&serde_json::to_vec(&s).unwrap()).is_ok());
         s.memory_available = 101;
         assert!(Sample::parse(&serde_json::to_vec(&s).unwrap()).is_err());

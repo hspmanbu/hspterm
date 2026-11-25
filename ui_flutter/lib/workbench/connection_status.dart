@@ -131,12 +131,31 @@ class _WorkbenchConnectionStatusState extends State<WorkbenchConnectionStatus>
         listenable: source.inspection,
         builder: (context, _) {
           final inspection = source.inspection;
-          final resource = inspection.summary?.label;
+          final sample = inspection.summary;
+          final resource = sample?.label;
           final details =
               '${source.statusLabel} · ${terminalTransportSummary(value)}';
           final resourceText = inspection.error != null
               ? '资源采样已暂停'
-              : resource ?? '资源采样中…';
+              : resource == null
+              ? '资源采样中…'
+              : inspection.sampleDelayed
+              ? '$resource · 延迟'
+              : resource;
+          final resourceTooltip = <String>[
+            ?inspection.error,
+            if (sample != null) ...[
+              sample.label,
+              if (inspection.sampleDelayed) '检查通道繁忙，显示上次样本',
+              if (sample.availabilityDetails.isNotEmpty)
+                sample.availabilityDetails,
+              if (sample.sample.network.isNotEmpty &&
+                  sample.sample.network != 'legacy')
+                '默认出口：${sample.sample.network}',
+              '服务器接收↓ / 发送↑，包含网卡全部流量。与 iftop 比较时请选择同一网卡。',
+            ] else if (inspection.error == null)
+              '资源采样中',
+          ].join('\n');
           final showResource =
               inspection.metrics ||
               resource != null ||
@@ -179,9 +198,7 @@ class _WorkbenchConnectionStatusState extends State<WorkbenchConnectionStatus>
                         key: const ValueKey('remote-inspection-status'),
                         onTap: () => showRemoteInspection(context, source),
                         child: Tooltip(
-                          message: resource == null
-                              ? inspection.error ?? '资源采样中'
-                              : '$resource\n默认出口：${inspection.summary!.sample.network}\n服务器接收↓ / 发送↑，包含该网卡全部流量；与 iftop 比较时请选择同一网卡。',
+                          message: resourceTooltip,
                           child: SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             reverse: true,

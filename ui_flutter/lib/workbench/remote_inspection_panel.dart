@@ -160,9 +160,13 @@ class _RemoteInspectionPanelState extends State<RemoteInspectionPanel> {
                     ),
                     if (c.busy) const LinearProgressIndicator(),
                     if (c.summary != null) Text(c.summary!.label, maxLines: 2),
+                    if (c.sampleDelayed) const Text('检查通道繁忙，显示上次样本。'),
+                    if (c.summary?.availabilityDetails case final details?
+                        when details.isNotEmpty)
+                      Text(details),
                     if (c.summary != null)
                       const Text(
-                        'CPU/网络为相邻有效采样的差值；内存为 MemAvailable，根盘为 /，网络汇总当前命名空间非 lo 接口（可能含桥接重复计数）。',
+                        'CPU 和网络速率根据两次远端采样计算。内存按 MemAvailable 计算，根盘为 /，网速采自远端默认出口。',
                         style: TextStyle(fontSize: 11),
                       ),
                     if (_error ?? c.error case final String error)

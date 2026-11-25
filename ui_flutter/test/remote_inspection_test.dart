@@ -14,6 +14,7 @@ String _sample({
   int millis = 1000,
   int total = 100,
   int idle = 20,
+  int? ioWait,
   String? boot,
   String network = "eth0:2",
 }) => jsonEncode({
@@ -22,6 +23,7 @@ String _sample({
   'millis': millis,
   'cpu_total': total,
   'cpu_idle': idle,
+  'cpu_iowait': ?ioWait,
   'memory_total': 1024,
   'memory_available': 256,
   'disk_total': 2048,
@@ -54,6 +56,7 @@ class _Gateway implements RemoteInspectionGateway {
   final configurations = <(int, int, bool, bool)>[];
   int samples = 0, lists = 0, signals = 0;
   Completer<String>? waiting;
+  String? nextSample;
   bool failSignal = false;
   bool sampleBusy = false, sampleInvalid = false;
   @override
@@ -70,7 +73,7 @@ class _Gateway implements RemoteInspectionGateway {
     samples++;
     if (sampleBusy) throw Exception('远端检查正在处理或等待旧通道结束；未开始新请求');
     if (sampleInvalid) return '{}';
-    return waiting?.future ?? _sample();
+    return waiting?.future ?? nextSample ?? _sample();
   }
 
   @override
@@ -232,6 +235,71 @@ void main() {
       contains('收↓20.0KiB/s 发↑10.0KiB/s'),
     );
   });
+  test('decreasing Linux iowait does not erase CPU utilization', () {
+    final previous = RemoteResourceSample.parse(
+      _sample(total: 100, idle: 40, ioWait: 20),
+    );
+    final next = RemoteResourceSample.parse(
+      _sample(millis: 6000, total: 135, idle: 35, ioWait: 10),
+    );
+    final summary = RemoteResourceSummary(next, previous);
+    expect(summary.cpu, closeTo(100 * 40 / 45, .001));
+    expect(summary.availabilityDetails, isEmpty);
+    expect(
+      () => RemoteResourceSample.parse(_sample(ioWait: 21)),
+      throwsFormatException,
+    );
+  });
+
+  testWidgets('busy preserves recent values and marks them delayed', (
+    tester,
+  ) async {
+    final (terminal, c, g) = await _fixture();
+    try {
+      await c.configure(metrics: true, processes: false);
+      await c.refreshMetrics();
+      g.nextSample = _sample(millis: 6000, total: 200, idle: 40);
+      await c.refreshMetrics();
+      final last = c.summary!;
+      expect(last.rxPerSecond, 20480);
+      g.sampleBusy = true;
+      await expectLater(c.refreshMetrics(), throwsException);
+      expect(c.summary, same(last));
+      expect(c.sampleDelayed, true);
+      g.sampleBusy = false;
+      g.nextSample = _sample(millis: 16000, total: 400, idle: 80);
+      await c.refreshMetrics();
+      expect(c.summary!.rxPerSecond, 20480);
+      expect(c.sampleDelayed, false);
+    } finally {
+      await _close(tester, terminal, c);
+    }
+  });
+
+  testWidgets('a reply from before focus loss cannot seed the next interval', (
+    tester,
+  ) async {
+    final (terminal, c, g) = await _fixture();
+    try {
+      await c.configure(metrics: true, processes: false);
+      c.setActive(true);
+      final pending = g.waiting = Completer<String>();
+      final old = c.refreshMetrics();
+      c.setActive(false);
+      c.setActive(true);
+      g.waiting = null;
+      pending.complete(_sample());
+      await old;
+      expect(c.summary, isNull);
+      await tester.pump(Duration.zero);
+      await tester.pump();
+      expect(c.summary, isNotNull);
+      expect(c.summary!.cpu, isNull);
+    } finally {
+      await _close(tester, terminal, c);
+    }
+  });
+
   test('adjacent monotonic samples calculate rates and refuse boot changes, resets and stale intervals', () {
     final a = RemoteResourceSample.parse(_sample());
     final b = RemoteResourceSample.parse(
