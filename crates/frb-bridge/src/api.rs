@@ -2757,6 +2757,7 @@ pub struct HostProxyConfig {
     pub port: u16,
     pub authenticate: bool,
     pub credential_set: Option<bool>,
+    pub enabled: Option<bool>,
 }
 /// Only supplied when editing authentication. Never returned in host metadata.
 pub struct ProxyAuthenticationInput {
@@ -2806,6 +2807,7 @@ impl From<hspterm_storage_sync::HostRecord> for HostConfig {
                 port: p.port,
                 authenticate: p.authenticate,
                 credential_set: Some(p.authenticate),
+                enabled: Some(p.enabled),
             }),
         }
     }
@@ -2851,6 +2853,7 @@ impl HostConfig {
                 address: p.address,
                 port: p.port,
                 authenticate: p.authenticate,
+                enabled: p.enabled.unwrap_or(true),
             });
         h
     }

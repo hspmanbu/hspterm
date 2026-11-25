@@ -11585,12 +11585,14 @@ impl SseDecode for crate::api::HostProxyConfig {
         let mut var_port = <u16>::sse_decode(deserializer);
         let mut var_authenticate = <bool>::sse_decode(deserializer);
         let mut var_credentialSet = <Option<bool>>::sse_decode(deserializer);
+        let mut var_enabled = <Option<bool>>::sse_decode(deserializer);
         return crate::api::HostProxyConfig {
             socks5: var_socks5,
             address: var_address,
             port: var_port,
             authenticate: var_authenticate,
             credential_set: var_credentialSet,
+            enabled: var_enabled,
         };
     }
 }
@@ -14580,6 +14582,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::HostProxyConfig {
             self.port.into_into_dart().into_dart(),
             self.authenticate.into_into_dart().into_dart(),
             self.credential_set.into_into_dart().into_dart(),
+            self.enabled.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -16213,6 +16216,7 @@ impl SseEncode for crate::api::HostProxyConfig {
         <u16>::sse_encode(self.port, serializer);
         <bool>::sse_encode(self.authenticate, serializer);
         <Option<bool>>::sse_encode(self.credential_set, serializer);
+        <Option<bool>>::sse_encode(self.enabled, serializer);
     }
 }
 

@@ -17,6 +17,7 @@ import '../workbench/typography_settings.dart';
 import '../src/rust/api.dart' as rust;
 import 'model.dart';
 import 'host_connection_test_dialog.dart';
+import 'settings_style.dart';
 import '../app_notice.dart';
 
 class HostManager extends StatefulWidget {
@@ -45,7 +46,8 @@ class HostManagerState extends State<HostManager> {
       _proxyPortFocus = FocusNode(),
       _proxyUserFocus = FocusNode(),
       _proxyPasswordFocus = FocusNode();
-  String proxyKind = '无代理';
+  String proxyKind = 'SOCKS5';
+  bool proxyEnabled = false;
   String? jumpHostId;
   final _jumpFocus = FocusNode();
   bool proxyAuthenticate = false,
@@ -158,7 +160,7 @@ class HostManagerState extends State<HostManager> {
     passphrase.clear();
     name.text = h?.name ?? '';
     address.text = h?.address ?? '';
-    user.text = h?.user ?? 'ubuntu';
+    user.text = h?.user ?? '';
     port.text = '${h?.port ?? 22}';
     note.text = h?.note ?? '';
     group =
@@ -170,13 +172,10 @@ class HostManagerState extends State<HostManager> {
     options['OSC7 跟随'] = h?.followOsc7 ?? false;
     final proxy = h?.proxy;
     jumpHostId = h?.jumpHostId;
-    proxyKind = proxy == null
-        ? '无代理'
-        : proxy.socks5
-        ? 'SOCKS5'
-        : 'HTTP CONNECT';
+    proxyEnabled = proxy?.enabled ?? false;
+    proxyKind = proxy?.socks5 == false ? 'HTTP CONNECT' : 'SOCKS5';
     proxyAddress.text = proxy?.address ?? '';
-    proxyPort.text = '${proxy?.port ?? 1080}';
+    proxyPort.text = proxy?.port == 0 ? '' : '${proxy?.port ?? 1080}';
     proxyAuthenticate = proxy?.authenticate ?? false;
     _proxyCredentialSet = proxy?.credentialSet ?? false;
     _proxySecretEdited = false;
@@ -220,16 +219,28 @@ class HostManagerState extends State<HostManager> {
     keepaliveResponseSeconds: responseEnabled
         ? int.tryParse(keepaliveResponse.text) ?? 0
         : null,
-    proxy: proxyKind == '无代理'
-        ? null
-        : DemoProxy(
-            socks5: proxyKind == 'SOCKS5',
-            address: proxyAddress.text.trim(),
-            port: int.tryParse(proxyPort.text) ?? 0,
-            authenticate: proxyAuthenticate,
-            credentialSet: _proxyCredentialSet,
-          ),
+    proxy: _proxySnapshot(),
   );
+  DemoProxy? _proxySnapshot() {
+    final address = proxyAddress.text.trim();
+    final port = int.tryParse(proxyPort.text) ?? 0;
+    if (!proxyEnabled &&
+        address.isEmpty &&
+        proxyPort.text == '1080' &&
+        proxyKind == 'SOCKS5' &&
+        !proxyAuthenticate) {
+      return null;
+    }
+    return DemoProxy(
+      socks5: proxyKind == 'SOCKS5',
+      address: address,
+      port: port >= 0 && port <= 65535 ? port : 0,
+      enabled: proxyEnabled,
+      authenticate: proxyAuthenticate,
+      credentialSet: _proxyCredentialSet,
+    );
+  }
+
   String? get _secret =>
       _secretEdited || (!_credentialSet && !m.isMock) ? secret.text : null;
   void changeAuth(String value) {
@@ -769,7 +780,7 @@ class HostManagerState extends State<HostManager> {
                   value: applyFavorite,
                   onChanged: (v) => update(() => applyFavorite = v!),
                 ),
-                SwitchListTile(
+                _settingsSwitch(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('设为收藏'),
                   value: targetFavorite,
@@ -902,12 +913,14 @@ class HostManagerState extends State<HostManager> {
             const SizedBox(width: 16),
             Row(
               children: [
-                Checkbox(
-                  value: favorite,
-                  onChanged: (v) {
-                    favorite = v!;
-                    mark();
-                  },
+                CompactSettingsToggle(
+                  child: Switch(
+                    value: favorite,
+                    onChanged: (value) {
+                      favorite = value;
+                      mark();
+                    },
+                  ),
                 ),
                 const Text('收藏'),
               ],
@@ -1182,7 +1195,7 @@ class HostManagerState extends State<HostManager> {
   ];
 
   bool get _proxyNeedsInput =>
-      proxyKind != '无代理' &&
+      proxyEnabled &&
       proxyAuthenticate &&
       (_proxySecretEdited || !_proxyCredentialSet);
   String? get _proxyUsername => _proxyNeedsInput ? proxyUser.text : null;
@@ -1208,7 +1221,7 @@ class HostManagerState extends State<HostManager> {
         errors[7] = '跳板主机已删除或未保存，请重新选择';
       } else if (jump.id == editingId || jump.jumpHostId != null) {
         errors[7] = '仅支持一级跳板，不能选择自身或含跳板的主机';
-      } else if (proxyKind != '无代理' && jump.proxy != null) {
+      } else if (proxyEnabled && jump.proxy?.enabled == true) {
         errors[7] = '目标与跳板只允许配置一个代理';
       }
     }
@@ -1218,7 +1231,7 @@ class HostManagerState extends State<HostManager> {
     if (dependents.isNotEmpty && jumpHostId != null) {
       errors[7] = '此主机已被用作跳板，不能再设置跳板';
     }
-    if (proxyKind != '无代理' && dependents.any((h) => h.proxy != null)) {
+    if (proxyEnabled && dependents.any((h) => h.proxy?.enabled == true)) {
       errors[7] = '关联目标已有代理，不能再为此跳板配置第二个代理';
     }
     final timeoutSeconds = int.tryParse(timeout.text),
@@ -1240,7 +1253,7 @@ class HostManagerState extends State<HostManager> {
         (response == null || response < 1 || response > 3600)) {
       errors[8] = '心跳响应超时须为 1–3600 秒';
     }
-    if (proxyKind == '无代理') return errors;
+    if (!proxyEnabled) return errors;
     if (!_validProxyHost(proxyAddress.text.trim())) {
       errors[0] = '请输入代理域名或 IP，不含协议、路径或端口';
     }
@@ -1315,7 +1328,7 @@ class HostManagerState extends State<HostManager> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        CheckboxListTile(
+        _settingsSwitch(
           key: const ValueKey('host-use-network-defaults'),
           dense: true,
           contentPadding: EdgeInsets.zero,
@@ -1323,7 +1336,7 @@ class HostManagerState extends State<HostManager> {
           subtitle: const Text('下次连接生效，当前连接不改变。下方覆盖值仅在关闭继承后使用。'),
           value: useNetworkDefaults,
           onChanged: (value) {
-            setState(() => useNetworkDefaults = value ?? false);
+            setState(() => useNetworkDefaults = value);
             mark();
           },
         ),
@@ -1349,7 +1362,7 @@ class HostManagerState extends State<HostManager> {
                 ),
         ),
         const SizedBox(height: 8),
-        SwitchListTile(
+        _settingsSwitch(
           key: const ValueKey('host-response-enabled'),
           dense: true,
           contentPadding: EdgeInsets.zero,
@@ -1391,110 +1404,120 @@ class HostManagerState extends State<HostManager> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         connectionTimingFields(),
-        DropdownButtonFormField<String>(
-          key: const ValueKey('host-proxy-kind'),
-          initialValue: proxyKind,
-          decoration: const InputDecoration(labelText: '连接代理'),
-          items: [
-            for (final s in ['无代理', 'HTTP CONNECT', 'SOCKS5'])
-              DropdownMenuItem(value: s, child: Text(s)),
-          ],
+        _settingsSwitch(
+          key: const ValueKey('host-proxy-enabled'),
+          title: const Text('启用连接代理'),
+          value: proxyEnabled,
           onChanged: (value) {
-            proxyKind = value!;
-            if (value == '无代理') {
-              proxyUser.clear();
-              proxyPassword.clear();
-              _proxySecretEdited = false;
-              _proxyCredentialSet = false;
-            }
+            if (!value) FocusScope.of(context).unfocus();
+            proxyEnabled = value;
             mark();
           },
         ),
-        if (proxyKind != '无代理') ...[
-          const SizedBox(height: 12),
-          TextFormField(
-            key: const ValueKey('host-proxy-address'),
-            controller: proxyAddress,
-            focusNode: _proxyAddressFocus,
-            decoration: const InputDecoration(labelText: '代理地址'),
-            validator: (_) => _networkErrors[0],
-            onChanged: (_) => mark(),
+        DropdownButtonFormField<String>(
+          key: const ValueKey('host-proxy-kind'),
+          initialValue: proxyKind,
+          decoration: const InputDecoration(labelText: '代理类型'),
+          items: [
+            for (final s in ['HTTP CONNECT', 'SOCKS5'])
+              DropdownMenuItem(value: s, child: Text(s)),
+          ],
+          onChanged: proxyEnabled
+              ? (value) {
+                  proxyKind = value!;
+                  mark();
+                }
+              : null,
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          key: const ValueKey('host-proxy-address'),
+          controller: proxyAddress,
+          focusNode: _proxyAddressFocus,
+          enabled: proxyEnabled,
+          decoration: const InputDecoration(labelText: '代理地址'),
+          validator: (_) => _networkErrors[0],
+          onChanged: (_) => mark(),
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          key: const ValueKey('host-proxy-port'),
+          controller: proxyPort,
+          focusNode: _proxyPortFocus,
+          enabled: proxyEnabled,
+          decoration: const InputDecoration(labelText: '代理端口'),
+          keyboardType: TextInputType.number,
+          validator: (_) => _networkErrors[1],
+          onChanged: (_) => mark(),
+        ),
+        _settingsSwitch(
+          key: const ValueKey('host-proxy-authenticate'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('代理用户名与密码认证'),
+          subtitle: const Text('独立于 SSH 登录认证'),
+          value: proxyAuthenticate,
+          onChanged: !proxyEnabled
+              ? null
+              : (value) {
+                  proxyAuthenticate = value;
+                  if (!value) {
+                    proxyUser.clear();
+                    proxyPassword.clear();
+                    _proxySecretEdited = false;
+                    _proxyCredentialSet = false;
+                  }
+                  mark();
+                },
+        ),
+        if (proxyAuthenticate) ...[
+          Text(
+            _proxyCredentialSet
+                ? '代理认证已设置；不修改这两项将保留原值。'
+                : '尚未设置代理认证，请填写用户名和密码。',
+            style: const TextStyle(fontSize: 11),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           TextFormField(
-            key: const ValueKey('host-proxy-port'),
-            controller: proxyPort,
-            focusNode: _proxyPortFocus,
-            decoration: const InputDecoration(labelText: '代理端口'),
-            keyboardType: TextInputType.number,
-            validator: (_) => _networkErrors[1],
-            onChanged: (_) => mark(),
-          ),
-          SwitchListTile(
-            key: const ValueKey('host-proxy-authenticate'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('代理用户名与密码认证'),
-            subtitle: const Text('独立于 SSH 登录认证'),
-            value: proxyAuthenticate,
-            onChanged: (value) {
-              proxyAuthenticate = value;
-              if (!value) {
-                proxyUser.clear();
-                proxyPassword.clear();
-                _proxySecretEdited = false;
-                _proxyCredentialSet = false;
-              }
+            key: const ValueKey('host-proxy-username'),
+            controller: proxyUser,
+            focusNode: _proxyUserFocus,
+            enabled: proxyEnabled,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: InputDecoration(
+              labelText: '代理用户名',
+              hintText: _proxyCredentialSet ? '已设置；修改时重新填写两项' : null,
+            ),
+            validator: (_) => _networkErrors[2],
+            onChanged: (_) {
+              _proxySecretEdited = true;
               mark();
             },
           ),
-          if (proxyAuthenticate) ...[
-            Text(
-              _proxyCredentialSet
-                  ? '代理认证已设置；不修改这两项将保留原值。'
-                  : '尚未设置代理认证，请填写用户名和密码。',
-              style: const TextStyle(fontSize: 11),
+          const SizedBox(height: 12),
+          TextFormField(
+            key: const ValueKey('host-proxy-password'),
+            controller: proxyPassword,
+            focusNode: _proxyPasswordFocus,
+            enabled: proxyEnabled,
+            obscureText: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: InputDecoration(
+              labelText: '代理密码',
+              hintText: _proxyCredentialSet ? '已设置；留空且不修改时保留' : null,
             ),
-            const SizedBox(height: 10),
-            TextFormField(
-              key: const ValueKey('host-proxy-username'),
-              controller: proxyUser,
-              focusNode: _proxyUserFocus,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: InputDecoration(
-                labelText: '代理用户名',
-                hintText: _proxyCredentialSet ? '已设置；修改时重新填写两项' : null,
-              ),
-              validator: (_) => _networkErrors[2],
-              onChanged: (_) {
-                _proxySecretEdited = true;
-                mark();
-              },
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              key: const ValueKey('host-proxy-password'),
-              controller: proxyPassword,
-              focusNode: _proxyPasswordFocus,
-              obscureText: true,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: InputDecoration(
-                labelText: '代理密码',
-                hintText: _proxyCredentialSet ? '已设置；留空且不修改时保留' : null,
-              ),
-              validator: (_) => _networkErrors[3],
-              onChanged: (_) {
-                _proxySecretEdited = true;
-                mark();
-              },
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'HTTP Basic / SOCKS5 认证在到代理的 TCP 链路中不加密，请使用可信代理与网络。',
-              style: TextStyle(fontSize: 11),
-            ),
-          ],
+            validator: (_) => _networkErrors[3],
+            onChanged: (_) {
+              _proxySecretEdited = true;
+              mark();
+            },
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'HTTP Basic / SOCKS5 认证在到代理的 TCP 链路中不加密，请使用可信代理与网络。',
+            style: TextStyle(fontSize: 11),
+          ),
         ],
         const SizedBox(height: 16),
         jumpField(),
@@ -1548,7 +1571,7 @@ class HostManagerState extends State<HostManager> {
     '认证' => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SwitchListTile.adaptive(
+        _settingsSwitch(
           key: const ValueKey('host-agent-forwarding'),
           dense: true,
           contentPadding: EdgeInsets.zero,
@@ -1686,7 +1709,7 @@ class HostManagerState extends State<HostManager> {
             onChanged: (_) => mark(),
           ),
         const SizedBox(height: 16),
-        SwitchListTile.adaptive(
+        _settingsSwitch(
           key: const ValueKey('host-shell-integration'),
           dense: true,
           contentPadding: EdgeInsets.zero,
@@ -1719,7 +1742,7 @@ class HostManagerState extends State<HostManager> {
                   mark();
                 },
         ),
-        SwitchListTile.adaptive(
+        _settingsSwitch(
           key: const ValueKey('host-tmux'),
           dense: true,
           contentPadding: EdgeInsets.zero,
@@ -1779,7 +1802,27 @@ class HostManagerState extends State<HostManager> {
       ],
     ),
   };
-  Widget toggle(String key, String subtitle) => SwitchListTile(
+  Widget _settingsSwitch({
+    Key? key,
+    required Widget title,
+    Widget? subtitle,
+    required bool value,
+    required ValueChanged<bool>? onChanged,
+    bool? dense,
+    EdgeInsetsGeometry contentPadding = EdgeInsets.zero,
+  }) => CompactSettingsToggle(
+    child: SwitchListTile(
+      key: key,
+      title: title,
+      subtitle: subtitle,
+      value: value,
+      onChanged: onChanged,
+      dense: dense,
+      contentPadding: contentPadding,
+    ),
+  );
+
+  Widget toggle(String key, String subtitle) => _settingsSwitch(
     contentPadding: EdgeInsets.zero,
     title: Text(key, style: const TextStyle(fontSize: 13)),
     subtitle: Text(subtitle, style: const TextStyle(fontSize: 11)),

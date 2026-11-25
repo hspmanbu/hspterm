@@ -17,6 +17,7 @@ fn secret() -> Credential {
 }
 fn proxy() -> ProxySettings {
     ProxySettings {
+        enabled: true,
         kind: ProxyKind::Socks5,
         address: "proxy.invalid".into(),
         port: 1080,

@@ -15,6 +15,16 @@ pub struct ProxySettings {
     pub address: String,
     pub port: u16,
     pub authenticate: bool,
+    #[serde(default = "enabled_by_default", skip_serializing_if = "is_enabled")]
+    pub enabled: bool,
+}
+
+fn enabled_by_default() -> bool {
+    true
+}
+
+fn is_enabled(enabled: &bool) -> bool {
+    *enabled
 }
 
 #[derive(Serialize, Deserialize)]
@@ -47,7 +57,11 @@ pub(crate) fn host(value: &str) -> bool {
 }
 impl ProxySettings {
     pub(crate) fn valid(&self, target: &str) -> bool {
-        self.port != 0 && host(&self.address) && host(target)
+        if self.enabled {
+            self.port != 0 && host(&self.address) && host(target)
+        } else {
+            self.address.len() <= 253 && !self.address.chars().any(char::is_control)
+        }
     }
     pub(crate) fn credential_valid(&self, c: &ProxyCredential) -> bool {
         match self.kind {

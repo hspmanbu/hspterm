@@ -96,6 +96,10 @@ pub struct HostRecord {
     pub shell_integration: bool,
 }
 impl HostRecord {
+    pub fn active_proxy(&self) -> Option<&ProxySettings> {
+        self.proxy.as_ref().filter(|proxy| proxy.enabled)
+    }
+
     pub fn new(name: String, address: String, username: String, auth: AuthMethod) -> Self {
         Self {
             id: opaque("host"),
@@ -298,7 +302,7 @@ impl<'a> Repository<'a> {
         if jump.jump_host_id.is_some() {
             return Err(RepositoryError::JumpInvalid);
         }
-        if host.proxy.is_some() && jump.proxy.is_some() {
+        if host.active_proxy().is_some() && jump.active_proxy().is_some() {
             return Err(RepositoryError::JumpProxyConflict);
         }
         Ok(Some(jump))
@@ -309,7 +313,7 @@ impl<'a> Repository<'a> {
         // silently create a second SSH hop or a second proxy for its targets.
         // Read one bounded encrypted record at a time, not the whole catalog's
         // notes/metadata into a second list.
-        if host.jump_host_id.is_some() || host.proxy.is_some() {
+        if host.jump_host_id.is_some() || host.active_proxy().is_some() {
             for id in &catalog.hosts {
                 if id == &host.id {
                     continue;
@@ -319,7 +323,7 @@ impl<'a> Repository<'a> {
                     if host.jump_host_id.is_some() {
                         return Err(RepositoryError::JumpInvalid);
                     }
-                    if dependent.proxy.is_some() && host.proxy.is_some() {
+                    if dependent.active_proxy().is_some() && host.active_proxy().is_some() {
                         return Err(RepositoryError::JumpProxyConflict);
                     }
                 }
@@ -365,7 +369,7 @@ impl<'a> Repository<'a> {
             }
         }
         let proxy_key = format!("host-proxy-credential-{}", host.id);
-        let proxy_raw = if let Some(proxy) = host.proxy.as_ref().filter(|p| p.authenticate) {
+        let proxy_raw = if let Some(proxy) = host.proxy.as_mut().filter(|p| p.authenticate) {
             if proxy_credential.is_none()
                 && existing
                     .as_ref()
@@ -374,13 +378,15 @@ impl<'a> Repository<'a> {
             {
                 proxy_credential = self.proxy_credential(&host.id)?;
             }
-            let value = proxy_credential
-                .as_ref()
-                .ok_or(RepositoryError::CredentialRequired)?;
-            if !proxy.credential_valid(value) {
-                return Err(RepositoryError::Invalid);
+            match proxy_credential.as_ref() {
+                Some(value) if proxy.credential_valid(value) => Some(encoded(value)?),
+                Some(_) => return Err(RepositoryError::Invalid),
+                None if proxy.enabled => return Err(RepositoryError::CredentialRequired),
+                None => {
+                    proxy.authenticate = false;
+                    None
+                }
             }
-            Some(encoded(value)?)
         } else {
             None
         };

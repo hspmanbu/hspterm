@@ -91,6 +91,7 @@ void main() {
         final editor = tester.state<HostManagerState>(find.byType(HostManager));
         await editor.choose(null);
         await tester.pumpAndSettle();
+        expect(editor.user.text, isEmpty);
         expect(
           editor.useNetworkDefaults,
           true,

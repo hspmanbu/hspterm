@@ -21,7 +21,7 @@ class DemoHost {
     this.address,
     this.group, {
     this.favorite = false,
-    this.user = 'ubuntu',
+    this.user = '',
     this.port = 22,
     this.auth = '私钥',
     this.note = '',
@@ -105,10 +105,11 @@ class DemoProxy {
     required this.socks5,
     required this.address,
     required this.port,
+    this.enabled = true,
     this.authenticate = false,
     this.credentialSet = false,
   });
-  final bool socks5, authenticate, credentialSet;
+  final bool enabled, socks5, authenticate, credentialSet;
   final String address;
   final int port;
 }
@@ -507,6 +508,7 @@ class WorkbenchModel extends ChangeNotifier {
       '生产 · Web 服务',
       'web-01.example.test',
       '生产环境',
+      user: 'operator',
       favorite: true,
     ),
     DemoHost(
@@ -514,6 +516,7 @@ class WorkbenchModel extends ChangeNotifier {
       '生产 · API 服务',
       'api-01.example.test',
       '生产环境',
+      user: 'operator',
       favorite: true,
     ),
     DemoHost(

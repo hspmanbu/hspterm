@@ -9,6 +9,7 @@ fn host() -> HostRecord {
         AuthMethod::Password,
     );
     h.proxy = Some(ProxySettings {
+        enabled: true,
         kind: ProxyKind::Socks5,
         address: "proxy.invalid".into(),
         port: 1080,
@@ -27,6 +28,29 @@ fn proxy_secret() -> ProxyCredential {
         username: "synthetic-proxy-user".into(),
         password: "synthetic-proxy-password".into(),
     }
+}
+
+#[test]
+fn disabled_proxy_keeps_its_address_port_and_saved_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut vault = Vault::create(
+        &dir.path().join("proxy-toggle.vault"),
+        b"synthetic-proxy-master",
+    )
+    .unwrap();
+    let mut repo = Repository::new(&mut vault);
+    let mut saved = repo
+        .save_with_proxy(host(), Some(ssh_secret()), Some(proxy_secret()))
+        .unwrap();
+    saved.proxy.as_mut().unwrap().enabled = false;
+    let disabled = repo.save(saved, None).unwrap();
+    let mut stored = repo.host(&disabled.id).unwrap().unwrap();
+    assert!(stored.active_proxy().is_none());
+    let settings = stored.proxy.as_mut().unwrap();
+    assert_eq!(settings.address, "proxy.invalid");
+    assert_eq!(settings.port, 1080);
+    settings.enabled = true;
+    assert!(repo.save(stored, None).unwrap().active_proxy().is_some());
 }
 
 #[test]

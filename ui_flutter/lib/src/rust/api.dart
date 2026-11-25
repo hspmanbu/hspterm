@@ -2486,6 +2486,7 @@ class HostProxyConfig {
   final int port;
   final bool authenticate;
   final bool? credentialSet;
+  final bool? enabled;
 
   const HostProxyConfig({
     required this.socks5,
@@ -2493,6 +2494,7 @@ class HostProxyConfig {
     required this.port,
     required this.authenticate,
     this.credentialSet,
+    this.enabled,
   });
 
   @override
@@ -2501,7 +2503,8 @@ class HostProxyConfig {
       address.hashCode ^
       port.hashCode ^
       authenticate.hashCode ^
-      credentialSet.hashCode;
+      credentialSet.hashCode ^
+      enabled.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -2512,7 +2515,8 @@ class HostProxyConfig {
           address == other.address &&
           port == other.port &&
           authenticate == other.authenticate &&
-          credentialSet == other.credentialSet;
+          credentialSet == other.credentialSet &&
+          enabled == other.enabled;
 }
 
 class KeyboardInput {

@@ -1,4 +1,5 @@
 import '../prototype/design.dart';
+import '../prototype/settings_style.dart';
 
 import 'dart:math' as math;
 
@@ -333,12 +334,14 @@ class _HostBulkDialogState extends State<HostBulkDialog> {
   ) => _select(
     id,
     title,
-    SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-      title: Text(value ? '设为开启' : '设为关闭'),
-      value: value,
-      onChanged: (v) => setState(() => change(v)),
+    CompactSettingsToggle(
+      child: SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        title: Text(value ? '设为开启' : '设为关闭'),
+        value: value,
+        onChanged: (v) => setState(() => change(v)),
+      ),
     ),
   );
   Widget _number(String id, String label, TextEditingController controller) =>
@@ -437,14 +440,16 @@ class _HostBulkDialogState extends State<HostBulkDialog> {
                               '修改网络参数（继承或一组明确覆盖）',
                               Column(
                                 children: [
-                                  SwitchListTile(
-                                    key: const ValueKey('host-bulk-inherit'),
-                                    contentPadding: EdgeInsets.zero,
-                                    dense: true,
-                                    title: const Text('继承全局网络配置'),
-                                    value: _inherit,
-                                    onChanged: (v) =>
-                                        setState(() => _inherit = v),
+                                  CompactSettingsToggle(
+                                    child: SwitchListTile(
+                                      key: const ValueKey('host-bulk-inherit'),
+                                      contentPadding: EdgeInsets.zero,
+                                      dense: true,
+                                      title: const Text('继承全局网络配置'),
+                                      value: _inherit,
+                                      onChanged: (v) =>
+                                          setState(() => _inherit = v),
+                                    ),
                                   ),
                                   if (!_inherit)
                                     Wrap(

@@ -11626,14 +11626,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   HostProxyConfig dco_decode_host_proxy_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return HostProxyConfig(
       socks5: dco_decode_bool(arr[0]),
       address: dco_decode_String(arr[1]),
       port: dco_decode_u_16(arr[2]),
       authenticate: dco_decode_bool(arr[3]),
       credentialSet: dco_decode_opt_box_autoadd_bool(arr[4]),
+      enabled: dco_decode_opt_box_autoadd_bool(arr[5]),
     );
   }
 
@@ -13680,12 +13681,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_port = sse_decode_u_16(deserializer);
     var var_authenticate = sse_decode_bool(deserializer);
     var var_credentialSet = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_enabled = sse_decode_opt_box_autoadd_bool(deserializer);
     return HostProxyConfig(
       socks5: var_socks5,
       address: var_address,
       port: var_port,
       authenticate: var_authenticate,
       credentialSet: var_credentialSet,
+      enabled: var_enabled,
     );
   }
 
@@ -16119,6 +16122,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_16(self.port, serializer);
     sse_encode_bool(self.authenticate, serializer);
     sse_encode_opt_box_autoadd_bool(self.credentialSet, serializer);
+    sse_encode_opt_box_autoadd_bool(self.enabled, serializer);
   }
 
   @protected

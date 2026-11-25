@@ -1851,6 +1851,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
             port: h.proxy!.port,
             authenticate: h.proxy!.authenticate,
             credentialSet: h.proxy!.credentialSet ?? false,
+            enabled: h.proxy!.enabled ?? true,
           ),
   );
   rust.HostConfig _record(
@@ -1890,6 +1891,7 @@ class LiveWorkbenchModel extends WorkbenchModel implements StagingCleanupPort {
               port: h.proxy!.port,
               authenticate: h.proxy!.authenticate,
               credentialSet: h.proxy!.credentialSet || proxySecretPresent,
+              enabled: h.proxy!.enabled,
             ),
     );
   }

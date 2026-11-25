@@ -14,6 +14,7 @@ class _Hosts extends WorkbenchModel {
           'Proxy fixture',
           'ssh.invalid',
           '未分组',
+          user: 'fixture',
           credentialSet: true,
         ),
       );
@@ -42,6 +43,7 @@ class _Hosts extends WorkbenchModel {
         port: p.port,
         authenticate: p.authenticate,
         credentialSet: p.authenticate,
+        enabled: p.enabled,
       );
     }
     return saved!;
@@ -63,6 +65,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('网络'));
+      await tester.pumpAndSettle();
+      final proxySwitch = find.byKey(const ValueKey('host-proxy-enabled'));
+      await tester.ensureVisible(proxySwitch);
+      await tester.tap(proxySwitch);
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(const ValueKey('host-proxy-kind')));
       await tester.tap(find.byKey(const ValueKey('host-proxy-kind')));
@@ -128,6 +134,21 @@ void main() {
       expect(await invalid, false);
       expect(model.writes, 1);
       expect(find.text('请输入 1–65535 的端口'), findsOneWidget);
+
+      final port = find.byKey(const ValueKey('host-proxy-port'));
+      await tester.enterText(port, '1080');
+      await tester.ensureVisible(proxySwitch);
+      await tester.tap(proxySwitch);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextFormField>(port).enabled, false);
+      expect(tester.widget<TextFormField>(port).controller!.text, '1080');
+      final disabled = key.currentState!.save();
+      await tester.pumpAndSettle();
+      expect(await disabled, true);
+      expect(model.saved!.proxy!.enabled, false);
+      expect(model.saved!.proxy!.address, '127.0.0.1');
+      expect(model.saved!.proxy!.port, 1080);
+      expect(model.proxyUser, isNull);
       await tester.pumpWidget(const SizedBox());
       model.dispose();
     },

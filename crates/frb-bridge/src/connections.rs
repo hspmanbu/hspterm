@@ -135,14 +135,13 @@ pub(crate) fn configuration(repo: &Repository<'_>, host: &HostRecord) -> Result<
     config.keepalive_interval = (interval != 0).then(|| Duration::from_secs(interval as u64));
     config.keepalive_failures = failures as usize;
     config.keepalive_response_timeout = response.map(|s| Duration::from_secs(s as u64));
-    let proxy_owner = if host.proxy.is_some() {
+    let proxy_owner = if host.active_proxy().is_some() {
         host
     } else {
         jump.as_ref().unwrap_or(host)
     };
     config.proxy = proxy_owner
-        .proxy
-        .as_ref()
+        .active_proxy()
         .map(|p| {
             let authentication = if p.authenticate {
                 let mut c = repo

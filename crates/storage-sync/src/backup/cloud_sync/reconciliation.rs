@@ -30,36 +30,6 @@ fn endpoint(h: &HostRecord) -> (String, u16, String) {
     });
     (address, h.port, h.username.clone())
 }
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct Identity {
-    endpoint: (String, u16, String),
-    jump: Option<(String, u16, String)>,
-    proxy: Option<(u8, String, u16)>,
-}
-fn identity(h: &HostRecord, hosts: &BTreeMap<String, HostRecord>) -> Option<Identity> {
-    let jump = match &h.jump_host_id {
-        Some(id) => Some(hosts.get(id)?),
-        None => None,
-    };
-    let proxy = h
-        .proxy
-        .as_ref()
-        .or_else(|| jump.and_then(|j| j.proxy.as_ref()))
-        .map(|p| {
-            let kind = match p.kind {
-                crate::ssh_proxy::ProxyKind::HttpConnect => 0,
-                crate::ssh_proxy::ProxyKind::Socks5 => 1,
-            };
-            let address =
-                normalized_ip(&p.address).unwrap_or_else(|| p.address.to_ascii_lowercase());
-            (kind, address, p.port)
-        });
-    Some(Identity {
-        endpoint: endpoint(h),
-        jump: jump.map(endpoint),
-        proxy,
-    })
-}
 fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     serde_json::to_vec(value).map_err(|_| SyncError::Invalid)
 }
@@ -175,18 +145,28 @@ impl Document {
         let mut aliases = BTreeMap::new();
         // The cloud ID remains stable when a new device already has the same endpoint.
         for h in remote_hosts.values() {
-            if let Some(key) = identity(h, &remote_hosts) {
-                let id = canonical.entry(key).or_insert_with(|| h.id.clone());
-                if *id != h.id {
-                    aliases.insert(h.id.clone(), id.clone());
-                }
+            let key = endpoint(h);
+            // A jump with the same endpoint can collapse into this group.
+            // Use its cloud ID to avoid turning the route into a self-jump.
+            let id = h
+                .jump_host_id
+                .as_ref()
+                .and_then(|id| remote_hosts.get(id))
+                .filter(|jump| endpoint(jump) == key)
+                .map_or(&h.id, |jump| &jump.id);
+            canonical.entry(key).or_insert_with(|| id.clone());
+        }
+        for h in remote_hosts.values() {
+            if let Some(id) = canonical.get(&endpoint(h))
+                && *id != h.id
+            {
+                aliases.insert(h.id.clone(), id.clone());
             }
         }
         let mut adopted = BTreeSet::new();
         for h in local_hosts.values() {
             if !remote_hosts.contains_key(&h.id)
-                && let Some(key) = identity(h, &local_hosts)
-                && let Some(id) = canonical.get(&key)
+                && let Some(id) = canonical.get(&endpoint(h))
                 && *id != h.id
             {
                 aliases.insert(h.id.clone(), id.clone());
@@ -386,9 +366,9 @@ impl projection::Projection {
                                 && aliases.get(&l.id) == Some(&remote.id)))
                 })
                 .or_else(|| {
-                    let target = identity(remote, &remotes)?;
+                    let target = endpoint(remote);
                     locals.values().find(|l| {
-                        identity(l, &locals).as_ref() == Some(&target)
+                        endpoint(l) == target
                             && !used.contains(&l.id)
                             && (!remotes.contains_key(&l.id) || l.id == remote.id)
                     })

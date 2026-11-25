@@ -434,7 +434,7 @@ pub fn prepare_restore(
             let target: HostRecord = decode(slice(raw))?;
             if jump == id
                 || target.jump_host_id.is_some()
-                || (host.proxy.is_some() && target.proxy.is_some())
+                || (host.active_proxy().is_some() && target.active_proxy().is_some())
             {
                 return Err(BackupError::Selection(host.name));
             }
