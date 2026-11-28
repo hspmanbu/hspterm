@@ -111,6 +111,27 @@ pub(super) fn load(vault: &Vault, now: u64) -> Result<(Option<Bytes>, Option<Jou
     Ok((raw, journal))
 }
 
+/// Source-comparison form of the mutation journal: the ACTOR that owns the
+/// pending stamps must match. The journal row is sync-managed bookkeeping —
+/// every configuration write restamps it inside the same SQLite transaction —
+/// so comparing raw bytes reads that ordinary churn as a fresh local change
+/// and aborts the exchange. A restamp never happens alone: when it reflects a
+/// real edit the underlying record changed too, and the proposal's frozen
+/// source revision still fails; a journal rebase or enable always accompanies
+/// target/ledger row changes that remain byte-compared. A row that appeared,
+/// vanished, or no longer decodes is still reported as a source change.
+pub(super) fn same_source(vault: &Vault, expected: Option<&[u8]>, now: u64) -> Result<bool> {
+    let (_, current) = load(vault, now)?;
+    let expected = match expected {
+        None => None,
+        Some(raw) => match Journal::decode(raw, now) {
+            Ok(journal) => Some(journal.actor),
+            Err(_) => return Ok(false),
+        },
+    };
+    Ok(expected == current.map(|journal| journal.actor))
+}
+
 /// Explicit setup arms tracking once. It does not connect, read remote files or
 /// upload. Preexisting local data is stamped as the user's initial sync state.
 /// The returned write can join the target/credentials CAS transaction.

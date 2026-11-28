@@ -38,6 +38,7 @@ class _Gateway implements ConfigurationSyncGateway {
       intervalSaves = 0;
   String phase = 'idle', operation = '', review = 'review-1';
   int networkFailures = 0;
+  int sourceChangedFailures = 0;
   String? error;
   bool risky = false,
       eligible = true,
@@ -119,6 +120,12 @@ class _Gateway implements ConfigurationSyncGateway {
       error = 'network';
       publish('failed');
       throw StateError('synthetic network failure');
+    }
+    if (sourceChangedFailures > 0) {
+      sourceChangedFailures--;
+      error = 'source_changed';
+      publish('failed');
+      throw StateError('synthetic source change');
     }
     error = null;
     publish('reading');
@@ -579,6 +586,33 @@ void main() {
     expect(controller.retrying, false);
     await tester.pump(const Duration(seconds: 10));
     expect(gateway.prepares, 6);
+    await drainAsync(tester, controller.shutdown());
+    controller.dispose();
+  });
+  testWidgets('source changes do not auto-retry on a dense backoff loop', (
+    tester,
+  ) async {
+    final gateway = _Gateway()..sourceChangedFailures = 3;
+    final controller = ConfigurationSyncController(gateway: gateway);
+    await controller.start();
+    final work = controller.synchronize();
+    await tester.pump();
+    // The exchange compared the local source before and after the network
+    // read; a persistent source_changed failure must not be retried every
+    // 2/4 seconds. Pacing falls back to the check interval or a manual sync.
+    expect(gateway.prepares, 1);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(gateway.prepares, 1);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    await work;
+    expect(gateway.prepares, 1);
+    expect(controller.state?.phase, 'failed');
+    expect(controller.state?.error, 'source_changed');
+    expect(controller.retrying, false);
+    await tester.pump(const Duration(seconds: 10));
+    expect(gateway.prepares, 1);
     await drainAsync(tester, controller.shutdown());
     controller.dispose();
   });

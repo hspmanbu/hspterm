@@ -401,3 +401,82 @@ fn stale_identity_aliases_are_pruned_while_history_bound_aliases_survive() {
     HistoryRepository::new(&mut b).clear(None).unwrap();
     assert!(localize(&b, &a).is_empty());
 }
+
+#[test]
+fn sync_owned_bookkeeping_churn_is_not_a_source_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = vault(dir.path(), "bookkeeping.vault");
+    let h = host(&mut v, "Bookkeeping fixture");
+    journal::enable(&mut v).unwrap();
+    let baseline = Baseline::load(&v, COLLECTION, NOW).unwrap();
+    let proposal = baseline.capture_local(&v, NOW + 1).unwrap();
+    // The journal row is rewritten with a fresh clock and pending set for the
+    // SAME actor, exactly like sync-owned bookkeeping churn landing between
+    // the capture and the source re-check. No configuration record changed,
+    // so the frozen source comparison must still accept the proposal.
+    let restamped = journal::rebase_record(&v, None, NOW + 5).unwrap();
+    v.put(journal::RECORD, &restamped).unwrap();
+    baseline.ensure_current(&v, &proposal, NOW + 6).unwrap();
+    // A real local edit still breaks the frozen source revision: relaxing the
+    // journal comparison only removed self-excitation, not edit detection.
+    let saved = Repository::new(&mut v).host(&h.id).unwrap().unwrap();
+    let mut edited = saved.clone();
+    edited.name = "Real user edit".into();
+    Repository::new(&mut v).save(edited, None).unwrap();
+    assert!(matches!(
+        baseline.ensure_current(&v, &proposal, NOW + 7),
+        Err(SyncError::Changed)
+    ));
+}
+
+#[test]
+fn drive_account_rotation_keeps_the_source_binding_replacement_breaks_it() {
+    fn account(refresh: &str, authorization: &str) -> Bytes {
+        Arc::new(Zeroizing::new(
+            serde_json::to_vec(&serde_json::json!({
+                "version": 1,
+                "authorization_id": authorization,
+                "client_id": "fixture.apps.googleusercontent.com",
+                "client_secret": "synthetic-secret",
+                "refresh_token": refresh,
+            }))
+            .unwrap(),
+        ))
+    }
+    let base = settings::Checkpoint {
+        config: None,
+        secret: None,
+        drive_account: Some(Some(account("token-1", ACTOR_A))),
+    };
+    // A refresh-token rotation rewrites the account row without changing the
+    // bound authorization: that sync-managed write is not a source change.
+    let rotated = settings::Checkpoint {
+        config: None,
+        secret: None,
+        drive_account: Some(Some(account("token-2", ACTOR_A))),
+    };
+    assert!(base.same_binding(&rotated));
+    assert!(rotated.same_binding(&base));
+    // A different authorization, a missing account row, or a changed target
+    // row is a real change and must still fail the source comparison.
+    let replaced = settings::Checkpoint {
+        config: None,
+        secret: None,
+        drive_account: Some(Some(account("token-1", ACTOR_B))),
+    };
+    assert!(!base.same_binding(&replaced));
+    let removed = settings::Checkpoint {
+        config: None,
+        secret: None,
+        drive_account: Some(None),
+    };
+    assert!(!base.same_binding(&removed));
+    let retargeted = settings::Checkpoint {
+        config: Some(Arc::new(Zeroizing::new(
+            b"local-cloud-sync-target".to_vec(),
+        ))),
+        secret: None,
+        drive_account: Some(Some(account("token-1", ACTOR_A))),
+    };
+    assert!(!base.same_binding(&retargeted));
+}

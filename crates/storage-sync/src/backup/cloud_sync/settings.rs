@@ -389,6 +389,32 @@ impl Checkpoint {
         }
         rows
     }
+    /// Source-comparison form. The target rows (config/secret) must match
+    /// byte-for-byte, and a stored Drive account row must be the SAME
+    /// authorization (client_id + authorization_id). The account row is
+    /// sync-managed bookkeeping: an OAuth refresh-token rotation rewrites it
+    /// without changing the bound target, and that write has no journal
+    /// feedback, so byte comparison read it as a fresh local change and
+    /// aborted every exchange on an active provider. The apply-phase row CAS
+    /// still compares the captured bytes, so a mid-exchange account
+    /// replacement stays rejected.
+    pub(super) fn same_binding(&self, other: &Self) -> bool {
+        if self.config != other.config || self.secret != other.secret {
+            return false;
+        }
+        match (&self.drive_account, &other.drive_account) {
+            (None, None) => true,
+            (Some(a), Some(b)) => match (a.as_deref(), b.as_deref()) {
+                (Some(a), Some(b)) => {
+                    crate::google_drive_account::identity(a)
+                        == crate::google_drive_account::identity(b)
+                }
+                (None, None) => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
 }
 pub(super) fn checkpoint(vault: &Vault) -> Result<Checkpoint> {
     let value = read(vault)?;
@@ -712,13 +738,13 @@ impl ActiveTarget {
     /// reads. An external writer between them cannot pair old endpoint/auth
     /// with a newly captured target checkpoint, even for the same collection.
     pub fn ensure_proposal(&self, proposal: &LocalProposal) -> Result<()> {
-        if self.scope != proposal.scope || self.checkpoint != proposal.settings {
+        if self.scope != proposal.scope || !self.checkpoint.same_binding(&proposal.settings) {
             return Err(SyncError::Changed);
         }
         Ok(())
     }
     pub fn ensure_current(&self, vault: &Vault) -> Result<()> {
-        if self.scope != vault.instance_id() || checkpoint(vault)? != self.checkpoint {
+        if self.scope != vault.instance_id() || !checkpoint(vault)?.same_binding(&self.checkpoint) {
             return Err(SyncError::Changed);
         }
         Ok(())

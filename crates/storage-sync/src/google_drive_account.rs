@@ -64,6 +64,19 @@ fn revision(vault: &Vault, raw: Option<&[u8]>) -> String {
 }
 
 type EncryptedRecord = Option<Zeroizing<Vec<u8>>>;
+/// Identity of a stored account row: `(client_id, authorization_id)`. An OAuth
+/// refresh-token rotation rewrites the row without changing this pair; only a
+/// replacement authorization does. Cloud-sync source comparisons use this so
+/// sync-managed token rotation is not misread as a local configuration change
+/// (the rotation write deliberately has no journal feedback). The apply-phase
+/// row CAS still compares the captured bytes.
+pub(crate) fn identity(raw: &[u8]) -> Option<(String, String)> {
+    serde_json::from_slice::<Stored>(raw)
+        .ok()
+        // Stored implements Drop (secret zeroization), so the non-secret
+        // identity fields are cloned out instead of moved.
+        .map(|stored| (stored.client_id.clone(), stored.authorization_id.clone()))
+}
 fn read(vault: &Vault) -> Result<(EncryptedRecord, Option<Stored>)> {
     let raw = vault.get_bounded(RECORD, LIMIT)?;
     let value = raw

@@ -699,8 +699,8 @@ impl Baseline {
                 .as_deref()
                 .map(Vec::as_slice)
                 != self.prior.as_ref().map(slice)
-            || journal::load(vault, now)?.0 != proposal.journal
-            || settings::checkpoint(vault)? != proposal.settings
+            || !journal::same_source(vault, proposal.journal.as_ref().map(slice), now)?
+            || !settings::checkpoint(vault)?.same_binding(&proposal.settings)
             || Snapshot::capture_kind(vault, false)
                 .map_err(backup_error)?
                 .revision(vault)
@@ -751,8 +751,8 @@ impl Baseline {
         let after = Snapshot::capture_kind(vault, false).map_err(backup_error)?;
         let revision = before.revision(vault);
         if after.revision(vault) != revision
-            || journal::load(vault, now)?.0 != journal
-            || settings::checkpoint(vault)? != settings
+            || !journal::same_source(vault, journal.as_ref().map(slice), now)?
+            || !settings::checkpoint(vault)?.same_binding(&settings)
         {
             return Err(SyncError::Changed);
         }
@@ -827,7 +827,9 @@ impl Baseline {
             return Err(SyncError::Changed);
         }
         let (journal_raw, journal) = journal::load(vault, now)?;
-        if journal_raw != proposal.journal || settings::checkpoint(vault)? != proposal.settings {
+        if !journal::same_source(vault, proposal.journal.as_ref().map(slice), now)?
+            || !settings::checkpoint(vault)?.same_binding(&proposal.settings)
+        {
             return Err(SyncError::Changed);
         }
         if Snapshot::capture_kind(vault, false)

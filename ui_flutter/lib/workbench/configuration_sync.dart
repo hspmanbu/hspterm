@@ -671,9 +671,15 @@ class ConfigurationSyncController extends ChangeNotifier {
           if (_closing || epoch != _editEpoch) return;
           _accept(await gateway.status(owner));
           final current = state;
+          // 'source_changed' is deliberately NOT auto-retried: the exchange
+          // already compared the local source before and after the network
+          // read, so an immediate third attempt reproduces the same failure
+          // and only hammers the target every 2/4 seconds. A persistent
+          // source change paces by the check interval or an explicit manual
+          // sync; network errors keep the bounded retry, and writeUnknown
+          // keeps its own 30-second convergence path.
           final retryable =
-              current?.writeUnknown == true ||
-              {'network', 'source_changed'}.contains(current?.error);
+              current?.writeUnknown == true || current?.error == 'network';
           if (attempt == 3 || !retryable || current?.phase == 'cancelled') {
             rethrow;
           }
@@ -686,8 +692,7 @@ class ConfigurationSyncController extends ChangeNotifier {
     }
   });
   bool get _canRetry =>
-      state?.writeUnknown == true ||
-      {'network', 'source_changed'}.contains(state?.error);
+      state?.writeUnknown == true || state?.error == 'network';
   Future<void> _decisionWithRetries(Future<void> Function() decision) async {
     final owner = _owner!, epoch = _editEpoch;
     _retrying = true;
