@@ -5,7 +5,10 @@ pub mod controls;
 
 use crate::{RecordChange, Repository, StorageError, Vault};
 use serde::{Deserialize, Serialize};
-use std::{cmp::Reverse, collections::BTreeMap};
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, BTreeSet},
+};
 use zeroize::{Zeroize, Zeroizing};
 
 const RECORD: &str = "config-command-history-v1";
@@ -730,6 +733,16 @@ pub(crate) fn remap_sync_hosts(
 
 pub(crate) fn merge_sync_payload(a: &[u8], b: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
     Document::merged(&Document::decode(a)?, &Document::decode(b)?)?.encode()
+}
+
+/// Host IDs that still carry a command-history section. Cloud-sync identity
+/// aliases must stay alive for exactly these IDs (plus live hosts) so their
+/// sections keep remapping to canonical cloud IDs; any other alias is stale.
+pub(crate) fn retained_host_ids(raw: Option<&[u8]>) -> Result<BTreeSet<String>> {
+    Ok(match raw {
+        None => BTreeSet::new(),
+        Some(raw) => Document::decode(raw)?.hosts.into_keys().collect(),
+    })
 }
 
 /// An immutable, original-Vault snapshot. `host_id: Some(_)` binds the pool to

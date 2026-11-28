@@ -383,6 +383,19 @@ impl projection::Projection {
                 }
             }
         }
+        // Stale entries can never be consulted again: host IDs are never
+        // recycled, only live hosts generate journal mutations, and a host
+        // whose command-history section is gone no longer needs its cloud
+        // remap. Retain the rest so the reconciliation map tracks live pairs
+        // instead of growing without bound.
+        let history = local
+            .units
+            .get(super::super::HISTORY)
+            .and_then(|bundle| bundle.records.get(super::super::HISTORY))
+            .map(Vec::as_slice);
+        let retained =
+            crate::command_history::retained_host_ids(history).map_err(|_| SyncError::Invalid)?;
+        aliases.retain(|id, _| locals.contains_key(id) || retained.contains(id));
         if aliases.len() > 10000 {
             return Err(SyncError::Capacity);
         }

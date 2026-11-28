@@ -107,6 +107,7 @@ impl Document {
                     .is_some_and(|old| old.value == i.value)
             });
         if same_values || remote.items.is_empty() {
+            self.trim_revisions_to_budget();
             return Ok(());
         }
         let id = identity(&remote.items)?;
@@ -121,7 +122,29 @@ impl Document {
         );
         self.snapshots.truncate(3);
         self.version = 2;
+        self.trim_revisions_to_budget();
         Ok(())
+    }
+    /// Revision snapshots are optional recovery metadata; the live catalog is
+    /// not. While the serialized document would not fit the authenticated
+    /// plain budget (including room for the ledger wrapper), drop the OLDEST
+    /// revisions first and publish the trimmed document instead of failing:
+    /// a shallower rollback depth is always preferable to a dead exchange,
+    /// and the newly retained revision is kept longest. Live items are never
+    /// dropped, so a catalog that is over budget on its own still reports
+    /// Capacity from encode().
+    pub(super) fn trim_revisions_to_budget(&mut self) {
+        self.trim_revisions_within(MAX_PLAIN - LEDGER_MARGIN);
+    }
+    /// Budget-parameterized form for tests; production budgets are the
+    /// envelope bound minus the ledger wrapper margin.
+    pub(super) fn trim_revisions_within(&mut self, budget: usize) {
+        while !self.snapshots.is_empty()
+            && serde_json::to_vec(&self.serializable()).is_ok_and(|raw| raw.len() > budget)
+        {
+            // Index 0 is the newest revision; the tail is the oldest.
+            self.snapshots.pop();
+        }
     }
 }
 impl Exchange {

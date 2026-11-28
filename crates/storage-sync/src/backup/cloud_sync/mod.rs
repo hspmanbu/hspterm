@@ -30,6 +30,10 @@ pub(super) const LEDGER: &str = "local-cloud-sync-ledger-v1";
 const MAX_ITEMS: usize = 24_000;
 const MAX_BODY: usize = 16 * 1024 * 1024;
 const MAX_PLAIN: usize = 64 * 1024 * 1024;
+/// The device-local ledger wraps the serialized document with actor and ETag
+/// fields. Revision-history trimming must leave room for that wrapper so an
+/// acknowledged document always fits both the envelope and its ledger copy.
+const LEDGER_MARGIN: usize = 2048;
 pub const MAX_ENCRYPTED_BYTES: usize = MAX_PLAIN + 92;
 const MAX_SKEW_MS: u64 = 24 * 60 * 60 * 1000;
 type Result<T> = std::result::Result<T, SyncError>;
@@ -409,12 +413,16 @@ impl Document {
                 value: value.cloned(),
             });
         }
-        let next = Self {
+        let mut next = Self {
             version: 1,
             collection: self.collection.clone(),
             items,
             snapshots: self.snapshots.clone(),
         };
+        // Local units may have grown since the baseline stored its revision
+        // history, and a first publication (remote object absent) never runs
+        // retain_previous: trim here so it still fits the envelope.
+        next.trim_revisions_to_budget();
         next.validate(now)?;
         Ok(next)
     }
