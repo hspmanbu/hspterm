@@ -11,7 +11,18 @@ use zeroize::{Zeroize, Zeroizing};
 const MAGIC: &[u8; 8] = b"HSPBKP01";
 const HEADER: usize = 32;
 const CHUNK: usize = 1024 * 1024;
+/// Plaintext budget of the LOCAL backup envelope. A backup file is a
+/// device-local encrypted artifact with no cloud-side semantic size cap, so
+/// this budget is deliberately independent from — and larger than — the
+/// cloud-sync document budget (64 MiB, `backup/cloud_sync/mod.rs`), which is
+/// bounded by the provider upload contract. 256 MiB covers the full local
+/// snapshot: imported fonts up to `typography::TOTAL_LIMIT` (128 MiB) plus
+/// command history (8 MiB), hosts, settings and trust headroom. The reader
+/// and writer both enforce exactly this value.
 pub(super) const MAX_PLAIN: usize = 256 * 1024 * 1024;
+/// On-disk ciphertext bound, derived from MAX_PLAIN so the pair can never
+/// drift: chunk framing plus authentication-tag overhead stays under the
+/// 1 MiB headroom for any plaintext up to MAX_PLAIN.
 pub(super) const MAX_CIPHER: u64 = MAX_PLAIN as u64 + 1024 * 1024;
 fn invalid() -> io::Error {
     io::Error::new(

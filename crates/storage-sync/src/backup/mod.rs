@@ -84,9 +84,31 @@ fn slice(value: &Bytes) -> &[u8] {
 fn proxy_key(host: &str) -> String {
     format!("host-proxy-credential-{host}")
 }
+/// Host-key trust records are device-local pinning decisions that a complete
+/// backup must carry, never silently drop. Direct pins are
+/// `trust-<sha256(address:port)>` (api::trust_id); a route through a jump host
+/// pins the target key as observed via that jump and is
+/// `trust-jump-<sha256(versioned jump+target tuple)>` (connections::
+/// target_identity). Both categories share the 10 000-record trust budget.
+/// Any other `trust-*` shape stays rejected: an unknown future category must
+/// fail loudly instead of vanishing from a purported complete backup.
 fn trust_key(id: &str) -> bool {
-    id.strip_prefix("trust-")
-        .is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+    trust_route(id).is_some()
+}
+/// Valid trust id split into its 64-hex digest and whether it pins a jump
+/// route, for capture, validation and restore labeling.
+fn trust_route(id: &str) -> Option<(&str, bool)> {
+    fn hex64(suffix: &str) -> bool {
+        suffix.len() == 64 && suffix.bytes().all(|b| b.is_ascii_hexdigit())
+    }
+    id.strip_prefix("trust-jump-")
+        .filter(|s| hex64(s))
+        .map(|hex| (hex, true))
+        .or_else(|| {
+            id.strip_prefix("trust-")
+                .filter(|s| hex64(s))
+                .map(|hex| (hex, false))
+        })
 }
 fn font_key(id: &str) -> bool {
     id.strip_prefix("device-terminal-font-v1-")

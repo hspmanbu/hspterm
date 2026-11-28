@@ -144,11 +144,19 @@ pub(super) fn units(snapshot: &Snapshot) -> Result<BTreeMap<String, Unit>> {
         }
     }
     for (id, data) in &snapshot.records {
-        if trust_key(id) {
+        if let Some((hex, jump)) = trust_route(id) {
             units.insert(
                 id.clone(),
                 Unit {
-                    label: format!("服务器信任 {}", &id[6..18]),
+                    label: format!(
+                        "{} {}",
+                        if jump {
+                            "跳板链服务器信任"
+                        } else {
+                            "服务器信任"
+                        },
+                        &hex[..12]
+                    ),
                     category: "主机密钥信任".into(),
                     summary: std::str::from_utf8(slice(data)).map_err(invalid)?.into(),
                     records: one(id, Arc::clone(data)),

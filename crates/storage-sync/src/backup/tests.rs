@@ -291,6 +291,71 @@ fn restore_history_merges_clear_epochs_instead_of_resurrecting_old_commands() {
     );
 }
 #[test]
+fn jump_route_trust_records_are_backed_up_validated_and_restored() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = Vault::create(&dir.path().join("source.vault"), b"synthetic-master").unwrap();
+    host(&mut v, "jump-user");
+    // A vault that ever pinned a key through a jump host holds a
+    // `trust-jump-*` route record next to its direct `trust-*` pins.
+    let direct = format!("trust-{}", "1".repeat(64));
+    let jump = format!("trust-jump-{}", "2".repeat(64));
+    v.put(&direct, format!("SHA256:{}", "A".repeat(43)).as_bytes())
+        .unwrap();
+    v.put(&jump, format!("SHA256:{}", "B".repeat(43)).as_bytes())
+        .unwrap();
+    // Regression: capture used to reject the jump route shape outright with
+    // BackupError::Capacity ("配置备份超过安全容量"), so every summary,
+    // export and restore of such a vault failed permanently.
+    let snapshot = Snapshot::capture(&v).unwrap();
+    assert!(snapshot.records.contains_key(&direct));
+    assert!(snapshot.records.contains_key(&jump));
+    let path = dir.path().join("jump-route.hspbackup");
+    snapshot
+        .write_encrypted(&path, b"synthetic-backup-secret")
+        .unwrap();
+    let loaded = Snapshot::read_encrypted(&path, b"synthetic-backup-secret").unwrap();
+    assert_eq!(snapshot.revision(&v), loaded.revision(&v));
+    let p = preview(&v, &loaded, "merge").unwrap();
+    let jump_item = p.items.iter().find(|i| i.id == jump).unwrap();
+    assert_eq!(jump_item.category, "主机密钥信任");
+    assert!(jump_item.label.starts_with("跳板链服务器信任"));
+    assert!(
+        p.items
+            .iter()
+            .find(|i| i.id == direct)
+            .unwrap()
+            .label
+            .starts_with("服务器信任")
+    );
+    // Restoring the trust units into a fresh vault must preserve the pinned
+    // fingerprints exactly; trust decisions are user data, not cache.
+    let mut fresh = Vault::create(&dir.path().join("fresh.vault"), b"synthetic-fresh").unwrap();
+    let p = preview(&fresh, &loaded, "merge").unwrap();
+    let selection: Vec<String> = p
+        .items
+        .iter()
+        .filter(|i| trust_key(&i.id))
+        .map(|i| i.id.clone())
+        .collect();
+    assert_eq!(selection.len(), 2);
+    prepare_restore(&fresh, &loaded, &p.vault_scope, &p.revision, &selection)
+        .unwrap()
+        .commit(&mut fresh)
+        .unwrap();
+    assert_eq!(
+        fresh.get(&direct).unwrap().unwrap().as_slice(),
+        format!("SHA256:{}", "A".repeat(43)).as_bytes()
+    );
+    assert_eq!(
+        fresh.get(&jump).unwrap().unwrap().as_slice(),
+        format!("SHA256:{}", "B".repeat(43)).as_bytes()
+    );
+    // Unknown trust-* shapes are still refused instead of silently dropped
+    // from a purported complete backup.
+    v.put("trust-unknown-shape", b"SHA256:opaque").unwrap();
+    assert!(matches!(Snapshot::capture(&v), Err(BackupError::Capacity)));
+}
+#[test]
 fn unknown_namespaces_and_broken_jump_references_are_rejected_without_writes() {
     let dir = tempfile::tempdir().unwrap();
     let mut local = Vault::create(&dir.path().join("local.vault"), b"synthetic-master").unwrap();
